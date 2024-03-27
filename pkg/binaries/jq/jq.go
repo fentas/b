@@ -9,7 +9,7 @@ import (
 	"github.com/buyoio/b/pkg/binary"
 )
 
-func NewJq(options *binaries.BinaryOptions) *binary.Binary {
+func Binary(options *binaries.BinaryOptions) *binary.Binary {
 	if options == nil {
 		options = &binaries.BinaryOptions{
 			Context: context.Background(),
@@ -19,6 +19,7 @@ func NewJq(options *binaries.BinaryOptions) *binary.Binary {
 		Context:    options.Context,
 		Envs:       options.Envs,
 		Tracker:    options.Tracker,
+		Version:    options.Version,
 		Name:       "jq",
 		GitHubRepo: "jqlang/jq",
 		GitHubFile: fmt.Sprintf("jq-%s-%s", runtime.GOOS, runtime.GOARCH),

@@ -10,7 +10,7 @@ import (
 	"github.com/buyoio/b/pkg/binary"
 )
 
-func NewKind(options *binaries.BinaryOptions) *binary.Binary {
+func Binary(options *binaries.BinaryOptions) *binary.Binary {
 	if options == nil {
 		options = &binaries.BinaryOptions{
 			Context: context.Background(),
@@ -20,6 +20,7 @@ func NewKind(options *binaries.BinaryOptions) *binary.Binary {
 		Context:    options.Context,
 		Envs:       options.Envs,
 		Tracker:    options.Tracker,
+		Version:    options.Version,
 		Name:       "kind",
 		GitHubRepo: "kubernetes-sigs/kind",
 		GitHubFile: fmt.Sprintf("kind-%s-%s", runtime.GOOS, runtime.GOARCH),

@@ -14,7 +14,7 @@ var (
 	kubectlLatestVersion = "https://storage.googleapis.com/kubernetes-release/release/stable.txt"
 )
 
-func NewKubectl(options *binaries.BinaryOptions) *binary.Binary {
+func Binary(options *binaries.BinaryOptions) *binary.Binary {
 	if options == nil {
 		options = &binaries.BinaryOptions{
 			Context: context.Background(),
@@ -24,6 +24,7 @@ func NewKubectl(options *binaries.BinaryOptions) *binary.Binary {
 		Context: options.Context,
 		Envs:    options.Envs,
 		Tracker: options.Tracker,
+		Version: options.Version,
 		Name:    "kubectl",
 		URLF: func(b *binary.Binary) (string, error) {
 			return fmt.Sprintf(

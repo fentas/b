@@ -11,7 +11,7 @@ import (
 	"github.com/buyoio/b/pkg/binary"
 )
 
-func NewK9s(options *binaries.BinaryOptions) *binary.Binary {
+func Binary(options *binaries.BinaryOptions) *binary.Binary {
 	if options == nil {
 		options = &binaries.BinaryOptions{
 			Context: context.Background(),
@@ -21,6 +21,7 @@ func NewK9s(options *binaries.BinaryOptions) *binary.Binary {
 		Context:    options.Context,
 		Envs:       options.Envs,
 		Tracker:    options.Tracker,
+		Version:    options.Version,
 		Name:       "k9s",
 		GitHubRepo: "derailed/k9s",
 		GitHubFile: fmt.Sprintf(

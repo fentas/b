@@ -4,16 +4,17 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/buyoio/b/pkg/binary"
 	"github.com/buyoio/goodies/progress"
+
+	"github.com/buyoio/b/pkg/binary"
 )
 
 func (o *CmdBinaryOptions) lookupLocals() ([]*binary.LocalBinary, error) {
 	wg := sync.WaitGroup{}
 	ch := make(chan *binary.LocalBinary, 1)
 
-	for _, b := range o.Binaries {
-		if b.BinaryExists() {
+	for b, do := range o.ensure {
+		if *do {
 			wg.Add(1)
 			go func() {
 				ch <- b.LocalBinary()

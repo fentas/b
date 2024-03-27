@@ -33,14 +33,14 @@ func main() {
 	}
 	root := cli.NewCmdBinary(&cli.CmdBinaryOptions{
 		Binaries: []*binary.Binary{
-			hcloud.NewHcloud(o),
-			jq.NewJq(o),
-			k9s.NewK9s(o),
-			kind.NewKind(o),
-			kubectl.NewKubectl(o),
-			mkcert.NewMkcert(o),
-			tilt.NewTilt(o),
-			yq.NewYq(o),
+			hcloud.Binary(o),
+			jq.Binary(o),
+			k9s.Binary(o),
+			kind.Binary(o),
+			kubectl.Binary(o),
+			mkcert.Binary(o),
+			tilt.Binary(o),
+			yq.Binary(o),
 		},
 		IO: &streams.IO{
 			In:     os.Stdin,

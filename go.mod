@@ -6,6 +6,7 @@ require (
 	github.com/buyoio/goodies v0.0.0-20240326183746-0dda8c9b7c63
 	github.com/jedib0t/go-pretty/v6 v6.5.6
 	github.com/spf13/cobra v1.8.0
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (
