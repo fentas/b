@@ -1,17 +1,6 @@
 <h3 align="center">
-	<img src="https://bashlogo.com/img/symbol/svg/full_colored_light.svg" width="16" alt="Logo"/>
 	b
 </h3>
-
-<h6 align="center">
-  <a href="https://arg.sh/getting-started">Quickstart</a>
-  ·
-  <a href="https://arg.sh/command-line-parser">CLI Parser</a>
-  ·
-  <a href="https://arg.sh/libraries/overview">Libraries</a>
-  ·
-  <a href="https://arg.sh/styleguide">Styleguide</a>
-</h6>
 
 <p align="center">
 	<a href="https://github.com/buyoio/b/stargazers">
@@ -83,6 +72,9 @@ Feel free to extend this, PRs are welcome.
 ### 🎯 Short term goals
 
 - [ ] Recognize the operating system and architecture and offer the correct binary
+- [ ] Create a logo
+- [ ] Docs
+- [ ] Tests
 
 &nbsp;
 
