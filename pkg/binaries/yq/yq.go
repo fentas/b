@@ -10,7 +10,7 @@ import (
 	"github.com/buyoio/b/pkg/binary"
 )
 
-func NewYq(options *binaries.BinaryOptions) *binary.Binary {
+func Binary(options *binaries.BinaryOptions) *binary.Binary {
 	if options == nil {
 		options = &binaries.BinaryOptions{
 			Context: context.Background(),
@@ -20,6 +20,7 @@ func NewYq(options *binaries.BinaryOptions) *binary.Binary {
 		Context:    options.Context,
 		Envs:       options.Envs,
 		Tracker:    options.Tracker,
+		Version:    options.Version,
 		GitHubRepo: "mikefarah/yq",
 		GitHubFile: fmt.Sprintf("yq_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH),
 		IsTarGz:    true,

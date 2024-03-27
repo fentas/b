@@ -9,7 +9,7 @@ import (
 	"github.com/buyoio/b/pkg/binary"
 )
 
-func NewMkcert(options *binaries.BinaryOptions) *binary.Binary {
+func Binary(options *binaries.BinaryOptions) *binary.Binary {
 	if options == nil {
 		options = &binaries.BinaryOptions{
 			Context: context.Background(),
@@ -19,6 +19,7 @@ func NewMkcert(options *binaries.BinaryOptions) *binary.Binary {
 		Context:    options.Context,
 		Envs:       options.Envs,
 		Tracker:    options.Tracker,
+		Version:    options.Version,
 		Name:       "mkcert",
 		GitHubRepo: "FiloSottile/mkcert",
 		GitHubFileF: func(b *binary.Binary) (string, error) {

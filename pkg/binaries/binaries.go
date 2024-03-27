@@ -8,6 +8,7 @@ import (
 
 type BinaryOptions struct {
 	Context context.Context
+	Version string
 	Tracker *progress.Tracker
 	Envs    map[string]string
 }

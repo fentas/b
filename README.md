@@ -21,7 +21,57 @@ The package includes a `Binary` struct that represents a binary file, including 
 
 &nbsp;
 
-### 🚀 Quickstart
+### 🐾 How to use
+
+```bash
+# List all installed binaries and defined in b.yaml
+b --all
+
+# Print as JSON
+b -ao json
+
+# Install all binaries
+b -a --install
+
+# Install or update jq
+b -iu --jq
+
+# Upgrade all binaries
+b -aiu
+
+# List all available binaries
+b --list
+
+# Checks (silent) if all binaries are up to date
+b -acq || echo "Some binaries are not up to date"
+```
+
+&nbsp;
+
+### 🧾 Configuration, what to install
+
+`b` needs one of three things defined to know where to install binaries to:
+
+- `PATH_BIN` env, set to the directory where you want to install binaries.
+- `PATH_BASE` env, set to the project root directory. All binaries will be installed in the `.bin` directory.
+- If you are in a git repository, `b` will install binaries in the `.bin` directory in the root of the repository.
+
+If none of these are set, `b` will fail.
+
+To properly use the `--all` flag, you should create a `b.yaml` file in the binary directory. This file should contain a list of binaries you want to manage. Here is an example:
+
+```yaml
+jq:
+	version: 1.7
+kind:
+tilt:
+```
+
+This will ensure that `jq`, `kind`, and `tilt` are installed and at the correct version. If you don't specify a version, `b` will install the latest version.
+
+&nbsp;
+
+### 🏗️ Manuell build
 
 If you have Go installed, you can build and install the latest version of `b` with:
 
@@ -72,6 +122,7 @@ Feel free to extend this, PRs are welcome.
 ### 🎯 Short term goals
 
 - [ ] Recognize the operating system and architecture and offer the correct binary
+- [ ] Enforce min and max versions
 - [ ] Create a logo
 - [ ] Docs
 - [ ] Tests

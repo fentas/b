@@ -17,31 +17,32 @@ type IsBinary interface {
 type Callback func(*Binary) (string, error)
 
 type Binary struct {
-	Context context.Context
+	Context context.Context `json:"-"`
 	// for installation
-	URL           string
-	URLF          Callback
-	GitHubRepo    string
-	GitHubFile    string
-	GitHubFileF   Callback
-	Version       string
-	VersionF      Callback
-	VersionLocalF Callback
-	Name          string
-	File          string
-	IsTarGz       bool
-	TarFile       string
-	TarFileF      Callback
-	Tracker       *progress.Tracker
+	URL           string            `json:"-"`
+	URLF          Callback          `json:"-"`
+	GitHubRepo    string            `json:"repo"`
+	GitHubFile    string            `json:"-"`
+	GitHubFileF   Callback          `json:"-"`
+	Version       string            `json:"-"`
+	VersionF      Callback          `json:"-"`
+	VersionLocalF Callback          `json:"-"`
+	Name          string            `json:"name" yaml:"name"`
+	File          string            `json:"-"`
+	IsTarGz       bool              `json:"-"`
+	TarFile       string            `json:"-"`
+	TarFileF      Callback          `json:"-"`
+	Tracker       *progress.Tracker `json:"-"`
 	// for execution
-	Envs map[string]string
+	Envs map[string]string `json:"-"`
 }
 
 type LocalBinary struct {
-	Name    string `json:"name"`
-	File    string `json:"file"`
-	Version string `json:"version"`
-	Latest  string `json:"latest"`
+	Name     string `json:"name"`
+	File     string `json:"file,omitempty"`
+	Version  string `json:"version,omitempty"`
+	Latest   string `json:"latest"`
+	Enforced string `json:"enforced,omitempty"`
 }
 
 func (b *Binary) LocalBinary() *LocalBinary {
@@ -53,11 +54,16 @@ func (b *Binary) LocalBinary() *LocalBinary {
 	if b.VersionLocalF != nil {
 		version, _ = b.VersionLocalF(b)
 	}
+	file := b.BinaryPath()
+	if !b.BinaryExists() {
+		file = ""
+	}
 	return &LocalBinary{
-		Name:    b.Name,
-		File:    b.BinaryPath(),
-		Version: version,
-		Latest:  latest,
+		Name:     b.Name,
+		File:     file,
+		Version:  version,
+		Latest:   latest,
+		Enforced: b.Version,
 	}
 }
 
@@ -98,7 +104,7 @@ func (b *Binary) EnsureBinary(update bool) error {
 			return nil
 		}
 		local := b.LocalBinary()
-		if local.Version != "" && local.Version == local.Latest {
+		if local.Version == local.Enforced || local.Enforced == "" && local.Latest == local.Version {
 			return nil
 		}
 	}

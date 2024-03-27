@@ -9,19 +9,23 @@ import (
 	"github.com/buyoio/goodies/templates"
 
 	"github.com/buyoio/b/pkg/binary"
+	"github.com/buyoio/b/pkg/state"
+
 	"github.com/spf13/cobra"
 )
 
 type CmdBinaryOptions struct {
-	Binaries []*binary.Binary
 	IO       *streams.IO
+	Binaries []*binary.Binary
+	config   *state.BinaryList
 
 	// Flags
-	all     bool
-	ensure  map[*binary.Binary]*bool
-	force   bool
-	install bool
-	check   bool
+	all       bool
+	available bool
+	ensure    map[*binary.Binary]*bool
+	force     bool
+	install   bool
+	check     bool
 }
 
 func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
@@ -42,22 +46,30 @@ func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
 			if path == "" {
 				return cmdutil.UsageErrorf(cmd, "Could not find a suitable path to install binaries")
 			}
-			return nil
+			var err error
+			options.config, err = state.LoadConfig()
+			return err
 		},
 		Example: templates.Examples(`
-			# Get all binaries
+			# List all installed binaries and defined in b.yaml
 			b --all
 
 			# Print as JSON
 			b -ao json
 
 			# Install all binaries
-			b --all --install
+			b -a --install
+
+			# Install or update jq
+			b -iu --jq
 
 			# Upgrade all binaries
-			b --all -i --force
+			b -aiu
 
-			# Checks if all binaries are up to date
+			# List all available binaries
+			b --list
+
+			# Checks (silent) if all binaries are up to date
 			b -acq || echo "Some binaries are not up to date"
 		`),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -73,22 +85,43 @@ func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
 }
 
 func (o *CmdBinaryOptions) AddFlags(cmd *cobra.Command) {
-	cmd.Flags().BoolVarP(&o.all, "all", "a", false, "All binaries")
+	cmd.Flags().BoolVarP(&o.all, "all", "a", false, "Binaries installed and defined in b.yaml")
 	for _, b := range o.Binaries {
-		cmd.Flags().BoolVar(o.ensure[b], b.Name, false, b.Name)
+		cmd.Flags().BoolVar(o.ensure[b], b.Name, false, b.Name+" binary")
 	}
 
-	cmd.Flags().BoolVarP(&o.force, "force", "f", false, "Upgrade if already installed")
+	cmd.Flags().BoolVarP(&o.force, "upgrade", "u", false, "Upgrade if already installed")
 	cmd.Flags().BoolVarP(&o.install, "install", "i", false, "Install if not installed")
+	cmd.Flags().BoolVar(&o.available, "list", false, "List all available binaries")
 	cmd.Flags().BoolVarP(&o.check, "check", "c", false, "Check if binary is up to date")
 }
 
 func (o *CmdBinaryOptions) Complete(cmd *cobra.Command, args []string) error {
-	if o.all {
-		for _, b := range o.ensure {
-			*b = true
+	if o.available {
+		return nil
+	}
+
+	if o.config != nil {
+		for _, lb := range *o.config {
+			for b, do := range o.ensure {
+				if lb.Name == b.Name {
+					b.Version = lb.Version
+
+					if o.all {
+						*do = true
+					}
+					break
+				}
+			}
+		}
+	} else if o.all {
+		for b, do := range o.ensure {
+			if b.BinaryExists() {
+				*do = true
+			}
 		}
 	}
+
 	return nil
 }
 
@@ -100,6 +133,9 @@ func (o *CmdBinaryOptions) Validate(cmd *cobra.Command) error {
 }
 
 func (o *CmdBinaryOptions) Run() error {
+	if o.available {
+		return o.IO.Print(o.Binaries)
+	}
 	if o.install {
 		return o.installBinaries()
 	}
