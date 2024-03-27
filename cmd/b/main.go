@@ -23,7 +23,8 @@ import (
 
 // Magic variables set by goreleaser
 var (
-	version string = "dev" // x-release-please-version
+	version           = "0.0.1" // x-release-please-version
+	versionPreRelease = "dev"
 )
 
 func main() {
@@ -50,7 +51,10 @@ func main() {
 
 	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
 		if cmd.Flags().Changed("version") {
-			fmt.Printf("b %s\n", version)
+			if versionPreRelease != "" {
+				version = fmt.Sprintf("%s-%s", version, versionPreRelease)
+			}
+			fmt.Printf("%s", version)
 			os.Exit(0)
 		}
 	}

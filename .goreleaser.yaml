@@ -9,6 +9,7 @@ builds:
     ldflags:
       - -w
       - -X {{ .ModulePath }}/cmd/b.version={{ .Version }}
+      - -X {{ .ModulePath }}/cmd/b.versionPrerelease={{- if .IsSnapshot -}}dev+{{ .ShortCommit }}{{- end -}}
     env:
       - CGO_ENABLED=0
     goos:
