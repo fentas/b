@@ -1,0 +1,60 @@
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: b-build
+    main: ./cmd/b/main.go
+    binary: b
+    ldflags:
+      - -w
+      - -X {{ .ModulePath }}/cmd/b.version={{ .Version }}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - freebsd
+      - windows
+      - linux
+    goarch:
+      - amd64
+      - arm
+      - arm64
+      - "386"
+    goarm:
+      - "6"
+      - "7"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+signs:
+  - artifacts: all
+    signature: ${artifact}.sig
+    id: buyo-sign
+    ids:
+      - b-build
+    args:
+      - --batch
+      - --local-user=github-bot@buyo.io
+      - --pinentry-mode=loopback
+      - --output=${signature}
+      - --detach-sign
+      - ${artifact}
+
+archives:
+  - id: b-archive
+    builds:
+      - b-build
+    name_template: "{{ .Binary }}-{{ .Os }}-{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+
+    format_overrides:
+      - goos: windows
+        format: zip
+
+    files:
+      - LICENSE
+      - README.md
+
+release:
+  draft: false

@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Run gofmt
+        run: diff -u <(echo -n) <(gofmt -d -s .)
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          # Required: the version of golangci-lint is required and must be specified with patch version
+          version: v1.57.1 # renovate: datasource=github-releases depName=golangci/golangci-lint
+          # In general linting is quite fast with warm caches, but a fresh run might take some time.
+          args: --timeout 5m
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test -coverprofile=coverage.txt -v -race ./...
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Delete old generated files
+        run: find . -name 'zz_*.go' -delete
+
+      - name: Run go generate
+        run: go generate ./...
+
+      - name: Check uncommitted changes
+        run: git diff --exit-code
+
+      - if: failure()
+        run: echo "::error::Check failed, please run 'go generate ./...' and commit the changes."
