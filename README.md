@@ -119,6 +119,23 @@ Feel free to extend this, PRs are welcome.
 
 &nbsp;
 
+### 🧙‍♂️ Magic, use direnv
+
+Using [direnv](https://direnv.net/) allows you to load required binaries bound to a specific project.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${PATH_BASE:="$(git rev-parse --show-toplevel)"}"
+: "${PATH_BIN:="${PATH_BASE}/.bin"}"
+export PATH_BASE PATH_BIN
+```
+
+This is all you need or have a look [here](./.envrc).
+
+&nbsp;
+
 ### 🎯 Short term goals
 
 - [ ] Recognize the operating system and architecture and offer the correct binary
