@@ -21,7 +21,7 @@ The package includes a `Binary` struct that represents a binary file, including 
 
 &nbsp;
 
-### 🐾 How to use
+### 🐾 How to use `b` as binary
 
 ```bash
 # List all installed binaries and defined in b.yaml
@@ -83,7 +83,7 @@ go install github.com/buyoio/b/b@latest
 
 &nbsp;
 
-### 📚 Import 
+### 📚 How to use `b` as go import 
 
 To use this package, you need to import it in your Go project:
 
