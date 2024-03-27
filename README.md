@@ -62,7 +62,7 @@ To properly use the `--all` flag, you should create a `b.yaml` file in the binar
 
 ```yaml
 jq:
-	version: 1.7
+  version: 1.7
 kind:
 tilt:
 ```
