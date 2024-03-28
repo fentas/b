@@ -17,6 +17,7 @@ import (
 type CmdBinaryOptions struct {
 	IO       *streams.IO
 	Binaries []*binary.Binary
+	NoConfig bool
 	config   *state.BinaryList
 
 	// Flags
@@ -37,6 +38,10 @@ func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
 		options.ensure[b] = new(bool)
 	}
 
+	configExample := ""
+	if !options.NoConfig {
+		configExample = " and defined in b.yaml"
+	}
 	cmd := &cobra.Command{
 		Use:   "b",
 		Short: "Manage all binaries",
@@ -46,12 +51,15 @@ func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
 			if path == "" {
 				return cmdutil.UsageErrorf(cmd, "Could not find a suitable path to install binaries")
 			}
-			var err error
-			options.config, err = state.LoadConfig()
-			return err
+			if !options.NoConfig {
+				var err error
+				options.config, err = state.LoadConfig()
+				return err
+			}
+			return nil
 		},
 		Example: templates.Examples(`
-			# List all installed binaries and defined in b.yaml
+			# List all installed binaries` + configExample + `
 			b --all
 
 			# Print as JSON
@@ -85,14 +93,18 @@ func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
 }
 
 func (o *CmdBinaryOptions) AddFlags(cmd *cobra.Command) {
-	cmd.Flags().BoolVarP(&o.all, "all", "a", false, "Binaries installed and defined in b.yaml")
+	all := "Binaries installed and defined in b.yaml"
+	if o.NoConfig {
+		all = "All binaries"
+	} else {
+		cmd.Flags().BoolVar(&o.available, "list", false, "List all available binaries")
+	}
+	cmd.Flags().BoolVarP(&o.all, "all", "a", false, all)
 	for _, b := range o.Binaries {
 		cmd.Flags().BoolVar(o.ensure[b], b.Name, false, b.Name+" binary")
 	}
-
 	cmd.Flags().BoolVarP(&o.force, "upgrade", "u", false, "Upgrade if already installed")
 	cmd.Flags().BoolVarP(&o.install, "install", "i", false, "Install if not installed")
-	cmd.Flags().BoolVar(&o.available, "list", false, "List all available binaries")
 	cmd.Flags().BoolVarP(&o.check, "check", "c", false, "Check if binary is up to date")
 }
 
@@ -116,7 +128,7 @@ func (o *CmdBinaryOptions) Complete(cmd *cobra.Command, args []string) error {
 		}
 	} else if o.all {
 		for b, do := range o.ensure {
-			if b.BinaryExists() {
+			if !o.NoConfig || b.BinaryExists() {
 				*do = true
 			}
 		}
