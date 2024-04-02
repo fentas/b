@@ -109,6 +109,7 @@ Have a look into [pkg/binary](./pkg/binary/) for more details.
 
 Have a look into [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 
+- `argsh` - Utilities for Bash script quality
 - `hcloud` - Hetzner Cloud CLI
 - `jq` - Command-line JSON processor
 - `k9s` - Kubernetes CLI to manage your clusters
