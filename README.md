@@ -98,7 +98,7 @@ The `Binary` struct represents a binary file, including its name, file path, ver
 
 ```go
 bin := binary.Binary{Name: "mybinary", Version: "1.0.0"}
-bin.EnsureBinary(true, false)
+bin.EnsureBinary(true)
 ```
 
 Have a look into [pkg/binary](./pkg/binary/) for more details.
