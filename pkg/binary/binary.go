@@ -2,7 +2,6 @@ package binary
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -94,21 +93,21 @@ func (b *Binary) BinaryExists() bool {
 }
 
 func (b *Binary) EnsureBinary(update bool) error {
-	exists := b.BinaryExists()
-	if b.File == "" {
-		return fmt.Errorf("unable to determine binary path")
-	}
-
-	if exists {
+	if b.BinaryExists() {
 		if !update {
 			return nil
 		}
 		local := b.LocalBinary()
+
 		if local.Version == local.Enforced || local.Enforced == "" && local.Latest == local.Version {
 			return nil
 		}
 	}
 
+	return b.DownloadBinary()
+}
+
+func (b *Binary) DownloadBinary() error {
 	err := os.MkdirAll(filepath.Dir(b.File), 0755)
 	if err != nil {
 		return err

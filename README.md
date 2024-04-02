@@ -24,17 +24,20 @@ The package includes a `Binary` struct that represents a binary file, including 
 ### 🐾 How to use `b` as binary
 
 ```bash
-# List all installed binaries and defined in b.yaml
+# List all installed binaries and/or defined in b.yaml
 b --all
 
 # Print as JSON
 b -ao json
 
-# Install all binaries
+# Install all binaries defined in b.yaml
 b -a --install
 
 # Install or update jq
-b -iu --jq
+b -iu jq
+
+# Force install jq, overwriting existing binary
+b -fi jq
 
 # Upgrade all binaries
 b -aiu
@@ -95,7 +98,7 @@ The `Binary` struct represents a binary file, including its name, file path, ver
 
 ```go
 bin := binary.Binary{Name: "mybinary", Version: "1.0.0"}
-bin.EnsureBinary()
+bin.EnsureBinary(true, false)
 ```
 
 Have a look into [pkg/binary](./pkg/binary/) for more details.

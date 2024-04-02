@@ -17,6 +17,9 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 			Context: context.Background(),
 		}
 	}
+	if options.Envs == nil {
+		options.Envs = map[string]string{}
+	}
 	return &binary.Binary{
 		Context:    options.Context,
 		Envs:       options.Envs,
@@ -32,6 +35,8 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 		VersionF: binary.GithubLatest,
 		IsTarGz:  true,
 		VersionLocalF: func(b *binary.Binary) (string, error) {
+			// If this is not set, k9s will fail...
+			b.Envs["K9S_LOGS_DIR"] = "/tmp"
 			s, err := b.Exec("version", "-s")
 			if err != nil {
 				return "", err

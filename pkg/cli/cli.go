@@ -24,7 +24,9 @@ type CmdBinaryOptions struct {
 	all       bool
 	available bool
 	ensure    map[*binary.Binary]*bool
+	lookup    map[string]*binary.Binary
 	force     bool
+	update    bool
 	install   bool
 	check     bool
 }
@@ -34,8 +36,10 @@ func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
 		options = &CmdBinaryOptions{}
 	}
 	options.ensure = make(map[*binary.Binary]*bool)
+	options.lookup = make(map[string]*binary.Binary)
 	for _, b := range options.Binaries {
 		options.ensure[b] = new(bool)
+		options.lookup[b.Name] = b
 	}
 
 	configExample := ""
@@ -43,7 +47,7 @@ func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
 		configExample = " and defined in b.yaml"
 	}
 	cmd := &cobra.Command{
-		Use:   "b",
+		Use:   "b [flags] [...binaries]",
 		Short: "Manage all binaries",
 		Long:  "Ensure that all binaries needed are installed and up to date",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
@@ -69,7 +73,10 @@ func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
 			b -a --install
 
 			# Install or update jq
-			b -iu --jq
+			b -iu jq
+
+			# Force install jq, overwriting existing binary
+			b -fi jq
 
 			# Upgrade all binaries
 			b -aiu
@@ -100,10 +107,8 @@ func (o *CmdBinaryOptions) AddFlags(cmd *cobra.Command) {
 		cmd.Flags().BoolVar(&o.available, "list", false, "List all available binaries")
 	}
 	cmd.Flags().BoolVarP(&o.all, "all", "a", false, all)
-	for _, b := range o.Binaries {
-		cmd.Flags().BoolVar(o.ensure[b], b.Name, false, b.Name+" binary")
-	}
-	cmd.Flags().BoolVarP(&o.force, "upgrade", "u", false, "Upgrade if already installed")
+	cmd.Flags().BoolVarP(&o.force, "force", "f", false, "Force download, overwriting existing binaries")
+	cmd.Flags().BoolVarP(&o.update, "upgrade", "u", false, "Upgrade if already installed")
 	cmd.Flags().BoolVarP(&o.install, "install", "i", false, "Install if not installed")
 	cmd.Flags().BoolVarP(&o.check, "check", "c", false, "Check if binary is up to date")
 }
@@ -111,6 +116,20 @@ func (o *CmdBinaryOptions) AddFlags(cmd *cobra.Command) {
 func (o *CmdBinaryOptions) Complete(cmd *cobra.Command, args []string) error {
 	if o.available {
 		return nil
+	}
+
+	if len(args) > 0 {
+		if o.all {
+			return cmdutil.UsageErrorf(cmd, "Cannot use --all with arguments")
+		}
+
+		for _, arg := range args {
+			b, ok := o.lookup[arg]
+			if !ok {
+				return cmdutil.UsageErrorf(cmd, "Unknown binary %s", arg)
+			}
+			*o.ensure[b] = true
+		}
 	}
 
 	if o.config != nil {

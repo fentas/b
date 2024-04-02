@@ -72,6 +72,10 @@ func (b *Binary) extractSingleFileFromTarGz(stream io.Reader) error {
 }
 
 func (b *Binary) downloadBinary() error {
+	path := b.BinaryPath()
+	if path == "" {
+		return fmt.Errorf("unable to determine binary path")
+	}
 	var err error
 	if b.Version == "" && b.VersionF != nil {
 		b.Version, err = b.VersionF(b)
