@@ -7,6 +7,7 @@ import (
 
 	"github.com/buyoio/b/pkg/binaries"
 	"github.com/buyoio/b/pkg/binaries/argsh"
+	"github.com/buyoio/b/pkg/binaries/b"
 	compose "github.com/buyoio/b/pkg/binaries/docker-compose"
 	"github.com/buyoio/b/pkg/binaries/gh"
 	"github.com/buyoio/b/pkg/binaries/hcloud"
@@ -26,8 +27,8 @@ import (
 
 // Magic variables set by goreleaser
 var (
-	version           = "1.0.0" // x-release-please-version
-	versionPreRelease = "dev"
+	version           = "v1.0.0" // x-release-please-version
+	versionPreRelease = ""
 )
 
 func main() {
@@ -37,6 +38,7 @@ func main() {
 	root := cli.NewCmdBinary(&cli.CmdBinaryOptions{
 		Binaries: []*binary.Binary{
 			argsh.Binary(o),
+			b.Binary(o),
 			compose.Binary(o),
 			gh.Binary(o),
 			hcloud.Binary(o),
