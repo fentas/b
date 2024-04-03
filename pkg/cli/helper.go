@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/buyoio/goodies/progress"
 
@@ -68,5 +69,7 @@ func (o *CmdBinaryOptions) installBinaries() error {
 		}
 	}
 	wg.Wait()
+	// let the progress bar render
+	time.Sleep(200 * time.Millisecond)
 	return nil
 }

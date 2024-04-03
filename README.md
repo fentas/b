@@ -109,15 +109,16 @@ Have a look into [pkg/binary](./pkg/binary/) for more details.
 
 Have a look into [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 
-- `argsh` - Utilities for Bash script quality
-- `hcloud` - Hetzner Cloud CLI
-- `jq` - Command-line JSON processor
-- `k9s` - Kubernetes CLI to manage your clusters
-- `kind` - Kubernetes IN Docker
-- `kubectl` - Kubernetes CLI to manage your clusters
-- `mkcert` - Create locally-trusted development certificates
-- `tilt` - Local Kubernetes development with no stress
-- `yq` - Command-line YAML processor
+- [argsh](https://github.com/arg-sh/argsh) - Utilities for Bash script quality
+- [gh](https://github.com/cli/cli) - GitHub CLI wrapper
+- [hcloud](https://github.com/hetznercloud/cli) - Hetzner Cloud CLI wrapper
+- [jq](https://github.com/jqlang/jq) - Command-line JSON processor
+- [k9s](https://github.com/derailed/k9s) - Kubernetes CLI to manage your clusters
+- [kind](https://github.com/kubernetes-sigs/kind) - Kubernetes IN Docker
+- [kubectl](https://github.com/kubernetes/kubectl) - Kubernetes CLI to manage your clusters
+- [mkcert](https://github.com/FiloSottile/mkcert) - Create locally-trusted development certificates
+- [tilt](https://github.com/tilt-dev/tilt) - Local Kubernetes development with no stress
+- [yq](https://github.com/mikefarah/yq) - Command-line YAML processor
 
 Feel free to extend this, PRs are welcome.
 
