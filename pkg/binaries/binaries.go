@@ -12,3 +12,10 @@ type BinaryOptions struct {
 	Tracker *progress.Tracker
 	Envs    map[string]string
 }
+
+func Arch(arch string) string {
+	if arch == "amd64" {
+		return "x86_64"
+	}
+	return arch
+}

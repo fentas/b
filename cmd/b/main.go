@@ -7,6 +7,7 @@ import (
 
 	"github.com/buyoio/b/pkg/binaries"
 	"github.com/buyoio/b/pkg/binaries/argsh"
+	compose "github.com/buyoio/b/pkg/binaries/docker-compose"
 	"github.com/buyoio/b/pkg/binaries/gh"
 	"github.com/buyoio/b/pkg/binaries/hcloud"
 	"github.com/buyoio/b/pkg/binaries/jq"
@@ -36,6 +37,7 @@ func main() {
 	root := cli.NewCmdBinary(&cli.CmdBinaryOptions{
 		Binaries: []*binary.Binary{
 			argsh.Binary(o),
+			compose.Binary(o),
 			gh.Binary(o),
 			hcloud.Binary(o),
 			jq.Binary(o),

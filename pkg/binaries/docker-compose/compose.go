@@ -1,4 +1,4 @@
-package tilt
+package compose
 
 import (
 	"context"
@@ -16,28 +16,28 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 			Context: context.Background(),
 		}
 	}
+	// https://github.com/docker/compose/releases/download/v2.26.1/docker-compose-linux-x86_64
 	return &binary.Binary{
 		Context:    options.Context,
 		Envs:       options.Envs,
 		Tracker:    options.Tracker,
 		Version:    options.Version,
-		GitHubRepo: "windmilleng/tilt",
+		Name:       "docker-compose",
+		GitHubRepo: "docker/compose",
 		GitHubFileF: func(b *binary.Binary) (string, error) {
-			return fmt.Sprintf("tilt.%s.%s.%s.tar.gz",
-				b.Version[1:],
+			return fmt.Sprintf("docker-compose-%s-%s",
 				runtime.GOOS,
 				binaries.Arch(runtime.GOARCH),
 			), nil
 		},
-		Name:     "tilt",
 		VersionF: binary.GithubLatest,
-		IsTarGz:  true,
 		VersionLocalF: func(b *binary.Binary) (string, error) {
-			s, err := b.Exec("version")
+			v, err := b.Exec("version")
 			if err != nil {
 				return "", err
 			}
-			return strings.Split(s, ",")[0], nil
+			s := strings.Split(v, " ")
+			return s[len(s)-1], nil
 		},
 	}
 }
