@@ -147,7 +147,7 @@ func (o *CmdBinaryOptions) Complete(cmd *cobra.Command, args []string) error {
 		}
 	} else if o.all {
 		for b, do := range o.ensure {
-			if !o.NoConfig || b.BinaryExists() {
+			if o.NoConfig || b.BinaryExists() {
 				*do = true
 			}
 		}
