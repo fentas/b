@@ -32,12 +32,12 @@ checksum:
 signs:
   - artifacts: all
     signature: ${artifact}.sig
-    id: buyo-sign
+    id: b-sign
     ids:
       - b-build
     args:
       - --batch
-      - --local-user=ops@buyo.io
+      - --local-user=fentas@github.com
       - --pinentry-mode=loopback
       - --output=${signature}
       - --detach-sign
