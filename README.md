@@ -3,12 +3,12 @@
 </h3>
 
 <p align="center">
-	<a href="https://github.com/buyoio/b/stargazers">
-		<img alt="Stargazers" src="https://img.shields.io/github/stars/buyoio/b?style=for-the-badge&logo=starship&color=C9CBFF&logoColor=D9E0EE&labelColor=302D41"></a>
-	<a href="https://github.com/buyoio/b/releases/latest">
-		<img alt="Releases" src="https://img.shields.io/github/release/buyoio/b.svg?style=for-the-badge&logo=github&color=F2CDCD&logoColor=D9E0EE&labelColor=302D41"/></a>
-	<a href="https://github.com/buyoio/b/issues">
-		<img alt="Issues" src="https://img.shields.io/github/issues/buyoio/b?style=for-the-badge&logo=gitbook&color=B5E8E0&logoColor=D9E0EE&labelColor=302D41"></a>
+	<a href="https://github.com/fentas/b/stargazers">
+		<img alt="Stargazers" src="https://img.shields.io/github/stars/fentas/b?style=for-the-badge&logo=starship&color=C9CBFF&logoColor=D9E0EE&labelColor=302D41"></a>
+	<a href="https://github.com/fentas/b/releases/latest">
+		<img alt="Releases" src="https://img.shields.io/github/release/fentas/b.svg?style=for-the-badge&logo=github&color=F2CDCD&logoColor=D9E0EE&labelColor=302D41"/></a>
+	<a href="https://github.com/fentas/b/issues">
+		<img alt="Issues" src="https://img.shields.io/github/issues/fentas/b?style=for-the-badge&logo=gitbook&color=B5E8E0&logoColor=D9E0EE&labelColor=302D41"></a>
 </p>
 
 &nbsp;
@@ -79,7 +79,7 @@ This will ensure that `jq`, `kind`, and `tilt` are installed and at the correct 
 If you have Go installed, you can build and install the latest version of `b` with:
 
 ```bash
-go install github.com/buyoio/b/b@latest
+go install github.com/fentas/b/b@latest
 ```
 
 > Binaries built in this way do not have the correct version embedded. Use our prebuilt binaries or check out [.goreleaser.yaml](./.goreleaser.yaml) to learn how to embed it yourself.
@@ -91,7 +91,7 @@ go install github.com/buyoio/b/b@latest
 To use this package, you need to import it in your Go project:
 
 ```go
-import "github.com/buyoio/b/pkg/binary"
+import "github.com/fentas/b/pkg/binary"
 ```
 
 The `Binary` struct represents a binary file, including its name, file path, version, and other related properties. You can create a `Binary` struct by providing the binary name and version:
@@ -162,7 +162,7 @@ This is all you need or have a look [here](./.envrc).
 - Modification
 - Private use
 
-For more convoluted language, see the [LICENSE](https://github.com/buyoio/b/blob/main/LICENSE). Let's build a better Bash experience together.
+For more convoluted language, see the [LICENSE](https://github.com/fentas/b/blob/main/LICENSE). Let's build a better Bash experience together.
 
 &nbsp;
 
@@ -172,5 +172,5 @@ Thanks to all tools and projects that developing this project made possible.
 
 &nbsp;
 
-<p align="center">Copyright &copy; 2024-present <a href="https://github.com/buyoio" target="_blank">Buyo</a>
-<p align="center"><a href="https://github.com/buyio/b/blob/main/LICENSE"><img src="https://img.shields.io/static/v1.svg?style=for-the-badge&label=License&message=MIT&logoColor=d9e0ee&colorA=302d41&colorB=b7bdf8"/></a></p>
+<p align="center">Copyright &copy; 2024-present <a href="https://github.com/fentas" target="_blank">Fentas</a>
+<p align="center"><a href="https://github.com/fentas/b/blob/main/LICENSE"><img src="https://img.shields.io/static/v1.svg?style=for-the-badge&label=License&message=MIT&logoColor=d9e0ee&colorA=302d41&colorB=b7bdf8"/></a></p>

@@ -15,14 +15,14 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 			Context: context.Background(),
 		}
 	}
-	// https://github.com/buyoio/b/releases/download/v1.0.0/b-linux-amd64.tar.gz
+	// https://github.com/fentas/b/releases/download/v1.0.0/b-linux-amd64.tar.gz
 	return &binary.Binary{
 		Context:    options.Context,
 		Envs:       options.Envs,
 		Tracker:    options.Tracker,
 		Version:    options.Version,
 		Name:       "b",
-		GitHubRepo: "buyoio/b",
+		GitHubRepo: "fentas/b",
 		GitHubFile: fmt.Sprintf("b-%s-%s.tar.gz", runtime.GOOS, runtime.GOARCH),
 		VersionF:   binary.GithubLatest,
 		IsTarGz:    true,
