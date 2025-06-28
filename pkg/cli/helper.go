@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/buyoio/goodies/progress"
+	"github.com/fentas/goodies/progress"
 
-	"github.com/buyoio/b/pkg/binary"
+	"github.com/fentas/b/pkg/binary"
 )
 
 func (o *CmdBinaryOptions) lookupLocals() ([]*binary.LocalBinary, error) {

@@ -3,13 +3,13 @@ package cli
 import (
 	"os"
 
-	"github.com/buyoio/goodies/cmdutil"
-	"github.com/buyoio/goodies/output"
-	"github.com/buyoio/goodies/streams"
-	"github.com/buyoio/goodies/templates"
+	"github.com/fentas/goodies/cmdutil"
+	"github.com/fentas/goodies/output"
+	"github.com/fentas/goodies/streams"
+	"github.com/fentas/goodies/templates"
 
-	"github.com/buyoio/b/pkg/binary"
-	"github.com/buyoio/b/pkg/state"
+	"github.com/fentas/b/pkg/binary"
+	"github.com/fentas/b/pkg/state"
 
 	"github.com/spf13/cobra"
 )

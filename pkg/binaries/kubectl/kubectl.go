@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/buyoio/b/pkg/binaries"
-	"github.com/buyoio/b/pkg/binary"
+	"github.com/fentas/b/pkg/binaries"
+	"github.com/fentas/b/pkg/binary"
 )
 
 var (
