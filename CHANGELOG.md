@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/fentas/b/compare/v1.3.0...v1.4.0) (2025-06-28)
+
+
+### Features
+
+* update release-please to use bot token for workflow triggering ([#21](https://github.com/fentas/b/issues/21)) ([2292a53](https://github.com/fentas/b/commit/2292a532a32776b8ac61fb4241447811590a66ba))
+
 ## [1.3.0](https://github.com/fentas/b/compare/v1.2.0...v1.3.0) (2025-06-28)
 
 
