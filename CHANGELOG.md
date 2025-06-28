@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/fentas/b/compare/v1.1.1...v1.2.0) (2025-06-28)
+
+
+### Features
+
+* fix release-please version management for 1.1.2 ([#14](https://github.com/fentas/b/issues/14)) ([5071cbb](https://github.com/fentas/b/commit/5071cbbf4386ffb3880a0c74e847713b9577bc54))
+
 ## [1.0.0](https://github.com/buyoio/b/compare/v0.1.0...v1.0.0) (2024-04-03)
 
 
