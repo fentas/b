@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/buyoio/b/pkg/binaries"
-	"github.com/buyoio/b/pkg/binary"
+	"github.com/fentas/b/pkg/binaries"
+	"github.com/fentas/b/pkg/binary"
 )
 
 func Binary(options *binaries.BinaryOptions) *binary.Binary {

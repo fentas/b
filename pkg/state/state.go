@@ -3,7 +3,7 @@ package state
 import (
 	"os"
 
-	"github.com/buyoio/b/pkg/binary"
+	"github.com/fentas/b/pkg/binary"
 
 	"gopkg.in/yaml.v2"
 )

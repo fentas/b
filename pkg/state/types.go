@@ -1,7 +1,7 @@
 package state
 
 import (
-	"github.com/buyoio/b/pkg/binary"
+	"github.com/fentas/b/pkg/binary"
 )
 
 type BinaryList []*binary.LocalBinary

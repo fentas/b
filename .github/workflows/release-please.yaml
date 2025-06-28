@@ -11,7 +11,7 @@ permissions:
 jobs:
   release-please:
     # Do not run on forks.
-    if: github.repository == 'buyoio/b'
+    if: github.repository == 'fentas/b'
 
     runs-on: ubuntu-latest
     steps:

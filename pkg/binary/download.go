@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/buyoio/goodies/progress"
+	"github.com/fentas/goodies/progress"
 )
 
 func (b *Binary) githubURL() (string, error) {
