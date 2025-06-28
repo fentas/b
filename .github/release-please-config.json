@@ -7,7 +7,7 @@
     ".": {
       "release-type": "go",
       "package-name": "b-cli",
-      "extra-files": ["cmd/b/main.go"]
+      "extra-files": ["cmd/b/main.go", "VERSION"]
     }
   }
 }
