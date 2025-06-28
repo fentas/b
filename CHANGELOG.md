@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/fentas/b/compare/v1.2.0...v1.3.0) (2025-06-28)
+
+
+### Features
+
+* update GPG signing configuration ([#19](https://github.com/fentas/b/issues/19)) ([7efb8c9](https://github.com/fentas/b/commit/7efb8c9c5f2fafb468e9c0366ca3feb898b43611))
+
 ## [1.2.0](https://github.com/fentas/b/compare/v1.1.1...v1.2.0) (2025-06-28)
 
 
