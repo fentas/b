@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"io"
 	"os"
 
 	"github.com/fentas/goodies/cmdutil"
@@ -29,6 +30,7 @@ type CmdBinaryOptions struct {
 	update    bool
 	install   bool
 	check     bool
+	quiet     bool
 }
 
 func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
@@ -59,6 +61,9 @@ func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
 				var err error
 				options.config, err = state.LoadConfig()
 				return err
+			}
+			if options.quiet {
+				options.IO.Out = io.Discard
 			}
 			return nil
 		},
@@ -111,6 +116,7 @@ func (o *CmdBinaryOptions) AddFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVarP(&o.update, "upgrade", "u", false, "Upgrade if already installed")
 	cmd.Flags().BoolVarP(&o.install, "install", "i", false, "Install if not installed")
 	cmd.Flags().BoolVarP(&o.check, "check", "c", false, "Check if binary is up to date")
+	cmd.Flags().BoolVarP(&o.quiet, "quiet", "q", false, "Quiet mode")
 }
 
 func (o *CmdBinaryOptions) Complete(cmd *cobra.Command, args []string) error {

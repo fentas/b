@@ -111,6 +111,7 @@ Have a look into [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 
 - [argsh](https://github.com/arg-sh/argsh) - Utilities for Bash script quality
 - `b` - (Selfupdate) Manage and execute binary files
+- [clusterctl](https://github.com/kubernetes-sigs/cluster-api) - Kubernetes cluster lifecycle management
 - [docker-compose](https://github.com/docker/compose) - Define and run multi-container Docker applications
 - [gh](https://github.com/cli/cli) - GitHub CLI wrapper
 - [hcloud](https://github.com/hetznercloud/cli) - Hetzner Cloud CLI wrapper
