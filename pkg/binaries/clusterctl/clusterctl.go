@@ -27,11 +27,11 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 		VersionF:   binary.GithubLatest,
 		IsTarGz:    false,
 		VersionLocalF: func(b *binary.Binary) (string, error) {
-			s, err := b.Exec("version")
+			s, err := b.Exec("version", "-o", "short")
 			if err != nil {
 				return "", err
 			}
-			return strings.Split(s, " ")[1], nil
+			return strings.TrimSpace(s), nil
 		},
 	}
 }
