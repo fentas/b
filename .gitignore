@@ -1,2 +1,6 @@
 vendor
 main
+
+/b
+/.bin/*
+!/.bin/b.yaml
