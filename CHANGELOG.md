@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.1](https://github.com/fentas/b/compare/v1.5.0...v1.5.1) (2025-07-08)
+
+
+### Bug Fixes
+
+* quiet mode and clusterctl version check ([#25](https://github.com/fentas/b/issues/25)) ([a7ad845](https://github.com/fentas/b/commit/a7ad845ef1de6f4a9e3a2c9f7a92d3cd9c102435))
+
 ## [1.5.0](https://github.com/fentas/b/compare/v1.4.0...v1.5.0) (2025-07-08)
 
 
