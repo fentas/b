@@ -119,6 +119,7 @@ Have a look into [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 - [k9s](https://github.com/derailed/k9s) - Kubernetes CLI to manage your clusters
 - [kind](https://github.com/kubernetes-sigs/kind) - Kubernetes IN Docker
 - [kubectl](https://github.com/kubernetes/kubectl) - Kubernetes CLI to manage your clusters
+- [kustomize](https://github.com/kubernetes-sigs/kustomize) - Kubernetes native configuration management
 - [mkcert](https://github.com/FiloSottile/mkcert) - Create locally-trusted development certificates
 - [tilt](https://github.com/tilt-dev/tilt) - Local Kubernetes development with no stress
 - [yq](https://github.com/mikefarah/yq) - Command-line YAML processor
