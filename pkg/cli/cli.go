@@ -53,18 +53,21 @@ func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
 		Short: "Manage all binaries",
 		Long:  "Ensure that all binaries needed are installed and up to date",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if options.quiet {
+				options.IO.Out = io.Discard
+			}
+
 			path := binary.GetBinaryPath()
 			if path == "" {
 				return cmdutil.UsageErrorf(cmd, "Could not find a suitable path to install binaries")
 			}
+
 			if !options.NoConfig {
 				var err error
 				options.config, err = state.LoadConfig()
 				return err
 			}
-			if options.quiet {
-				options.IO.Out = io.Discard
-			}
+
 			return nil
 		},
 		Example: templates.Examples(`
