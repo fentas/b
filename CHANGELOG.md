@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.2](https://github.com/fentas/b/compare/v1.5.1...v1.5.2) (2025-07-09)
+
+
+### Bug Fixes
+
+* clusterctl version ([#31](https://github.com/fentas/b/issues/31)) ([7cf5016](https://github.com/fentas/b/commit/7cf5016cfe9dbfcb84c6ce34c91ba00818140e66))
+
 ## [1.5.1](https://github.com/fentas/b/compare/v1.5.0...v1.5.1) (2025-07-08)
 
 
