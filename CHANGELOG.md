@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.3](https://github.com/fentas/b/compare/v1.5.2...v1.5.3) (2025-07-09)
+
+
+### Bug Fixes
+
+* quiet mode ([#33](https://github.com/fentas/b/issues/33)) ([919a5b6](https://github.com/fentas/b/commit/919a5b68d5e43c5e4cda176cf5ef149a42509bb7))
+
 ## [1.5.2](https://github.com/fentas/b/compare/v1.5.1...v1.5.2) (2025-07-09)
 
 
