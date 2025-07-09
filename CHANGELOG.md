@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/fentas/b/compare/v1.5.3...v1.6.0) (2025-07-09)
+
+
+### Features
+
+* add kustomize ([#35](https://github.com/fentas/b/issues/35)) ([71b176e](https://github.com/fentas/b/commit/71b176ef4eabfb62e0abbe751eea52298ad66557))
+
 ## [1.5.3](https://github.com/fentas/b/compare/v1.5.2...v1.5.3) (2025-07-09)
 
 
