@@ -2,3 +2,4 @@ jq:
   version: jq-1.7
 kind:
 mkcert:
+clusterctl:

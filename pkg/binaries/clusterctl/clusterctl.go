@@ -28,10 +28,13 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 		IsTarGz:    false,
 		VersionLocalF: func(b *binary.Binary) (string, error) {
 			s, err := b.Exec("version", "-o", "short")
-			if err != nil {
+			// https://github.com/kubernetes-sigs/cluster-api/issues/3573
+			// we will ignore the following error
+			// Error: unable to verify clusterctl version: unable to write version state file: mkdir /etc/xdg/cluster-api: permission denied exit status 1
+			if err != nil && (s == "" || s[0] != 'v') {
 				return "", err
 			}
-			return strings.TrimSpace(s), nil
+			return strings.Split(s, "\n")[0], nil
 		},
 	}
 }
