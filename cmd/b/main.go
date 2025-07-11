@@ -18,6 +18,7 @@ import (
 	"github.com/fentas/b/pkg/binaries/kubectl"
 	"github.com/fentas/b/pkg/binaries/kustomize"
 	"github.com/fentas/b/pkg/binaries/mkcert"
+	"github.com/fentas/b/pkg/binaries/stern"
 	"github.com/fentas/b/pkg/binaries/tilt"
 	"github.com/fentas/b/pkg/binaries/yq"
 	"github.com/spf13/cobra"
@@ -51,6 +52,7 @@ func main() {
 			kubectl.Binary(o),
 			kustomize.Binary(o),
 			mkcert.Binary(o),
+			stern.Binary(o),
 			tilt.Binary(o),
 			yq.Binary(o),
 		},
