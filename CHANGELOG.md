@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/fentas/b/compare/v1.6.0...v1.7.0) (2025-07-11)
+
+
+### Features
+
+* add stern ([#38](https://github.com/fentas/b/issues/38)) ([6aaca43](https://github.com/fentas/b/commit/6aaca434776df7a25cad70c39374b7102877cc7c))
+
 ## [1.6.0](https://github.com/fentas/b/compare/v1.5.3...v1.6.0) (2025-07-09)
 
 
