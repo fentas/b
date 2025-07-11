@@ -4,3 +4,4 @@ kind:
 mkcert:
 clusterctl:
 kustomize:
+stern:
