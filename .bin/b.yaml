@@ -5,3 +5,4 @@ mkcert:
 clusterctl:
 kustomize:
 stern:
+sops:
