@@ -121,6 +121,7 @@ Have a look into [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 - [kubectl](https://github.com/kubernetes/kubectl) - Kubernetes CLI to manage your clusters
 - [kustomize](https://github.com/kubernetes-sigs/kustomize) - Kubernetes native configuration management
 - [mkcert](https://github.com/FiloSottile/mkcert) - Create locally-trusted development certificates
+- [sops](https://github.com/getsops/sops) - Secure processing of configuration files
 - [stern](https://github.com/stern/stern) - Simultaneous log tailing for multiple Kubernetes pods and containers
 - [tilt](https://github.com/tilt-dev/tilt) - Local Kubernetes development with no stress
 - [yq](https://github.com/mikefarah/yq) - Command-line YAML processor
