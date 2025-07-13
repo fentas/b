@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/fentas/b/compare/v1.7.0...v1.8.0) (2025-07-13)
+
+
+### Features
+
+* add sops ([#40](https://github.com/fentas/b/issues/40)) ([c5203cb](https://github.com/fentas/b/commit/c5203cbb3645743542604ab66f6cf60819e7d362))
+
 ## [1.7.0](https://github.com/fentas/b/compare/v1.6.0...v1.7.0) (2025-07-11)
 
 
