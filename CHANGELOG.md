@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/fentas/b/compare/v1.8.0...v1.9.0) (2025-07-15)
+
+
+### Features
+
+* add packer and zip support ([#43](https://github.com/fentas/b/issues/43)) ([2c06fa8](https://github.com/fentas/b/commit/2c06fa85f9a971f3d3453b8b85f7aec58162abeb))
+
 ## [1.8.0](https://github.com/fentas/b/compare/v1.7.0...v1.8.0) (2025-07-13)
 
 
