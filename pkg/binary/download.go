@@ -2,6 +2,8 @@ package binary
 
 import (
 	"archive/tar"
+	"archive/zip"
+	"bytes"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -63,12 +65,48 @@ func (b *Binary) extractSingleFileFromTarGz(stream io.Reader) error {
 		if err != nil {
 			return err
 		}
-		_, err = io.Copy(file, tarReader)
-		file.Close()
+		defer file.Close()
+		if _, err = io.Copy(file, tarReader); err != nil {
+			return err
+		}
+		return os.Chmod(b.File, 0755)
+	}
+
+	return fmt.Errorf("file %s not found", b.Name)
+}
+
+func (b *Binary) extractSingleFileFromZip(stream io.Reader) error {
+	zipData, err := io.ReadAll(stream)
+	if err != nil {
 		return err
 	}
 
-	return os.Chmod(b.File, 0755)
+	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return err
+	}
+
+	for _, file := range zipReader.File {
+		if file.Name == b.Name {
+			zippedFile, err := file.Open()
+			if err != nil {
+				return err
+			}
+			defer zippedFile.Close()
+
+			bfile, err := os.OpenFile(b.File, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
+			if err != nil {
+				return err
+			}
+			defer bfile.Close()
+			if _, err = io.Copy(bfile, zippedFile); err != nil {
+				return err
+			}
+			return os.Chmod(b.File, 0755)
+		}
+	}
+
+	return fmt.Errorf("file %s not found", b.Name)
 }
 
 func (b *Binary) downloadBinary() error {
@@ -112,6 +150,9 @@ func (b *Binary) downloadBinary() error {
 	}
 	if b.IsTarGz {
 		return b.extractSingleFileFromTarGz(reader)
+	}
+	if b.IsZip {
+		return b.extractSingleFileFromZip(reader)
 	}
 
 	file, err := os.OpenFile(b.File, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)

@@ -6,3 +6,4 @@ clusterctl:
 kustomize:
 stern:
 sops:
+packer:
