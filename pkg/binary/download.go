@@ -69,9 +69,10 @@ func (b *Binary) extractSingleFileFromTarGz(stream io.Reader) error {
 		if _, err = io.Copy(file, tarReader); err != nil {
 			return err
 		}
+		return os.Chmod(b.File, 0755)
 	}
 
-	return os.Chmod(b.File, 0755)
+	return fmt.Errorf("file %s not found", b.Name)
 }
 
 func (b *Binary) extractSingleFileFromZip(stream io.Reader) error {
@@ -101,10 +102,11 @@ func (b *Binary) extractSingleFileFromZip(stream io.Reader) error {
 			if _, err = io.Copy(bfile, zippedFile); err != nil {
 				return err
 			}
+			return os.Chmod(b.File, 0755)
 		}
 	}
 
-	return os.Chmod(b.File, 0755)
+	return fmt.Errorf("file %s not found", b.Name)
 }
 
 func (b *Binary) downloadBinary() error {
