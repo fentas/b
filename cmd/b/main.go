@@ -16,6 +16,7 @@ import (
 	"github.com/fentas/b/pkg/binaries/k9s"
 	"github.com/fentas/b/pkg/binaries/kind"
 	"github.com/fentas/b/pkg/binaries/kubectl"
+	"github.com/fentas/b/pkg/binaries/kubeseal"
 	"github.com/fentas/b/pkg/binaries/kustomize"
 	"github.com/fentas/b/pkg/binaries/mkcert"
 	"github.com/fentas/b/pkg/binaries/packer"
@@ -52,6 +53,7 @@ func main() {
 			k9s.Binary(o),
 			kind.Binary(o),
 			kubectl.Binary(o),
+			kubeseal.Binary(o),
 			kustomize.Binary(o),
 			mkcert.Binary(o),
 			packer.Binary(o),
