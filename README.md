@@ -119,6 +119,7 @@ Have a look into [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 - [k9s](https://github.com/derailed/k9s) - Kubernetes CLI to manage your clusters
 - [kind](https://github.com/kubernetes-sigs/kind) - Kubernetes IN Docker
 - [kubectl](https://github.com/kubernetes/kubectl) - Kubernetes CLI to manage your clusters
+- [kubeseal](https://github.com/bitnami-labs/sealed-secrets) - A Kubernetes controller and tool for one-way encrypted Secrets
 - [kustomize](https://github.com/kubernetes-sigs/kustomize) - Kubernetes native configuration management
 - [mkcert](https://github.com/FiloSottile/mkcert) - Create locally-trusted development certificates
 - [packer](https://github.com/hashicorp/packer) - Packer is a tool for creating machine and container images
