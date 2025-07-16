@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/fentas/b/compare/v1.9.0...v1.10.0) (2025-07-16)
+
+
+### Features
+
+* add kubeseal ([#46](https://github.com/fentas/b/issues/46)) ([b993b31](https://github.com/fentas/b/commit/b993b313900d228c538bccc088eaefd55e1a8095))
+
 ## [1.9.0](https://github.com/fentas/b/compare/v1.8.0...v1.9.0) (2025-07-15)
 
 
