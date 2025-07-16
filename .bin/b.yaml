@@ -7,3 +7,4 @@ kustomize:
 stern:
 sops:
 packer:
+kubeseal:
