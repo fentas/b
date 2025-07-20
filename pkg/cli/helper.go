@@ -48,9 +48,10 @@ func (o *CmdBinaryOptions) installBinaries() error {
 		if *do {
 			wg.Add(1)
 
-			go func() {
+			go func(b *binary.Binary) {
 				tracker := pw.AddTracker(fmt.Sprintf("Ensuring %s is installed", b.Name), 0)
 				b.Tracker = tracker
+				b.Writer = pw
 
 				var err error
 				if o.force {
@@ -60,12 +61,12 @@ func (o *CmdBinaryOptions) installBinaries() error {
 				}
 
 				progress.ProgressDone(
-					tracker,
+					b.Tracker,
 					fmt.Sprintf("%s is installed", b.Name),
 					err,
 				)
 				wg.Done()
-			}()
+			}(b)
 		}
 	}
 	wg.Wait()
