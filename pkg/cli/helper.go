@@ -2,9 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"github.com/fentas/goodies/progress"
 	"sync"
 	"time"
+
+	"github.com/fentas/goodies/progress"
 
 	"github.com/fentas/b/pkg/binary"
 )
