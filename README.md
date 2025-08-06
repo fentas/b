@@ -14,14 +14,14 @@
 &nbsp;
 
 <p align="left">
-`b` is binary or a go package that provides a set of utilities for managing and executing binary files. It is particularly useful for binaries hosted on GitHub.
+`b` is a binary or a Go package that provides a set of utilities for managing and executing binary files. It is particularly useful for binaries hosted on GitHub.
 
 The package includes a `Binary` struct that represents a binary file, including its name, file path, version, and other related properties. You can create a `Binary` struct by providing the binary name and version, and then use the `EnsureBinary` method to ensure that the binary is available on the system.
 </p>
 
 &nbsp;
 
-### 🐾 How to use `b` as binary
+### 🐾 How to use `b` as a binary
 
 ```bash
 # Initialise a new project with b.yaml config and direnv
