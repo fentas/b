@@ -1,10 +1,1 @@
-jq:
-  version: jq-1.7
-kind:
-mkcert:
-clusterctl:
-kustomize:
-stern:
-sops:
-packer:
-kubeseal:
+{}

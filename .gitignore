@@ -4,3 +4,5 @@ main
 /b
 /.bin/*
 !/.bin/b.yaml
+
+/.back

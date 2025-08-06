@@ -102,10 +102,9 @@ func (b *Binary) extractSingleFileFromZip(stream io.Reader) error {
 
 			var reader io.Reader = zippedFile
 			if b.Writer != nil {
-				extractTracker := b.Writer.AddTracker(fmt.Sprintf("Extracting %s", b.Name), int64(file.UncompressedSize64))
-				b.Tracker = extractTracker
-				reader = progress.NewReader(zippedFile, extractTracker)
-				defer extractTracker.MarkAsDone()
+				b.Tracker = b.Writer.AddTracker(fmt.Sprintf("Extracting %s", b.Name), int64(file.UncompressedSize64))
+				reader = progress.NewReader(zippedFile, b.Tracker)
+				defer b.Tracker.MarkAsDone()
 			}
 
 			if _, err = io.Copy(bfile, reader); err != nil {
