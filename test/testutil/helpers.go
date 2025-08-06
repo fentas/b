@@ -29,12 +29,12 @@ func TempFile(t *testing.T, name, content string) string {
 	t.Helper()
 	dir := TempDir(t)
 	path := filepath.Join(dir, name)
-	
+
 	// Create directory if needed
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatalf("failed to create dir for temp file: %v", err)
 	}
-	
+
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
@@ -153,7 +153,7 @@ func (b *MockBuffer) Reset() {
 
 // contains is a helper function to check if a string contains a substring
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || 
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
 		(len(substr) <= len(s) && s[:len(substr)] == substr) ||
 		(len(substr) <= len(s) && s[len(s)-len(substr):] == substr) ||
 		containsAt(s, substr))
@@ -175,11 +175,11 @@ func ChangeDir(t *testing.T, dir string) {
 	if err != nil {
 		t.Fatalf("failed to get current dir: %v", err)
 	}
-	
+
 	if err := os.Chdir(dir); err != nil {
 		t.Fatalf("failed to change dir to %s: %v", dir, err)
 	}
-	
+
 	t.Cleanup(func() {
 		os.Chdir(oldDir)
 	})
@@ -189,7 +189,7 @@ func ChangeDir(t *testing.T, dir string) {
 func CreateTestProject(t *testing.T, config *state.BinaryList) string {
 	t.Helper()
 	dir := TempDir(t)
-	
+
 	if config != nil {
 		configPath := filepath.Join(dir, ".bin", "b.yaml")
 		if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
@@ -199,6 +199,6 @@ func CreateTestProject(t *testing.T, config *state.BinaryList) string {
 			t.Fatalf("failed to save test config: %v", err)
 		}
 	}
-	
+
 	return dir
 }

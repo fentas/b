@@ -39,7 +39,7 @@ func main() {
 	o := &binaries.BinaryOptions{
 		Context: context.Background(),
 	}
-	
+
 	binaries := []*binary.Binary{
 		argsh.Binary(o),
 		b.Binary(o),
@@ -60,7 +60,7 @@ func main() {
 		tilt.Binary(o),
 		yq.Binary(o),
 	}
-	
+
 	io := &streams.IO{
 		In:     os.Stdin,
 		Out:    os.Stdout,

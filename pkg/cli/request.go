@@ -82,13 +82,13 @@ func (o *RequestOptions) Run() error {
 // createIssueURL creates a GitHub issue URL with prefilled template
 func (o *RequestOptions) createIssueURL() string {
 	baseURL := "https://github.com/fentas/b/issues/new"
-	
+
 	// Use GitHub issue template with prefilled binary name
 	params := url.Values{}
 	params.Add("template", "binary-request.yml")
 	params.Add("title", fmt.Sprintf("Binary Request: %s", o.BinaryName))
 	params.Add("labels", "request")
-	
+
 	// Pre-fill the binary name field if the template supports it
 	// GitHub will use this to populate the form field
 	params.Add("binary-name", o.BinaryName)
