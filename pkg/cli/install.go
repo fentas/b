@@ -121,9 +121,7 @@ func (o *InstallOptions) Run() error {
 	}
 
 	if len(binariesToInstall) == 0 {
-		if !o.Quiet {
-			fmt.Fprintln(o.IO.Out, "No binaries to install")
-		}
+		fmt.Fprintln(o.IO.Out, "No binaries to install")
 		return nil
 	}
 

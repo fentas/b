@@ -131,9 +131,7 @@ func (o *VersionOptions) Run() error {
 			}
 		}
 		if len(notUpToDate) > 0 {
-			if !o.Quiet {
-				o.IO.Print(notUpToDate)
-			}
+			o.IO.Print(notUpToDate)
 			os.Exit(1)
 		}
 		return nil

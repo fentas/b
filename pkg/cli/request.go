@@ -70,10 +70,8 @@ func (o *RequestOptions) Run() error {
 	// Create GitHub issue URL with prefilled template
 	issueURL := o.createIssueURL()
 
-	if !o.Quiet {
-		fmt.Fprintf(o.IO.Out, "Opening GitHub issue for binary request: %s\n", o.BinaryName)
-		fmt.Fprintf(o.IO.Out, "URL: %s\n", issueURL)
-	}
+	fmt.Fprintf(o.IO.Out, "Opening GitHub issue for binary request: %s\n", o.BinaryName)
+	fmt.Fprintf(o.IO.Out, "URL: %s\n", issueURL)
 
 	// Open URL in default browser
 	return o.openURL(issueURL)

@@ -41,11 +41,16 @@ func NewSharedOptions(io *streams.IO, binaries []*binary.Binary) *SharedOptions 
 	return opts
 }
 
-// LoadConfig loads the configuration file with enhanced discovery
-func (o *SharedOptions) LoadConfig() error {
+// ApplyQuietMode redirects output to discard if quiet mode is enabled
+func (o *SharedOptions) ApplyQuietMode() {
 	if o.Quiet {
 		o.IO.Out = io.Discard
 	}
+}
+
+// LoadConfig loads the configuration file with enhanced discovery
+func (o *SharedOptions) LoadConfig() error {
+	o.ApplyQuietMode()
 
 	var err error
 	if o.ConfigPath != "" {

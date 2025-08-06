@@ -101,9 +101,7 @@ func (o *UpdateOptions) Run() error {
 	}
 
 	if len(binariesToUpdate) == 0 {
-		if !o.Quiet {
-			fmt.Fprintln(o.IO.Out, "No binaries to update")
-		}
+		fmt.Fprintln(o.IO.Out, "No binaries to update")
 		return nil
 	}
 

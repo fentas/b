@@ -79,9 +79,7 @@ func (o *InitOptions) Run() error {
 		return fmt.Errorf("failed to create configuration file: %w", err)
 	}
 
-	if !o.Quiet {
-		fmt.Fprintf(o.IO.Out, "Created configuration file: %s\n", configPath)
-	}
+	fmt.Fprintf(o.IO.Out, "Created configuration file: %s\n", configPath)
 
 	// Create additional project files if this is a new/empty directory
 	if err := o.createProjectFiles(); err != nil {
@@ -135,9 +133,7 @@ func (o *InitOptions) createGitignore(dir string) error {
 
 	// Check if .gitignore already exists
 	if _, err := os.Stat(gitignorePath); err == nil {
-		if !o.Quiet {
-			fmt.Fprintf(o.IO.Out, ".gitignore already exists, skipping\n")
-		}
+		fmt.Fprintf(o.IO.Out, ".gitignore already exists, skipping\n")
 		return nil
 	}
 
@@ -152,9 +148,7 @@ func (o *InitOptions) createGitignore(dir string) error {
 		return err
 	}
 
-	if !o.Quiet {
-		fmt.Fprintf(o.IO.Out, "Created .gitignore\n")
-	}
+	fmt.Fprintf(o.IO.Out, "Created .gitignore\n")
 
 	return nil
 }
@@ -165,9 +159,7 @@ func (o *InitOptions) createEnvrc() error {
 
 	// Check if .envrc already exists
 	if _, err := os.Stat(envrcPath); err == nil {
-		if !o.Quiet {
-			fmt.Fprintf(o.IO.Out, ".envrc already exists. Add '${PATH_BIN:-\"${PATH_BASE}/.bin\"}' to your PATH\n")
-		}
+		fmt.Fprintf(o.IO.Out, ".envrc already exists. Add '${PATH_BIN:-\"${PATH_BASE}/.bin\"}' to your PATH\n")
 		return nil
 	}
 
@@ -241,13 +233,9 @@ main() {
 		return err
 	}
 
-	if !o.Quiet {
-		fmt.Fprintf(o.IO.Out, "Created .envrc for direnv integration\n")
-	}
+	fmt.Fprintf(o.IO.Out, "Created .envrc for direnv integration\n")
 	if !o.isDirenvInstalled() {
-		if !o.Quiet {
-			fmt.Fprintf(o.IO.Out, "⚠️ direnv not installed. Consider installing it for automatic environment setup\n")
-		}
+		fmt.Fprintf(o.IO.Out, "⚠️ direnv not installed. Consider installing it for automatic environment setup\n")
 		return nil
 	}
 
