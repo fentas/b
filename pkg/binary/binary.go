@@ -1,53 +1,11 @@
 package binary
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 
-	// Core progress tracking from go-pretty
-	pretty "github.com/jedib0t/go-pretty/v6/progress"
-	// Custom wrapper that simplifies writer creation and styling
-	pwrap "github.com/fentas/goodies/progress"
+	"github.com/fentas/b/pkg/path"
 )
-
-type IsBinary interface {
-	EnsureBinary(bool) error
-	LocalBinary() *LocalBinary
-}
-
-type Callback func(*Binary) (string, error)
-
-type Binary struct {
-	Context context.Context `json:"-"`
-	// for installation
-	URL           string          `json:"-"`
-	URLF          Callback        `json:"-"`
-	GitHubRepo    string          `json:"repo"`
-	GitHubFile    string          `json:"-"`
-	GitHubFileF   Callback        `json:"-"`
-	Version       string          `json:"-"`
-	VersionF      Callback        `json:"-"`
-	VersionLocalF Callback        `json:"-"`
-	Name          string          `json:"name" yaml:"name"`
-	File          string          `json:"-"`
-	IsTarGz       bool            `json:"-"`
-	IsZip         bool            `json:"-"`
-	TarFile       string          `json:"-"`
-	TarFileF      Callback        `json:"-"`
-	Tracker       *pretty.Tracker `json:"-"`
-	Writer        *pwrap.Writer   `json:"-"`
-	// for execution
-	Envs map[string]string `json:"-"`
-}
-
-type LocalBinary struct {
-	Name     string `json:"name"`
-	File     string `json:"file,omitempty"`
-	Version  string `json:"version,omitempty"`
-	Latest   string `json:"latest"`
-	Enforced string `json:"enforced,omitempty"`
-}
 
 func (b *Binary) LocalBinary() *LocalBinary {
 	var latest string
@@ -83,7 +41,7 @@ func (b *Binary) BinaryPath() string {
 	// 	return b.File
 	// }
 
-	path := GetBinaryPath()
+	path := path.GetBinaryPath()
 	b.File = filepath.Join(path, b.Name)
 	return b.File
 }

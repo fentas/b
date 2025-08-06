@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fentas/b/pkg/binary"
+	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/b/pkg/state"
 )
 
@@ -63,7 +64,7 @@ func (o *InitOptions) Validate() error {
 func (o *InitOptions) Run() error {
 	configPath := o.ConfigPath
 	if configPath == "" {
-		configPath = state.GetDefaultConfigPath()
+		configPath = path.GetDefaultConfigPath()
 	}
 
 	// Check if config already exists
@@ -112,7 +113,7 @@ func (o *InitOptions) createConfigWithSelfReference(configPath string) error {
 func (o *InitOptions) createProjectFiles() error {
 	configPath := o.ConfigPath
 	if configPath == "" {
-		configPath = state.GetDefaultConfigPath()
+		configPath = path.GetDefaultConfigPath()
 	}
 
 	// Create .gitignore in the same directory as b.yaml

@@ -3,9 +3,10 @@ package cli
 import (
 	"io"
 
-	"github.com/fentas/goodies/streams"
 	"github.com/fentas/b/pkg/binary"
+	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/b/pkg/state"
+	"github.com/fentas/goodies/streams"
 )
 
 // SharedOptions contains common options used across subcommands
@@ -13,13 +14,13 @@ type SharedOptions struct {
 	IO       *streams.IO
 	Binaries []*binary.Binary
 	Config   *state.BinaryList
-	
+
 	// Global flags
 	ConfigPath string
 	Force      bool
 	Quiet      bool
 	Output     string
-	
+
 	// Internal
 	lookup map[string]*binary.Binary
 }
@@ -31,12 +32,12 @@ func NewSharedOptions(io *streams.IO, binaries []*binary.Binary) *SharedOptions 
 		Binaries: binaries,
 		lookup:   make(map[string]*binary.Binary),
 	}
-	
+
 	// Build lookup map
 	for _, b := range binaries {
 		opts.lookup[b.Name] = b
 	}
-	
+
 	return opts
 }
 
@@ -45,20 +46,14 @@ func (o *SharedOptions) LoadConfig() error {
 	if o.Quiet {
 		o.IO.Out = io.Discard
 	}
-	
-	// Check if binary path is available
-	path := binary.GetBinaryPath()
-	if path == "" {
-		return nil // No error, just no config
-	}
-	
+
 	var err error
 	if o.ConfigPath != "" {
 		o.Config, err = state.LoadConfigFromPath(o.ConfigPath)
 	} else {
 		o.Config, err = state.LoadConfig()
 	}
-	
+
 	return err
 }
 
@@ -73,7 +68,7 @@ func (o *SharedOptions) GetBinariesFromConfig() []*binary.Binary {
 	if o.Config == nil {
 		return nil
 	}
-	
+
 	var result []*binary.Binary
 	for _, lb := range *o.Config {
 		if b, ok := o.lookup[lb.Name]; ok {
@@ -82,13 +77,13 @@ func (o *SharedOptions) GetBinariesFromConfig() []*binary.Binary {
 			result = append(result, b)
 		}
 	}
-	
+
 	return result
 }
 
 // ValidateBinaryPath ensures we have a valid binary installation path
 func (o *SharedOptions) ValidateBinaryPath() error {
-	path := binary.GetBinaryPath()
+	path := path.GetBinaryPath()
 	if path == "" {
 		return ErrNoBinaryPath
 	}
@@ -100,5 +95,5 @@ func (o *SharedOptions) getConfigPath() (string, error) {
 	if o.ConfigPath != "" {
 		return o.ConfigPath, nil
 	}
-	return state.FindConfigFile()
+	return path.FindConfigFile()
 }

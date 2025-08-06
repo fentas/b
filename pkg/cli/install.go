@@ -11,14 +11,15 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fentas/b/pkg/binary"
+	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/b/pkg/state"
 )
 
 // InstallOptions holds options for the install command
 type InstallOptions struct {
 	*SharedOptions
-	Add bool // Add to b.yaml during install
-	Fix bool // Pin version in b.yaml
+	Add               bool             // Add to b.yaml during install
+	Fix               bool             // Pin version in b.yaml
 	specifiedBinaries []*binary.Binary // Binaries specified on command line
 }
 
@@ -87,14 +88,14 @@ func (o *InstallOptions) Complete(args []string) error {
 		if !ok {
 			return fmt.Errorf("unknown binary: %s", name)
 		}
-		
+
 		// Set version if specified
 		if version != "" {
 			b.Version = version
 			// TODO: Add version validation here
 			// For now, we'll validate during installation
 		}
-		
+
 		// Add to specified binaries list
 		o.specifiedBinaries = append(o.specifiedBinaries, b)
 	}
@@ -152,7 +153,7 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 
 		go func(b *binary.Binary) {
 			defer wg.Done()
-			
+
 			tracker := pw.AddTracker(fmt.Sprintf("Installing %s", b.Name), 0)
 			b.Tracker = tracker
 			b.Writer = pw
@@ -182,7 +183,7 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 	configPath := o.ConfigPath
 	if configPath == "" {
-		configPath = state.GetDefaultConfigPath()
+		configPath = path.GetDefaultConfigPath()
 	}
 
 	// Load existing config or create new one
@@ -208,7 +209,7 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 				break
 			}
 		}
-		
+
 		if !found {
 			entry := &binary.LocalBinary{
 				Name: b.Name,

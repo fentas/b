@@ -10,6 +10,7 @@ import (
 	"github.com/fentas/goodies/templates"
 
 	"github.com/fentas/b/pkg/binary"
+	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/b/pkg/state"
 
 	"github.com/spf13/cobra"
@@ -57,7 +58,7 @@ func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
 				options.IO.Out = io.Discard
 			}
 
-			path := binary.GetBinaryPath()
+			path := path.GetBinaryPath()
 			if path == "" {
 				return cmdutil.UsageErrorf(cmd, "Could not find a suitable path to install binaries")
 			}

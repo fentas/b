@@ -97,9 +97,7 @@ func (o *UpdateOptions) Run() error {
 		binariesToUpdate = o.GetBinariesFromConfig()
 	} else {
 		// Update specified binaries
-		for _, b := range o.Binaries {
-			binariesToUpdate = append(binariesToUpdate, b)
-		}
+		binariesToUpdate = append(binariesToUpdate, o.Binaries...)
 	}
 
 	if len(binariesToUpdate) == 0 {
@@ -126,7 +124,7 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 
 		go func(b *binary.Binary) {
 			defer wg.Done()
-			
+
 			tracker := pw.AddTracker(fmt.Sprintf("Updating %s", b.Name), 0)
 			b.Tracker = tracker
 			b.Writer = pw
