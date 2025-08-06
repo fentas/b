@@ -36,7 +36,7 @@ jobs:
       run: go mod download
       
     - name: Run tests
-      run: go test -race -coverprofile=coverage.out ./...
+      run: go test -race -coverprofile="coverage.out" ./...
       
     - name: Generate coverage report
       run: go tool cover -func=coverage.out
