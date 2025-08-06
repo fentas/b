@@ -102,10 +102,9 @@ func (b *Binary) extractSingleFileFromZip(stream io.Reader) error {
 
 			var reader io.Reader = zippedFile
 			if b.Writer != nil {
-				extractTracker := b.Writer.AddTracker(fmt.Sprintf("Extracting %s", b.Name), int64(file.UncompressedSize64))
-				b.Tracker = extractTracker
-				reader = progress.NewReader(zippedFile, extractTracker)
-				defer extractTracker.MarkAsDone()
+				b.Tracker = b.Writer.AddTracker(fmt.Sprintf("Extracting %s", b.Name), int64(file.UncompressedSize64))
+				reader = progress.NewReader(zippedFile, b.Tracker)
+				defer b.Tracker.MarkAsDone()
 			}
 
 			if _, err = io.Copy(bfile, reader); err != nil {
@@ -150,6 +149,26 @@ func (b *Binary) downloadBinary() error {
 		return err
 	}
 	defer resp.Body.Close()
+
+	// Check HTTP status code
+	if resp.StatusCode != http.StatusOK {
+		switch resp.StatusCode {
+		case http.StatusNotFound:
+			var latest string
+			if b.VersionF != nil {
+				latest, _ = b.VersionF(b)
+			}
+			return fmt.Errorf("%s not found ^^ %s", b.Version, latest)
+		case http.StatusForbidden:
+		case http.StatusUnauthorized:
+			return fmt.Errorf("Unauthorized")
+		case http.StatusTooManyRequests:
+			//lint:ignore ST1005 "this error is capitalized because it's presented directly to the user"
+			return fmt.Errorf("Rate limited")
+		default:
+			return fmt.Errorf("HTTP error %d", resp.StatusCode)
+		}
+	}
 
 	reader := resp.Body
 	if b.Tracker != nil {
