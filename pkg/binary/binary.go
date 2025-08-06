@@ -7,9 +7,9 @@ import (
 	"github.com/fentas/b/pkg/path"
 )
 
-func (b *Binary) LocalBinary() *LocalBinary {
+func (b *Binary) LocalBinary(remote bool) *LocalBinary {
 	var latest string
-	if b.VersionF != nil {
+	if b.VersionF != nil && remote {
 		latest, _ = b.VersionF(b)
 	}
 	version := b.Version
@@ -60,7 +60,7 @@ func (b *Binary) EnsureBinary(update bool) error {
 		if !update {
 			return nil
 		}
-		local := b.LocalBinary()
+		local := b.LocalBinary(true)
 
 		if local.Version == local.Enforced || local.Enforced == "" && local.Latest == local.Version {
 			return nil

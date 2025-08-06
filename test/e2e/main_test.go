@@ -99,7 +99,7 @@ func TestE2E_InitWorkflow(t *testing.T) {
 	}
 
 	configStr := string(configContent)
-	if !strings.Contains(configStr, "name: b") {
+	if !strings.Contains(configStr, "b: null") {
 		t.Error("Config file does not contain self-reference to 'b' binary")
 	}
 
@@ -129,9 +129,9 @@ func TestE2E_ConfigDiscovery(t *testing.T) {
 	}
 
 	configPath := filepath.Join(configDir, "b.yaml")
-	configContent := []byte(`- name: jq
+	configContent := []byte(`jq:
   version: "1.7"
-- name: kubectl
+kubectl:
   version: "latest"
 `)
 	err = os.WriteFile(configPath, configContent, 0644)

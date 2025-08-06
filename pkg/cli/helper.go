@@ -18,7 +18,7 @@ func (o *CmdBinaryOptions) lookupLocals() ([]*binary.LocalBinary, error) {
 		if *do {
 			wg.Add(1)
 			go func() {
-				ch <- b.LocalBinary()
+				ch <- b.LocalBinary(true)
 				wg.Done()
 			}()
 		}

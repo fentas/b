@@ -85,7 +85,7 @@ func (o *ListOptions) lookupLocals() ([]*binary.LocalBinary, error) {
 		wg.Add(1)
 		go func(b *binary.Binary) {
 			defer wg.Done()
-			ch <- b.LocalBinary()
+			ch <- b.LocalBinary(true)
 		}(b)
 	}
 

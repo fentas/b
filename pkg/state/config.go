@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/path"
 	"gopkg.in/yaml.v2"
 )
@@ -59,6 +60,10 @@ func SaveConfig(config *BinaryList, configPath string) error {
 
 // CreateDefaultConfig creates a default b.yaml configuration file
 func CreateDefaultConfig(configPath string) error {
-	defaultConfig := BinaryList{}
+	defaultConfig := BinaryList{
+		&binary.LocalBinary{
+			Name: "b",
+		},
+	}
 	return SaveConfig(&defaultConfig, configPath)
 }

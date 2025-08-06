@@ -14,8 +14,9 @@ import (
 // VersionOptions holds options for the version command
 type VersionOptions struct {
 	*SharedOptions
-	Local bool // Only show local versions
-	Check bool // Check if versions are up to date (exit code based)
+	Local bool     // Only show local versions
+	Check bool     // Check if versions are up to date (exit code based)
+	args  []string // Parsed arguments from Complete
 }
 
 // NewVersionCmd creates the version subcommand
@@ -25,10 +26,10 @@ func NewVersionCmd(shared *SharedOptions) *cobra.Command {
 	}
 
 	cmd := &cobra.Command{
-		Use:     "version [binary]",
+		Use:     "version [binary...]",
 		Aliases: []string{"v"},
 		Short:   "Show version information",
-		Long:    "List all versions. If an argument is given, it just shows the version of the binary.",
+		Long:    "List all versions. If arguments are given, it shows the version of the specified binaries.",
 		Example: templates.Examples(`
 			# Show all versions
 			b version
@@ -36,11 +37,17 @@ func NewVersionCmd(shared *SharedOptions) *cobra.Command {
 			# Show specific binary version
 			b version jq
 
+			# Show multiple binary versions
+			b version jq kubectl helm
+
 			# Show only local versions
 			b version --local
 
 			# Check if versions are up to date (exit code based)
 			b version --quiet --check
+
+			# Check specific binaries
+			b version jq kubectl --check
 		`),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := o.Complete(args); err != nil {
@@ -48,6 +55,10 @@ func NewVersionCmd(shared *SharedOptions) *cobra.Command {
 			}
 			if err := o.Validate(); err != nil {
 				return err
+			}
+			// If quiet mode is enabled, automatically enable check mode
+			if o.Quiet {
+				o.Check = true
 			}
 			return o.Run()
 		},
@@ -61,17 +72,15 @@ func NewVersionCmd(shared *SharedOptions) *cobra.Command {
 
 // Complete sets up the version operation
 func (o *VersionOptions) Complete(args []string) error {
-	if len(args) > 1 {
-		return fmt.Errorf("only one binary can be specified")
-	}
-
-	if len(args) == 1 {
-		name := args[0]
+	// Validate all specified binaries exist
+	for _, name := range args {
 		if _, ok := o.GetBinary(name); !ok {
 			return fmt.Errorf("unknown binary: %s", name)
 		}
 	}
 
+	// Store the parsed arguments for use in Run
+	o.args = args
 	return nil
 }
 
@@ -84,12 +93,11 @@ func (o *VersionOptions) Validate() error {
 func (o *VersionOptions) Run() error {
 	var binariesToCheck []*binary.Binary
 
-	if len(os.Args) > 2 && os.Args[2] != "version" && os.Args[2] != "v" {
-		// Specific binary requested
-		for _, arg := range os.Args[2:] {
-			if b, ok := o.GetBinary(arg); ok {
+	if len(o.args) > 0 {
+		// Specific binaries requested
+		for _, name := range o.args {
+			if b, ok := o.GetBinary(name); ok {
 				binariesToCheck = append(binariesToCheck, b)
-				break
 			}
 		}
 	} else {
@@ -113,6 +121,9 @@ func (o *VersionOptions) Run() error {
 		for _, l := range locals {
 			// Skip if version is pinned (enforced)
 			if l.Enforced != "" && l.Enforced != "latest" {
+				if l.Enforced != l.Version {
+					notUpToDate = append(notUpToDate, l)
+				}
 				continue
 			}
 			if l.Version == "" || (l.Latest != "" && l.Version != l.Latest) {
@@ -140,16 +151,7 @@ func (o *VersionOptions) getVersionInfo(binaries []*binary.Binary) ([]*binary.Lo
 		wg.Add(1)
 		go func(b *binary.Binary) {
 			defer wg.Done()
-			local := b.LocalBinary()
-			
-			// If not local-only mode, try to get latest version
-			if !o.Local && b.VersionF != nil {
-				if latest, err := b.VersionF(b); err == nil {
-					local.Latest = latest
-				}
-			}
-			
-			ch <- local
+			ch <- b.LocalBinary(!o.Local)
 		}(b)
 	}
 

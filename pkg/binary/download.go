@@ -150,6 +150,26 @@ func (b *Binary) downloadBinary() error {
 	}
 	defer resp.Body.Close()
 
+	// Check HTTP status code
+	if resp.StatusCode != http.StatusOK {
+		switch resp.StatusCode {
+		case http.StatusNotFound:
+			var latest string
+			if b.VersionF != nil {
+				latest, _ = b.VersionF(b)
+			}
+			return fmt.Errorf("%s not found ^^ %s", b.Version, latest)
+		case http.StatusForbidden:
+		case http.StatusUnauthorized:
+			return fmt.Errorf("Unauthorized")
+		case http.StatusTooManyRequests:
+			//lint:ignore ST1005 "this error is capitalized because it's presented directly to the user"
+			return fmt.Errorf("Rate limited")
+		default:
+			return fmt.Errorf("HTTP error %d", resp.StatusCode)
+		}
+	}
+
 	reader := resp.Body
 	if b.Tracker != nil {
 		b.Tracker.UpdateMessage(fmt.Sprintf("Downloading %s", b.Name))
