@@ -77,7 +77,7 @@ func (o *ListOptions) Run() error {
 // lookupLocals gets local binary information for all configured binaries
 func (o *ListOptions) lookupLocals() ([]*binary.LocalBinary, error) {
 	binariesFromConfig := o.GetBinariesFromConfig()
-	
+
 	wg := sync.WaitGroup{}
 	ch := make(chan *binary.LocalBinary, len(binariesFromConfig))
 

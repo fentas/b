@@ -24,29 +24,37 @@ The package includes a `Binary` struct that represents a binary file, including 
 ### 🐾 How to use `b` as binary
 
 ```bash
-# List all installed binaries and/or defined in b.yaml
-b --all
+# Initialize a new project with b.yaml config and direnv
+b init
 
-# Print as JSON
-b -ao json
+# List all configured binaries
+b list
+b ls
 
-# Install all binaries defined in b.yaml
-b -a --install
+# Install specific binaries
+b install jq
+b i kubectl helm
 
-# Install or update jq
-b -iu jq
+# Install and add binary to config
+b install --add jq@1.7
 
-# Force install jq, overwriting existing binary
-b -fi jq
+# Update all binaries
+b update
+b u tilt
 
-# Upgrade all binaries
-b -aiu
+# Update specific binaries
+b update jq kubectl
 
-# List all available binaries
-b --list
+# Search for available binaries
+b search terraform
+b s kube
 
-# Checks (silent) if all binaries are up to date
-b -acq || echo "Some binaries are not up to date"
+# Show version
+b version
+b v kind
+
+# Request a new binary
+b request
 ```
 
 &nbsp;

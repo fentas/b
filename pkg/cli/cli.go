@@ -72,29 +72,37 @@ func NewCmdBinary(options *CmdBinaryOptions) *cobra.Command {
 			return nil
 		},
 		Example: templates.Examples(`
-			# List all installed binaries` + configExample + `
-			b --all
+			# Initialize a new project with b.yaml config
+			b init
 
-			# Print as JSON
-			b -ao json
+			# List all configured binaries` + configExample + `
+			b list
+			b ls
 
-			# Install all binaries
-			b -a --install
+			# Install specific binaries
+			b install jq
+			b i kubectl helm
 
-			# Install or update jq
-			b -iu jq
+			# Install and add binary to config
+			b install --add jq@1.7
 
-			# Force install jq, overwriting existing binary
-			b -fi jq
+			# Update all binaries
+			b update
+			b u
 
-			# Upgrade all binaries
-			b -aiu
+			# Update specific binaries
+			b update jq kubectl
 
-			# List all available binaries
-			b --list
+			# Search for available binaries
+			b search terraform
+			b s kube
 
-			# Checks (silent) if all binaries are up to date
-			b -acq || echo "Some binaries are not up to date"
+			# Show version
+			b version
+			b v kind
+
+			# Request a new binary
+			b request
 		`),
 		Run: func(cmd *cobra.Command, args []string) {
 			cmdutil.CheckErr(options.Complete(cmd, args))

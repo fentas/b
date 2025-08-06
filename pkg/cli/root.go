@@ -19,7 +19,7 @@ func NewRootCmd(binaries []*binary.Binary, io *streams.IO, version, versionPreRe
 	cmd := &cobra.Command{
 		Use:   "b",
 		Short: "Manage all binaries",
-		Long:  "A tool to manage binary installations and updates",
+		Long:  "A tool to manage binary installations and updates 🧙",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Handle version flag at root level
 			if cmd.Flags().Changed("version") {
@@ -36,6 +36,10 @@ func NewRootCmd(binaries []*binary.Binary, io *streams.IO, version, versionPreRe
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Run: func(cmd *cobra.Command, args []string) {
+			// Show help when no subcommand is provided
+			cmd.Help()
+		},
 	}
 
 	// Global flags
@@ -65,7 +69,35 @@ func NewRootCmd(binaries []*binary.Binary, io *streams.IO, version, versionPreRe
 	cmd.AddCommand(NewVersionCmd(shared))
 	cmd.AddCommand(NewRequestCmd(shared))
 
+	// Set custom usage template to show aliases in command list
+	cmd.SetUsageTemplate(getUsageTemplate())
+
 	return cmd
+}
+
+// getUsageTemplate returns a custom usage template that shows aliases
+func getUsageTemplate() string {
+	return `Usage:{{if .Runnable}}
+  {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
+  {{.CommandPath}} [command]{{end}}{{if .HasExample}}
+
+Examples:
+{{.Example}}{{end}}{{if .HasAvailableSubCommands}}
+
+Available Commands:{{range .Commands}}{{if .IsAvailableCommand}}
+  {{$cmdName := .Name}}{{range .Aliases}}{{$cmdName = printf "%s, %s" $cmdName .}}{{end}}{{rpad $cmdName .NamePadding }}     {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+
+Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
+
+Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
+
+Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
+`
 }
 
 // Execute runs the root command
