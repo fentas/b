@@ -18,7 +18,7 @@ func (o *CmdBinaryOptions) lookupLocals() ([]*binary.LocalBinary, error) {
 		if *do {
 			wg.Add(1)
 			go func() {
-				ch <- b.LocalBinary()
+				ch <- b.LocalBinary(true)
 				wg.Done()
 			}()
 		}
@@ -49,9 +49,8 @@ func (o *CmdBinaryOptions) installBinaries() error {
 			wg.Add(1)
 
 			go func(b *binary.Binary) {
-				tracker := pw.AddTracker(fmt.Sprintf("Ensuring %s is installed", b.Name), 0)
-				b.Tracker = tracker
 				b.Writer = pw
+				b.Tracker = b.Writer.AddTracker(fmt.Sprintf("Ensuring %s is installed", b.Name), 0)
 
 				var err error
 				if o.force {

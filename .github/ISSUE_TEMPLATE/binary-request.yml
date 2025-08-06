@@ -1,0 +1,65 @@
+name: Binary Request
+description: Request a new binary to be added to the b CLI tool
+title: "Binary Request: "
+labels: ["request"]
+body:
+  - type: input
+    id: binary-name
+    attributes:
+      label: Binary Name
+      description: What is the name of the binary you want to request?
+      placeholder: e.g., terraform, kubectl, jq
+    validations:
+      required: true
+  
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Please provide a brief description of what this binary does
+      placeholder: Describe the purpose and functionality of this binary
+    validations:
+      required: true
+  
+  - type: checkboxes
+    id: source-type
+    attributes:
+      label: Source Type
+      description: Where can this binary be downloaded from?
+      options:
+        - label: GitHub Release
+        - label: Direct Download URL
+        - label: Package Manager (apt, brew, etc.)
+        - label: Other (please specify in additional information)
+  
+  - type: input
+    id: github-repo
+    attributes:
+      label: GitHub Repository
+      description: If available, provide the GitHub repository URL
+      placeholder: https://github.com/owner/repo
+  
+  - type: input
+    id: download-url
+    attributes:
+      label: Download URL or Pattern
+      description: If known, provide the direct download URL or URL pattern
+      placeholder: https://releases.example.com/binary/v{version}/binary-{os}-{arch}.tar.gz
+  
+  - type: textarea
+    id: additional-info
+    attributes:
+      label: Additional Information
+      description: Any additional context, requirements, or notes for this binary
+      placeholder: Special installation requirements, version considerations, etc.
+  
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Checklist
+      description: Please confirm the following
+      options:
+        - label: I have searched existing issues to ensure this binary hasn't been requested already
+          required: true
+        - label: This binary is publicly available and legally distributable
+          required: true
