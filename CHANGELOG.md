@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/fentas/b/compare/v1.10.1...v2.0.0) (2025-08-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* new cli ([#50](https://github.com/fentas/b/issues/50))
+
+### Code Refactoring
+
+* new cli ([#50](https://github.com/fentas/b/issues/50)) ([ce3fcce](https://github.com/fentas/b/commit/ce3fcce2b56daee53601f10ae969a8c9acb981e6))
+
 ## [1.10.1](https://github.com/fentas/b/compare/v1.10.0...v1.10.1) (2025-08-06)
 
 
