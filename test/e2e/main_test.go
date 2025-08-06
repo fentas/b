@@ -235,7 +235,7 @@ func TestE2E_ErrorHandling(t *testing.T) {
 
 	// Test invalid command
 	cmd = exec.Command(binaryPath, "invalid-command")
-	output, err = cmd.CombinedOutput()
+	_, err = cmd.CombinedOutput()
 	if err == nil {
 		t.Error("Expected error for invalid command")
 	}
@@ -259,7 +259,7 @@ func TestE2E_ErrorHandling(t *testing.T) {
 	}
 
 	cmd = exec.Command(binaryPath, "list")
-	output, err = cmd.CombinedOutput()
+	output, _ = cmd.CombinedOutput()
 	// Should handle missing config gracefully
 	outputStr := string(output)
 	if strings.Contains(outputStr, "panic") {
