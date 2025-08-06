@@ -2,13 +2,13 @@ package cli
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/fentas/goodies/streams"
 
 	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/state"
-	"github.com/fentas/b/test/testutil"
 )
 
 func TestVersionOptions_Complete(t *testing.T) {
@@ -65,7 +65,7 @@ func TestVersionOptions_Complete(t *testing.T) {
 					t.Errorf("Complete() expected error but got none")
 					return
 				}
-				if !testutil.Contains(err.Error(), tt.errMsg) {
+				if !strings.Contains(err.Error(), tt.errMsg) {
 					t.Errorf("Complete() error = %v, want error containing %v", err, tt.errMsg)
 				}
 			} else {

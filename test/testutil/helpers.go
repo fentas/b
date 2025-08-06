@@ -3,6 +3,7 @@ package testutil
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fentas/goodies/streams"
@@ -108,7 +109,7 @@ func AssertFileContains(t *testing.T, path, expected string) {
 	if err != nil {
 		t.Fatalf("failed to read file %s: %v", path, err)
 	}
-	if !contains(string(content), expected) {
+	if !strings.Contains(string(content), expected) {
 		t.Fatalf("file %s does not contain expected content: %q", path, expected)
 	}
 }
@@ -149,23 +150,6 @@ func (b *MockBuffer) String() string {
 
 func (b *MockBuffer) Reset() {
 	b.content = nil
-}
-
-// contains is a helper function to check if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(substr) <= len(s) && s[:len(substr)] == substr) ||
-		(len(substr) <= len(s) && s[len(s)-len(substr):] == substr) ||
-		containsAt(s, substr))
-}
-
-func containsAt(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // ChangeDir changes to a directory and restores on cleanup
