@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/fentas/b/compare/v1.10.0...v1.10.1) (2025-08-06)
+
+
+### Bug Fixes
+
+* Add progress tracking for zip extraction ([#48](https://github.com/fentas/b/issues/48)) ([13cb0bc](https://github.com/fentas/b/commit/13cb0bcfa7367425e46a6dc61708b45ca0d48f6d))
+
 ## [1.10.0](https://github.com/fentas/b/compare/v1.9.0...v1.10.0) (2025-07-16)
 
 
