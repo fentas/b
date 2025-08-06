@@ -24,7 +24,7 @@ The package includes a `Binary` struct that represents a binary file, including 
 ### 🐾 How to use `b` as binary
 
 ```bash
-# Initialize a new project with b.yaml config and direnv
+# Initialise a new project with b.yaml config and direnv
 b init
 
 # List all configured binaries
@@ -61,7 +61,7 @@ b request
 
 ### 🧾 Configuration, what to install
 
-`b` needs one of three things defined to know where to install binaries to:
+`b` needs one of three things defined to know where to install binaries:
 
 - `PATH_BIN` env, set to the directory where you want to install binaries.
 - `PATH_BASE` env, set to the project root directory. All binaries will be installed in the `.bin` directory.
@@ -73,7 +73,8 @@ To properly use the `--all` flag, you should create a `b.yaml` file in the binar
 
 ```yaml
 jq:
-  version: 1.7
+  # pin version
+  version: jq-1.8.1
 kind:
 tilt:
 ```
@@ -82,7 +83,7 @@ This will ensure that `jq`, `kind`, and `tilt` are installed and at the correct 
 
 &nbsp;
 
-### 🏗️ Manuell build
+### 🏗️ Manual build
 
 If you have Go installed, you can build and install the latest version of `b` with:
 
@@ -96,7 +97,7 @@ go install github.com/fentas/b/b@latest
 
 ### 📚 How to use `b` as go import 
 
-To use this package, you need to import it in your Go project:
+To use this package, you need to import it into your Go project:
 
 ```go
 import "github.com/fentas/b/pkg/binary"
@@ -109,13 +110,13 @@ bin := binary.Binary{Name: "mybinary", Version: "1.0.0"}
 bin.EnsureBinary(true)
 ```
 
-Have a look into [pkg/binary](./pkg/binary/) for more details.
+Have a look at [pkg/binary](./pkg/binary/) for more details.
 
 &nbsp;
 
 ### 📦 Prepackaged Binaries
 
-Have a look into [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
+Have a look at [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 
 - [argsh](https://github.com/arg-sh/argsh) - Utilities for Bash script quality
 - `b` - (Selfupdate) Manage and execute binary files
@@ -159,7 +160,7 @@ This is all you need or have a look [here](./.envrc).
 
 ### 🎯 Short term goals
 
-- [ ] Recognize the operating system and architecture and offer the correct binary
+- [ ] Recognise the operating system and architecture and offer the correct binary
 - [ ] Enforce min and max versions
 - [ ] Create a logo
 - [ ] Docs
