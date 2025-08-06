@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/jedib0t/go-pretty/v6/progress"
+	// Core progress tracking from go-pretty
+	pretty "github.com/jedib0t/go-pretty/v6/progress"
+	// Custom wrapper that simplifies writer creation and styling
+	pwrap "github.com/fentas/goodies/progress"
 )
 
 type IsBinary interface {
@@ -18,21 +21,22 @@ type Callback func(*Binary) (string, error)
 type Binary struct {
 	Context context.Context `json:"-"`
 	// for installation
-	URL           string            `json:"-"`
-	URLF          Callback          `json:"-"`
-	GitHubRepo    string            `json:"repo"`
-	GitHubFile    string            `json:"-"`
-	GitHubFileF   Callback          `json:"-"`
-	Version       string            `json:"-"`
-	VersionF      Callback          `json:"-"`
-	VersionLocalF Callback          `json:"-"`
-	Name          string            `json:"name" yaml:"name"`
-	File          string            `json:"-"`
-	IsTarGz       bool              `json:"-"`
-	IsZip         bool              `json:"-"`
-	TarFile       string            `json:"-"`
-	TarFileF      Callback          `json:"-"`
-	Tracker       *progress.Tracker `json:"-"`
+	URL           string          `json:"-"`
+	URLF          Callback        `json:"-"`
+	GitHubRepo    string          `json:"repo"`
+	GitHubFile    string          `json:"-"`
+	GitHubFileF   Callback        `json:"-"`
+	Version       string          `json:"-"`
+	VersionF      Callback        `json:"-"`
+	VersionLocalF Callback        `json:"-"`
+	Name          string          `json:"name" yaml:"name"`
+	File          string          `json:"-"`
+	IsTarGz       bool            `json:"-"`
+	IsZip         bool            `json:"-"`
+	TarFile       string          `json:"-"`
+	TarFileF      Callback        `json:"-"`
+	Tracker       *pretty.Tracker `json:"-"`
+	Writer        *pwrap.Writer   `json:"-"`
 	// for execution
 	Envs map[string]string `json:"-"`
 }

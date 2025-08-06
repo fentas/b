@@ -99,7 +99,16 @@ func (b *Binary) extractSingleFileFromZip(stream io.Reader) error {
 				return err
 			}
 			defer bfile.Close()
-			if _, err = io.Copy(bfile, zippedFile); err != nil {
+
+			var reader io.Reader = zippedFile
+			if b.Writer != nil {
+				extractTracker := b.Writer.AddTracker(fmt.Sprintf("Extracting %s", b.Name), int64(file.UncompressedSize64))
+				b.Tracker = extractTracker
+				reader = progress.NewReader(zippedFile, extractTracker)
+				defer extractTracker.MarkAsDone()
+			}
+
+			if _, err = io.Copy(bfile, reader); err != nil {
 				return err
 			}
 			return os.Chmod(b.File, 0755)
