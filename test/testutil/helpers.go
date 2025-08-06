@@ -181,7 +181,7 @@ func ChangeDir(t *testing.T, dir string) {
 	}
 
 	t.Cleanup(func() {
-		os.Chdir(oldDir)
+		_ = os.Chdir(oldDir)
 	})
 }
 

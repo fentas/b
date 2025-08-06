@@ -60,7 +60,7 @@ func TestE2E_InitWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get current directory: %v", err)
 	}
-	defer os.Chdir(originalDir)
+	defer func() { _ = os.Chdir(originalDir) }()
 
 	err = os.Chdir(tempDir)
 	if err != nil {
@@ -156,10 +156,9 @@ kubectl:
 	if err != nil {
 		t.Fatalf("Failed to get current directory: %v", err)
 	}
-	defer os.Chdir(originalDir)
+	defer func() { _ = os.Chdir(originalDir) }()
 
-	err = os.Chdir(projectDir)
-	if err != nil {
+	if err = os.Chdir(projectDir); err != nil {
 		t.Fatalf("Failed to change to project subdirectory: %v", err)
 	}
 
@@ -252,7 +251,7 @@ func TestE2E_ErrorHandling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get current directory: %v", err)
 	}
-	defer os.Chdir(originalDir)
+	defer func() { _ = os.Chdir(originalDir) }()
 
 	err = os.Chdir(tempDir)
 	if err != nil {

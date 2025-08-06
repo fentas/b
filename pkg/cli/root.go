@@ -38,7 +38,7 @@ func NewRootCmd(binaries []*binary.Binary, io *streams.IO, version, versionPreRe
 		SilenceErrors: true,
 		Run: func(cmd *cobra.Command, args []string) {
 			// Show help when no subcommand is provided
-			cmd.Help()
+			_ = cmd.Help()
 		},
 	}
 

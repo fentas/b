@@ -171,14 +171,6 @@ func (o *InitOptions) createEnvrc() error {
 		return nil
 	}
 
-	// Check if direnv is installed
-	if !o.isDirenvInstalled() {
-		if !o.Quiet {
-			fmt.Fprintf(o.IO.Out, "direnv not installed. Consider installing it for automatic environment setup\n")
-		}
-		return nil
-	}
-
 	envrcContent := `#!/usr/bin/env bash
 # Automatically set up development environment with direnv
 set -euo pipefail
@@ -251,6 +243,12 @@ main() {
 
 	if !o.Quiet {
 		fmt.Fprintf(o.IO.Out, "Created .envrc for direnv integration\n")
+	}
+	if !o.isDirenvInstalled() {
+		if !o.Quiet {
+			fmt.Fprintf(o.IO.Out, "⚠️ direnv not installed. Consider installing it for automatic environment setup\n")
+		}
+		return nil
 	}
 
 	return nil
