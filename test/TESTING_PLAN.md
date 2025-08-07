@@ -1,4 +1,4 @@
-# Testing Plan for B CLI Tool
+# Testing Plan for b CLI Tool
 
 ## Overview
 

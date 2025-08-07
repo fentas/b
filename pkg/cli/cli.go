@@ -21,7 +21,7 @@ type CmdBinaryOptions struct {
 	IO       *streams.IO
 	Binaries []*binary.Binary
 	NoConfig bool
-	config   *state.BinaryList
+	config   *state.State
 
 	// Flags
 	all       bool
@@ -152,7 +152,7 @@ func (o *CmdBinaryOptions) Complete(cmd *cobra.Command, args []string) error {
 	}
 
 	if o.config != nil {
-		for _, lb := range *o.config {
+		for _, lb := range o.config.Binaries {
 			for b, do := range o.ensure {
 				if lb.Name == b.Name {
 					b.Version = lb.Version

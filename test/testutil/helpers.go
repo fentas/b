@@ -170,7 +170,7 @@ func ChangeDir(t *testing.T, dir string) {
 }
 
 // CreateTestProject creates a test project structure
-func CreateTestProject(t *testing.T, config *state.BinaryList) string {
+func CreateTestProject(t *testing.T, config *state.State) string {
 	t.Helper()
 	dir := TempDir(t)
 
