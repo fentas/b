@@ -13,6 +13,7 @@ import (
 	compose "github.com/fentas/b/pkg/binaries/docker-compose"
 	"github.com/fentas/b/pkg/binaries/gh"
 	"github.com/fentas/b/pkg/binaries/hcloud"
+	"github.com/fentas/b/pkg/binaries/hubble"
 	"github.com/fentas/b/pkg/binaries/jq"
 	"github.com/fentas/b/pkg/binaries/k9s"
 	"github.com/fentas/b/pkg/binaries/kind"
@@ -51,6 +52,7 @@ func main() {
 		curl.Binary(o),
 		gh.Binary(o),
 		hcloud.Binary(o),
+		hubble.Binary(o),
 		jq.Binary(o),
 		k9s.Binary(o),
 		kind.Binary(o),
