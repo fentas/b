@@ -1,3 +1,4 @@
+// Package binary provides a binary manager
 package binary
 
 import (

@@ -1,3 +1,4 @@
+// Package cli provides a CLI for managing binaries
 package cli
 
 import (

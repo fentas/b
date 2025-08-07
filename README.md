@@ -121,6 +121,7 @@ Have a look at [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 
 - [argsh](https://github.com/arg-sh/argsh) - Utilities for Bash script quality
 - `b` - (Selfupdate) Manage and execute binary files
+- [cilium](https://github.com/cilium/cilium-cli) - Providing, securing, and observing network connectivity between workloads
 - [clusterctl](https://github.com/kubernetes-sigs/cluster-api) - Kubernetes cluster lifecycle management
 - [curl](https://github.com/stunnel/static-curl) - Command-line tool for transferring data with URL syntax
 - [docker-compose](https://github.com/docker/compose) - Define and run multi-container Docker applications

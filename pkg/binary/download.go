@@ -45,7 +45,7 @@ func (b *Binary) extractSingleFileFromTar(stream io.Reader, compression string) 
 		}
 		tarReader = tar.NewReader(xzReader)
 	default:
-		return fmt.Errorf("unknown compression type: %s", compression)
+		return fmt.Errorf("Unknown compression type: %s", compression)
 	}
 
 	for {
@@ -179,7 +179,6 @@ func (b *Binary) downloadBinary() error {
 		case http.StatusUnauthorized:
 			return fmt.Errorf("Unauthorized")
 		case http.StatusTooManyRequests:
-			//lint:ignore ST1005 "this error is capitalized because it's presented directly to the user"
 			return fmt.Errorf("Rate limited")
 		default:
 			return fmt.Errorf("HTTP error %d", resp.StatusCode)
@@ -192,6 +191,25 @@ func (b *Binary) downloadBinary() error {
 		b.Tracker.UpdateTotal(resp.ContentLength)
 		reader = progress.NewReader(resp.Body, b.Tracker)
 	}
+
+	// Checks file extension
+	if b.IsDynamic {
+		extension, err := GetFileExtensionFromURL(url)
+		if err != nil {
+			return err
+		}
+		switch extension {
+		case "tar.gz":
+			b.IsTarGz = true
+		case "tar.xz":
+			b.IsTarXz = true
+		case "zip":
+			b.IsZip = true
+		default:
+			return fmt.Errorf("Unknown file extension: %s", extension)
+		}
+	}
+
 	if b.IsTarGz {
 		return b.extractSingleFileFromTar(reader, "gz")
 	}
