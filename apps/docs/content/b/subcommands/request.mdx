@@ -1,0 +1,52 @@
+---
+description: "Request new binaries to be added to b CLI"
+---
+
+# b request
+
+The `b request` command helps users request new binaries to be added to the b CLI ecosystem by creating GitHub issues with the appropriate template.
+
+## Synopsis
+
+```bash
+b request [options] <binary-name>
+```
+
+## Description
+
+The `request` command streamlines the process of requesting new binaries to be added to the b CLI. It opens your default web browser to create a new GitHub issue with a pre-filled template, making it easy to request new tools.
+
+## Options
+
+- `--help, -h`: Show help information
+
+## Examples
+
+### Basic Usage
+
+```bash
+# Request a new binary to be added
+b request my-cool-tool
+```
+
+## Request Process
+
+When you submit a request:
+
+1. The command collects information about your system
+2. Opens a new issue in the b CLI GitHub repository
+3. Pre-fills a template with:
+   - Requested binary name
+   - Your system information
+   - Any additional notes you provided
+   - Version of b CLI you're using
+
+## Request Guidelines
+
+For the best chance of your request being accepted:
+
+1. **Check existing issues** first to avoid duplicates
+2. **Provide a clear use case** for the binary
+3. **Include relevant links** to the project's homepage
+4. **Mention any alternatives** you've considered
+5. **Be specific** about versions or features needed
