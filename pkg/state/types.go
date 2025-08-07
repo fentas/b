@@ -1,8 +1,38 @@
+// Package state provides state management for b
 package state
 
 import (
 	"github.com/fentas/b/pkg/binary"
 )
+
+type State struct {
+	Binaries BinaryList `yaml:"binaries"`
+}
+
+// MarshalYAML implements the yaml.Marshaler interface for State
+func (s *State) MarshalYAML() (interface{}, error) {
+	binaries, err := s.Binaries.MarshalYAML()
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"binaries": binaries,
+	}, nil
+}
+
+// UnmarshalYAML implements the yaml.Unmarshaler interface for State
+func (s *State) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	type Alias State
+	var aux Alias
+
+	if err := unmarshal(&aux); err != nil {
+		return err
+	}
+
+	*s = State(aux)
+	return nil
+}
 
 type BinaryList []*binary.LocalBinary
 
@@ -27,15 +57,12 @@ func (list *BinaryList) MarshalYAML() (interface{}, error) {
 	result := make(map[string]interface{})
 	for _, b := range *list {
 		if b.Name != "" {
-			// Only include version if it's set and not empty
-			if b.Version != "" && b.Version != "latest" {
-				// Create a simple map with only the version field
+			if b.Enforced != "" {
 				result[b.Name] = map[string]string{
-					"version": b.Version,
+					"version": b.Enforced,
 				}
 			} else {
-				// Just the key with no value (null)
-				result[b.Name] = nil
+				result[b.Name] = &struct{}{}
 			}
 		}
 	}

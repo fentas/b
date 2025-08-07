@@ -1,0 +1,137 @@
+---
+description: 'Install b and get started with binary management for your development projects'
+---
+
+# Getting Started with b
+
+Get up and running with **b** in just a few minutes. **b** helps you manage command-line tools and binaries for your development projects with automatic PATH management and version control.
+
+## Installation
+
+### Quick Install (Recommended)
+
+```bash
+# Install b
+curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+
+# Or using wget
+wget -qO- https://github.com/fentas/b/releases/latest/download/install.sh | bash
+```
+
+### Manual Installation
+
+1. Download the latest release for your platform from [GitHub Releases](https://github.com/fentas/b/releases)
+2. Extract the binary to a directory in your PATH
+3. Make it executable: `chmod +x b`
+
+### Verify Installation
+
+```bash
+b version
+```
+
+## Quick Start
+
+### 1. Initialize a Project
+
+```bash
+# Navigate to your project directory
+cd my-project
+
+# Initialize b configuration
+b init
+```
+
+This creates a `b.yaml` file in your project root.
+
+### 2. Install Tools
+
+```bash
+# Install specific versions
+b install jq@jq-1.6 kubectl@v1.28.0
+
+# Install latest versions
+b install terraform helm
+
+# Install and add to b.yaml
+b install --add docker-compose@v2.20.0
+```
+
+### 3. Use Your Tools
+
+Tools are automatically available in your PATH:
+
+```bash
+jq --version     # 1.6
+kubectl version  # 1.28.0
+```
+
+## Common Workflows
+
+### Team Collaboration
+
+Share tool requirements with your team:
+
+```bash
+# Add tools to b.yaml
+b install --add jq@jq-1.6 kubectl@v1.28.0
+
+# Commit b.yaml to version control
+git add b.yaml
+git commit -m "Add project tool requirements"
+
+# Team members can install the same tools
+b install  # Installs all tools from b.yaml
+```
+
+### CI/CD Integration
+
+Use **b** in your CI/CD pipelines:
+
+```yaml
+# .github/workflows/ci.yml
+steps:
+  - uses: actions/checkout@v4
+  - name: Install b
+    run: curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+  - name: Install project tools
+    run: b install
+  - name: Run tests
+    run: |
+      kubectl version --client
+      jq --version
+```
+
+### Version Management
+
+```bash
+# List installed tools
+b list
+
+# Update tools to latest versions
+b update
+
+# Update specific tools
+b update kubectl terraform
+
+# Search for available tools
+b search docker
+```
+
+## Configuration
+
+The `b.yaml` file defines your project's tool requirements:
+
+```yaml
+binaries:
+  jq:
+    version: "jq-1.6"
+  kubectl:
+    version: "v1.28.0"
+  terraform:
+    version: "latest"
+```
+
+## Next Steps
+
+- [CLI Reference](/b/overview) - Complete command reference

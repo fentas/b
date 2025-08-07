@@ -187,20 +187,20 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 	// Load existing config or create new one
 	config := o.Config
 	if config == nil {
-		config = &state.BinaryList{}
+		config = &state.State{}
 	}
 
 	// Add binaries to config
 	for _, b := range binaries {
 		// Check if already exists
 		found := false
-		for i, existing := range *config {
+		for i, existing := range config.Binaries {
 			if existing.Name == b.Name {
 				// Update version only if we have a specific version
 				if b.Version != "" && b.Version != "latest" {
-					(*config)[i].Version = b.Version
+					config.Binaries[i].Version = b.Version
 					if o.Fix {
-						(*config)[i].Enforced = b.Version
+						config.Binaries[i].Enforced = b.Version
 					}
 				}
 				found = true
@@ -219,7 +219,7 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 					entry.Enforced = b.Version
 				}
 			}
-			*config = append(*config, entry)
+			config.Binaries = append(config.Binaries, entry)
 		}
 	}
 

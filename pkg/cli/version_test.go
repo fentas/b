@@ -97,7 +97,7 @@ func TestVersionOptions_Validate(t *testing.T) {
 func TestVersionOptions_Run(t *testing.T) {
 	tests := []struct {
 		name     string
-		config   *state.BinaryList
+		config   *state.State
 		local    bool
 		check    bool
 		quiet    bool
@@ -106,10 +106,12 @@ func TestVersionOptions_Run(t *testing.T) {
 	}{
 		{
 			name: "run with config",
-			config: &state.BinaryList{
-				&binary.LocalBinary{
-					Name:    "jq",
-					Version: "1.7",
+			config: &state.State{
+				Binaries: state.BinaryList{
+					&binary.LocalBinary{
+						Name:    "jq",
+						Version: "1.7",
+					},
 				},
 			},
 			local: false,
@@ -118,10 +120,12 @@ func TestVersionOptions_Run(t *testing.T) {
 		},
 		{
 			name: "run local only",
-			config: &state.BinaryList{
-				&binary.LocalBinary{
-					Name:    "jq",
-					Version: "1.7",
+			config: &state.State{
+				Binaries: state.BinaryList{
+					&binary.LocalBinary{
+						Name:    "jq",
+						Version: "1.7",
+					},
 				},
 			},
 			local: true,

@@ -20,7 +20,7 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 		Tracker:    options.Tracker,
 		Version:    options.Version,
 		Name:       "argsh",
-		GitHubRepo: "arg-sh/argsh",
+		GitHubRepo: "fentas/b",
 		GitHubFile: "argsh",
 		VersionF:   binary.GithubLatest,
 		VersionLocalF: func(b *binary.Binary) (string, error) {

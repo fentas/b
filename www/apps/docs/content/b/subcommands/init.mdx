@@ -1,0 +1,89 @@
+---
+description: "Initialize a new project with b"
+---
+
+# b init
+
+The `b init` command initializes a new project with **b** configuration, creating the necessary **b.yaml** file and setting up the project structure.
+
+## Synopsis
+
+```bash
+b init [options]
+```
+
+## Description
+
+The `init` command creates a new **b.yaml** configuration file in the current directory and optionally sets up additional project files like `.gitignore` and shell integration scripts.
+
+## Options
+
+- `--quiet, -q`: Run in quiet mode with minimal output
+- `--help, -h`: Show help information
+
+## Examples
+
+### Basic Initialization
+
+```bash
+# Initialize b in current directory
+b init
+```
+
+This creates a basic **b.yaml** file:
+
+```yaml
+version: v1
+binaries:
+  b: {}
+```
+
+### Project Structure
+
+After initialization, your project will have:
+
+```
+project/
+├── .bin
+│   ├── .gitignore
+│   └── b.yaml
+└── .envrc
+```
+
+## Configuration File
+
+The generated **b.yaml** file serves as the central configuration for your project's binary dependencies:
+
+```yaml
+binaries:
+  # Binary dependencies will be added here
+  # Example:
+  # jq:
+  #   version: "1.6"
+  # kubectl:
+  #   version: "1.28.0"
+```
+
+## Best Practices
+
+1. **Version Control**: Always commit the **b.yaml** file to version control
+2. **Team Collaboration**: Initialize **b** in shared project repositories
+3. **CI/CD**: Use `b init` in CI/CD pipelines before installing dependencies
+4. **Documentation**: Document your binary requirements in the project README
+
+## Integration with Git
+
+The `init` command automatically creates or updates `.gitignore` to exclude:
+
+```gitignore
+# b
+.bin/
+```
+
+## Error Handling
+
+Common issues and solutions:
+
+- **Permission denied**: Ensure write permissions in the current directory
+- **File exists**: The command will not overwrite existing **b.yaml** files
+- **Invalid directory**: Run from a valid project directory

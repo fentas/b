@@ -9,7 +9,6 @@ import (
 	"github.com/fentas/goodies/templates"
 	"github.com/spf13/cobra"
 
-	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/b/pkg/state"
 )
@@ -96,15 +95,7 @@ func (o *InitOptions) createConfigWithSelfReference(configPath string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
-
-	// Create config with self-reference to 'b'
-	config := &state.BinaryList{
-		&binary.LocalBinary{
-			Name: "b",
-		},
-	}
-
-	return state.SaveConfig(config, configPath)
+	return state.CreateDefaultConfig(configPath)
 }
 
 // createProjectFiles creates additional project files (.gitignore, .envrc) if needed

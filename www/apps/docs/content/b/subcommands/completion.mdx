@@ -1,0 +1,129 @@
+---
+description: "Generate shell completion scripts for b CLI"
+---
+
+# b completion
+
+The `b completion` command generates shell completion scripts for the b CLI, enabling tab completion for commands, flags, and arguments in your shell.
+
+## Synopsis
+
+```bash
+# Generate completion script for your shell
+b completion [bash|zsh|fish|powershell]
+
+# Source the completion script in your current shell session
+source <(b completion bash)  # for bash
+```
+
+## Description
+
+The `completion` command generates shell completion scripts that provide command-line completion for b CLI. This allows you to use the Tab key to automatically complete commands, subcommands, flags, and arguments, making the CLI more user-friendly and efficient.
+
+## Available Shells
+
+Completion is available for the following shells:
+
+- **bash**: For Bash shell users
+- **zsh**: For Zsh shell users
+- **fish**: For Fish shell users
+- **powershell**: For PowerShell users
+
+## Installation
+
+### Bash
+
+Add the following to your `~/.bashrc` or `~/.bash_profile`:
+
+```bash
+# Bash completion for b CLI
+source <(b completion bash)
+```
+
+### Zsh
+
+Add the following to your `~/.zshrc`:
+
+```zsh
+# Zsh completion for b CLI
+if [ $commands[b] ]; then
+  source <(b completion zsh)
+fi
+```
+
+### Fish
+
+Save the completion script to your Fish completions directory:
+
+```bash
+# Create completions directory if it doesn't exist
+mkdir -p ~/.config/fish/completions
+
+# Generate and save completion script
+b completion fish > ~/.config/fish/completions/b.fish
+```
+
+### PowerShell
+
+Add the following to your PowerShell profile (`$PROFILE`):
+
+```powershell
+# PowerShell completion for b CLI
+b completion powershell | Out-String | Invoke-Expression
+```
+
+## Examples
+
+### Generate Completion Script
+
+```bash
+# Generate bash completion script
+b completion bash > /etc/bash_completion.d/b
+
+# Generate zsh completion script
+b completion zsh > "${fpath[1]}/_b"
+
+# Generate fish completion script
+b completion fish > ~/.config/fish/completions/b.fish
+
+# Generate PowerShell completion script
+b completion powershell > ~/.b-completion.ps1
+```
+
+### One-time Completion
+
+For a single session without modifying your shell configuration:
+
+```bash
+# Bash/Zsh
+source <(b completion bash)
+
+# Fish
+b completion fish | source
+```
+
+## Completion Features
+
+- **Command Completion**: Tab-complete all available commands
+- **Flag Completion**: Complete flags for each command
+- **Argument Completion**: Context-aware completion for arguments
+- **Flag Value Completion**: Smart completion for flag values
+- **Descriptions**: Show help text for completions (in supported shells)
+
+## Shell-Specific Notes
+
+### Bash
+
+For better completion experience with bash, consider installing the `bash-completion` package:
+
+```bash
+# On macOS with Homebrew
+brew install bash-completion
+
+# On Ubuntu/Debian
+sudo apt-get install bash-completion
+```
+
+### Zsh
+
+If you're using Oh My Zsh, the completion should work out of the box after installation.

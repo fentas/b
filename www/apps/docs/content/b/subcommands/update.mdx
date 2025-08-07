@@ -1,0 +1,84 @@
+---
+description: "Update installed binaries to their latest versions"
+---
+
+# b update
+
+The `b update` command checks for and installs newer versions of previously installed binaries, ensuring your tools stay up-to-date.
+
+## Synopsis
+
+```bash
+b update [options] [binary...]
+```
+
+## Description
+
+The `update` command checks GitHub releases for newer versions of your installed binaries and updates them if available. It respects version constraints in your `b.yaml` configuration while updating to the latest compatible version.
+
+## Options
+
+- `--all, -a`: Update all installed binaries
+- `--force, -f`: Force update even if already at latest version
+- `--quiet, -q`: Run in quiet mode with minimal output
+- `--check, -c`: Check for updates without installing
+- `--help, -h`: Show help information
+
+## Examples
+
+### Check for Updates
+
+```bash
+# Check for updates without installing
+b update --check
+
+# Check specific binaries
+b update --check jq kubectl
+```
+
+### Update Binaries
+
+```bash
+# Update all installed binaries
+b update --all
+
+# Update specific binaries
+b update jq kubectl
+
+# Force update even if at latest version
+b update --force jq
+```
+
+### Update Configuration
+
+```bash
+# Update binaries and save versions to b.yaml
+b update --all --save
+```
+
+## Version Constraints
+
+When updating, the command respects version constraints in your `b.yaml`:
+
+- `^1.2.3`: Updates to the latest 1.x.x version
+- `~1.2.3`: Updates to the latest 1.2.x version
+- `>1.2.3`: Updates to any version above 1.2.3
+- `1.2.3`: Keeps exactly this version (use --force to override)
+
+## Update Process
+
+1. **Version Check**: Compares installed versions with latest available
+2. **Dependency Resolution**: Ensures compatibility between dependencies
+3. **Download**: Fetches updated binaries from GitHub releases
+4. **Verification**: Validates the downloaded binaries
+5. **Backup**: Creates backups of existing binaries before updating
+6. **Update**: Replaces old binaries with new versions
+
+## Error Handling
+
+Common issues and solutions:
+
+- **Update failed**: Check network connection and GitHub access
+- **Version conflict**: Review version constraints in b.yaml
+- **Permission denied**: Ensure write permissions to installation directory
+- **Binary in use**: Close applications using the binary before updating

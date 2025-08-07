@@ -1,0 +1,94 @@
+---
+description: "Complete command reference for b"
+hide_table_of_contents: true
+---
+
+import DocCardList from '@theme/DocCardList';
+import Icons from '@theme/Icon';
+
+# b reference
+
+**b** provides a comprehensive set of commands for managing binary dependencies in your projects. This reference covers all available commands, options, and usage patterns.
+
+## Core
+
+**b** is built around a subcommand architecture that provides intuitive and powerful binary management capabilities.
+
+## Quick reference
+
+Get started quickly with the most common commands:
+
+```bash
+b init                    # Initialize a new project
+b install jq              # Install a specific binary
+b install --add jq@jq-1.6    # Install and add to b.yaml
+b list                    # List installed binaries
+b update                  # Update all binaries
+b search kubectl          # Search for available binaries
+```
+
+<DocCardList colSize={4} items={[
+  {
+    type: 'link',
+    href: '/b/subcommands/init',
+    label: 'b init',
+    customProps: {
+      icon: Icons['command-line-solid'],
+      description: 'Initialize a new project with b.yaml configuration.'
+    }
+  },
+  {
+    type: 'link',
+    href: '/b/subcommands/install',
+    label: 'b install',
+    customProps: {
+      icon: Icons['magnifying-glass'],
+      description: 'Install binaries and manage dependencies.'
+    }
+  },
+  {
+    type: 'link',
+    href: '/b/subcommands/list',
+    label: 'b list',
+    customProps: {
+      icon: Icons['beaker'],
+      description: 'List all installed binaries and their versions.'
+    }
+  },
+  {
+    type: 'link',
+    href: '/b/subcommands/update',
+    label: 'b update',
+    customProps: {
+      icon: Icons['receipt-percent'],
+      description: 'Update binaries to their latest versions.'
+    }
+  },
+  {
+    type: 'link',
+    href: '/b/subcommands/search',
+    label: 'b search',
+    customProps: {
+      icon: Icons['academic-cap-solid'],
+      description: 'Search for available binaries to install.'
+    }
+  },
+  {
+    type: 'link',
+    href: '/b/subcommands/version',
+    label: 'b version',
+    customProps: {
+      icon: Icons['circle-dotted-line'],
+      description: 'Display version information for b and installed binaries.'
+    }
+  },
+  {
+    type: 'link',
+    href: '/b/subcommands/request',
+    label: 'b request',
+    customProps: {
+      icon: Icons['star'],
+      description: 'Request a binary to be implemented.'
+    }
+  },
+]} />
