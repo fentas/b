@@ -7,6 +7,7 @@ import (
 	"github.com/fentas/b/pkg/binaries"
 	"github.com/fentas/b/pkg/binaries/argsh"
 	"github.com/fentas/b/pkg/binaries/b"
+	"github.com/fentas/b/pkg/binaries/cilium"
 	"github.com/fentas/b/pkg/binaries/clusterctl"
 	"github.com/fentas/b/pkg/binaries/curl"
 	compose "github.com/fentas/b/pkg/binaries/docker-compose"
@@ -44,6 +45,7 @@ func main() {
 	binaries := []*binary.Binary{
 		argsh.Binary(o),
 		b.Binary(o),
+		cilium.Binary(o),
 		compose.Binary(o),
 		clusterctl.Binary(o),
 		curl.Binary(o),

@@ -30,6 +30,7 @@ type Binary struct {
 	IsTarGz       bool            `json:"-"`
 	IsTarXz       bool            `json:"-"`
 	IsZip         bool            `json:"-"`
+	IsDynamic     bool            `json:"-"`
 	TarFile       string          `json:"-"`
 	TarFileF      Callback        `json:"-"`
 	Tracker       *pretty.Tracker `json:"-"`

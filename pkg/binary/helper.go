@@ -1,15 +1,22 @@
 package binary
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
 const (
 	GithubLatestURL = "https://github.com/%s/releases/latest"
 	// GithubLatestURL = "https://api.github.com/repos/%s/releases/latest"
+)
+
+var (
+	// List of special extensions to try
+	Extensions = []string{"tar.gz", "tar.xz"}
 )
 
 func GithubLatest(b *Binary) (string, error) {
@@ -36,4 +43,24 @@ func GetBody(url string) (string, error) {
 		return "", err
 	}
 	return string(body), nil
+}
+
+// GetFileExtensionFromURL returns the file extension from a URL
+func GetFileExtensionFromURL(rawURL string) (string, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	for _, ext := range Extensions {
+		if strings.HasSuffix(u.Path, "."+ext) {
+			return ext, nil
+		}
+	}
+	// Default to the last period
+	pos := strings.LastIndex(u.Path, ".")
+	if pos == -1 {
+		return "", errors.New("couldn't find a period to indicate a file extension")
+	}
+
+	return u.Path[pos+1 : len(u.Path)], nil
 }
