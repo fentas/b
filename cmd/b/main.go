@@ -34,7 +34,7 @@ import (
 
 // Magic variables set by goreleaser
 var (
-	version           = "v2.2.0" // x-release-please-version
+	version           = "v2.3.0" // x-release-please-version
 	versionPreRelease = ""
 )
 
