@@ -127,6 +127,7 @@ Have a look at [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 - [docker-compose](https://github.com/docker/compose) - Define and run multi-container Docker applications
 - [gh](https://github.com/cli/cli) - GitHub CLI wrapper
 - [hcloud](https://github.com/hetznercloud/cli) - Hetzner Cloud CLI wrapper
+- [hubble](https://github.com/cilium/hubble) - Fully distributed networking and security observability platform
 - [jq](https://github.com/jqlang/jq) - Command-line JSON processor
 - [k9s](https://github.com/derailed/k9s) - Kubernetes CLI to manage your clusters
 - [kind](https://github.com/kubernetes-sigs/kind) - Kubernetes IN Docker
