@@ -6,6 +6,7 @@ require (
 	github.com/fentas/goodies v0.0.0-20250628100539-67031d6c92c6
 	github.com/jedib0t/go-pretty/v6 v6.5.6
 	github.com/spf13/cobra v1.8.0
+	github.com/ulikunitz/xz v0.5.12
 	gopkg.in/yaml.v2 v2.4.0
 )
 

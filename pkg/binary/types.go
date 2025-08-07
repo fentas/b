@@ -28,6 +28,7 @@ type Binary struct {
 	Name          string          `json:"name" yaml:"name"`
 	File          string          `json:"-"`
 	IsTarGz       bool            `json:"-"`
+	IsTarXz       bool            `json:"-"`
 	IsZip         bool            `json:"-"`
 	TarFile       string          `json:"-"`
 	TarFileF      Callback        `json:"-"`
