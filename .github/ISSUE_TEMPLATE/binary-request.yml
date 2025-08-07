@@ -1,7 +1,7 @@
 name: Binary Request
 description: Request a new binary to be added to the b CLI tool
 title: "Binary Request: "
-labels: ["request"]
+labels: ["request", "good first issue"]
 body:
   - type: input
     id: binary-name
