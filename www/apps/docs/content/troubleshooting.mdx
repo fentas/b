@@ -1,0 +1,262 @@
+---
+title: Troubleshooting
+description: Common issues and solutions when using b
+---
+
+# Troubleshooting
+
+This guide covers common issues you might encounter when using **b** and their solutions.
+
+## Installation Issues
+
+### Permission Denied
+
+**Problem**: Getting permission denied errors during installation.
+
+**Solution**:
+```bash
+# Make sure you have write permissions to the installation directory
+sudo curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+
+# Or install to a user directory
+curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash -s -- --prefix=$HOME/.local
+```
+
+### Command Not Found
+
+**Problem**: `b: command not found` after installation.
+
+**Solution**:
+```bash
+# Add b to your PATH
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+# Or for zsh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+## Configuration Issues
+
+### b.yaml Not Found
+
+**Problem**: `b.yaml configuration file not found`
+
+**Solution**:
+```bash
+# Initialize b in your project directory
+cd your-project
+b init
+
+# Or create b.yaml manually
+cat > b.yaml << EOF
+binaries: {}
+EOF
+```
+
+### Invalid Configuration
+
+**Problem**: YAML parsing errors in **b.yaml**
+
+**Solution**:
+```bash
+# Validate your YAML syntax
+# Check for proper indentation and structure
+cat b.yaml
+
+# Example valid format:
+binaries:
+  jq:
+    version: "jq-1.6"
+  kubectl:
+    version: "v1.28.0"
+```
+
+## Binary Installation Issues
+
+### Download Failures
+
+**Problem**: Failed to download binary from GitHub releases
+
+**Solutions**:
+```bash
+# Check your internet connection
+curl -I https://github.com
+
+# Try with verbose output for debugging
+b install --verbose jq
+
+# Check GitHub API rate limits
+curl -H "Accept: application/vnd.github.v3+json" https://api.github.com/rate_limit
+```
+
+### Version Not Found
+
+**Problem**: Specified version doesn't exist
+
+**Solution**:
+```bash
+# Search for available versions
+b search jq
+
+# Use 'latest' for the most recent version
+b install jq@latest
+
+# Check the project's GitHub releases page
+```
+
+### Binary Not Executable
+
+**Problem**: Installed binary is not executable
+
+**Solution**:
+```bash
+# Check binary permissions
+ls -la ~/.local/share/b/bin/
+
+# Make executable if needed
+chmod +x ~/.local/share/b/bin/jq
+
+# Reinstall the binary
+b install --force jq
+```
+
+## PATH and Environment Issues
+
+### Tools Not Available
+
+**Problem**: Installed tools are not available in PATH
+
+**Solution**:
+```bash
+# Check if b's bin directory is in PATH
+echo $PATH | grep -o '[^:]*b[^:]*'
+
+# Source your shell configuration
+source ~/.bashrc  # or ~/.zshrc
+
+# Check b's configuration
+b list
+```
+
+### Conflicting Versions
+
+**Problem**: System version conflicts with b-managed version
+
+**Solution**:
+```bash
+# Check which version is being used
+which jq
+jq --version
+
+# Ensure b's bin directory comes first in PATH
+export PATH="$HOME/.local/share/b/bin:$PATH"
+
+# Update your shell configuration
+echo 'export PATH="$HOME/.local/share/b/bin:$PATH"' >> ~/.bashrc
+```
+
+## Performance Issues
+
+### Slow Downloads
+
+**Problem**: Binary downloads are very slow
+
+**Solutions**:
+```bash
+# Use a different mirror or CDN if available
+# Check your network connection
+speedtest-cli
+
+# Try downloading during off-peak hours
+# Consider using a VPN if geographical restrictions apply
+```
+
+### Large Binary Cache
+
+**Problem**: **b**'s cache directory is taking up too much space
+
+**Solution**:
+```bash
+# Check cache size
+du -sh ~/.local/share/b/
+
+# Clean up old versions (if implemented)
+b clean
+
+# Manually remove old binaries
+rm -rf ~/.local/share/b/cache/
+```
+
+## CI/CD Issues
+
+### GitHub Actions Failures
+
+**Problem**: **b** installation fails in GitHub Actions
+
+**Solution**:
+```yaml
+# Use specific version and add error handling
+steps:
+  - name: Install b
+    run: |
+      curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+      echo "$HOME/.local/bin" >> $GITHUB_PATH
+  
+  - name: Verify b installation
+    run: b version
+  
+  - name: Install project tools
+    run: b install
+```
+
+### Docker Container Issues
+
+**Problem**: **b** doesn't work properly in Docker containers
+
+**Solution**:
+```dockerfile
+# Install b in Dockerfile
+RUN curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+ENV PATH="/root/.local/bin:$PATH"
+
+# Or use multi-stage build
+FROM alpine AS b-installer
+RUN apk add --no-cache curl
+RUN curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+
+FROM alpine
+COPY --from=b-installer /root/.local/bin/b /usr/local/bin/b
+```
+
+## Getting Help
+
+If you're still experiencing issues:
+
+1. **Check the logs**: Run commands with `--verbose` flag for detailed output
+2. **Search existing issues**: Check [GitHub Issues](https://github.com/fentas/b/issues)
+3. **Create a new issue**: Include your OS, **b** version, and error messages
+4. **Join the community**: Participate in discussions and get help from other users
+
+### Debug Information
+
+When reporting issues, include this information:
+
+```bash
+# b CLI version
+b version
+
+# Operating system
+uname -a
+
+# Shell information
+echo $SHELL
+echo $PATH
+
+# Configuration
+cat b.yaml
+
+# Installed binaries
+b list
+```

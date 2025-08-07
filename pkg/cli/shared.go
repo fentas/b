@@ -13,7 +13,7 @@ import (
 type SharedOptions struct {
 	IO       *streams.IO
 	Binaries []*binary.Binary
-	Config   *state.BinaryList
+	Config   *state.State
 
 	// Global flags
 	ConfigPath string
@@ -75,7 +75,7 @@ func (o *SharedOptions) GetBinariesFromConfig() []*binary.Binary {
 	}
 
 	var result []*binary.Binary
-	for _, lb := range *o.Config {
+	for _, lb := range o.Config.Binaries {
 		if b, ok := o.lookup[lb.Name]; ok {
 			// Set version from config
 			b.Version = lb.Version

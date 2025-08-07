@@ -73,11 +73,12 @@ If none of these are set, `b` will fail.
 To properly use the `--all` flag, you should create a `b.yaml` file in the binary directory. This file should contain a list of binaries you want to manage. Here is an example:
 
 ```yaml
-jq:
-  # pin version
-  version: jq-1.8.1
-kind:
-tilt:
+binaries:
+  jq:
+    # pin version
+    version: jq-1.8.1
+  kind:
+  tilt:
 ```
 
 This will ensure that `jq`, `kind`, and `tilt` are installed and at the correct version. If you don't specify a version, `b` will install the latest version.
@@ -119,7 +120,7 @@ Have a look at [pkg/binary](./pkg/binary/) for more details.
 
 Have a look at [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 
-- [argsh](https://github.com/arg-sh/argsh) - Utilities for Bash script quality
+- [argsh](https://github.com/fentas/b) - Utilities for Bash script quality
 - `b` - (Selfupdate) Manage and execute binary files
 - [cilium](https://github.com/cilium/cilium-cli) - Providing, securing, and observing network connectivity between workloads
 - [clusterctl](https://github.com/kubernetes-sigs/cluster-api) - Kubernetes cluster lifecycle management

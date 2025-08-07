@@ -1,0 +1,85 @@
+---
+description: "Install and manage binaries with b CLI"
+---
+
+# b install
+
+The `b install` command downloads and installs binaries, managing their versions and updating your project configuration.
+
+## Synopsis
+
+```bash
+b install [options] [binary[@version]...]
+```
+
+## Description
+
+The `install` command downloads binaries from GitHub releases and makes them available in your project. It can install specific versions, update existing installations, and automatically manage your `b.yaml` configuration.
+
+## Options
+
+- `--add, -a`: Add installed binaries to b.yaml configuration
+- `--force, -f`: Force reinstallation even if already installed
+- `--quiet, -q`: Run in quiet mode with minimal output
+- `--help, -h`: Show help information
+
+## Examples
+
+### Install Specific Binaries
+
+```bash
+# Install latest version
+b install jq
+
+# Install specific version
+b install jq@1.6
+
+# Install multiple binaries
+b install jq kubectl terraform
+```
+
+### Install and Add to Configuration
+
+```bash
+# Install and add to b.yaml
+b install --add jq@1.6
+
+# Install multiple with specific versions
+b install --add jq@1.6 kubectl@1.28.0
+```
+
+### Install from Configuration
+
+```bash
+# Install all binaries from b.yaml
+b install
+
+# Force reinstall all
+b install --force
+```
+
+## Version Resolution
+
+The install command supports flexible version specifications:
+
+- `latest`: Always installs the most recent version
+- `1.6`: Installs exactly version 1.6
+- `1.6.0`: Installs exactly version 1.6.0
+
+## Installation Process
+
+1. **Version Resolution**: Determines the exact version to install
+2. **Download**: Fetches the binary from GitHub releases
+3. **Verification**: Validates the downloaded binary
+4. **Installation**: Places the binary in the managed directory
+5. **PATH Management**: Ensures the binary is available in PATH
+6. **Configuration Update**: Updates b.yaml if `--add` is specified
+
+## Error Handling
+
+Common issues and solutions:
+
+- **Version not found**: Check available versions with `b search <binary>`
+- **Download failed**: Verify internet connection and GitHub access
+- **Permission denied**: Ensure write permissions to installation directory
+- **Binary not executable**: The install command automatically sets execute permissions

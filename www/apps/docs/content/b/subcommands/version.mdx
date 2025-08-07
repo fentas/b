@@ -1,0 +1,113 @@
+---
+description: "Display version information for b CLI and installed binaries"
+---
+
+# b version
+
+The `b version` command displays version information about the b CLI tool and its installed binaries, helping you track which versions are currently in use.
+
+## Synopsis
+
+```bash
+b version [options] [binary...]
+```
+
+## Description
+
+The `version` command shows detailed version information about the b CLI itself and any installed binaries. It's useful for debugging, reporting issues, and ensuring compatibility between different components.
+
+## Options
+
+- `--short, -s`: Show only version numbers
+- `--json`: Output in JSON format
+- `--all, -a`: Show versions of all installed binaries
+- `--help, -h`: Show help information
+
+## Examples
+
+### Basic Usage
+
+```bash
+# Show b CLI version
+b version
+
+# Show version in short format
+b version --short
+```
+
+### Check Binary Versions
+
+```bash
+# Check version of specific binaries
+b version jq kubectl
+
+# Show versions of all installed binaries
+b version --all
+
+# Get version information in JSON format
+b version --json
+```
+
+## Version Information
+
+The version command displays several types of version information:
+
+1. **CLI Version**: The version of the b CLI tool
+2. **Runtime Information**: Go version and build platform
+3. **Binary Versions**: For each specified binary:
+   - Installed version
+   - Latest available version
+   - Whether an update is available
+   - Source of installation
+   - Last checked/updated timestamp
+
+## Output Formats
+
+### Standard Output
+```
+b version 1.2.3 (go1.19.5 darwin/amd64)
+
+jq: jq-1.6 (latest: jq-1.7) [Update available]
+kubectl: v1.28.0 (latest: v1.28.0) [Up to date]
+```
+
+### JSON Output (--json)
+```json
+{
+  "cli": {
+    "version": "1.2.3",
+    "goVersion": "go1.19.5",
+    "platform": "darwin/amd64"
+  },
+  "binaries": {
+    "jq": {
+      "installed": "jq-1.6",
+      "latest": "jq-1.7",
+      "updateAvailable": true,
+      "source": "github.com/stedolan/jq"
+    }
+  }
+}
+```
+
+## Integration with CI/CD
+
+The `--short` and `--json` flags are particularly useful in CI/CD pipelines:
+
+```yaml
+# Example GitHub Actions workflow step
+- name: Verify binary versions
+  run: |
+    if [ "$(b version --short jq)" != "1.6" ]; then
+      echo "Incorrect jq version"
+      exit 1
+    fi
+```
+
+## Error Handling
+
+Common issues and solutions:
+
+- **Binary not found**: The specified binary is not installed
+- **Version check failed**: Could not determine latest version (check network connection)
+- **Permission denied**: Insufficient permissions to read version information

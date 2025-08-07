@@ -10,7 +10,7 @@ import (
 )
 
 // LoadConfigFromPath loads configuration from a specific path
-func LoadConfigFromPath(configPath string) (*BinaryList, error) {
+func LoadConfigFromPath(configPath string) (*State, error) {
 	if _, err := os.Stat(configPath); err != nil {
 		return nil, err
 	}
@@ -20,16 +20,16 @@ func LoadConfigFromPath(configPath string) (*BinaryList, error) {
 		return nil, err
 	}
 
-	var list BinaryList
-	if err := yaml.Unmarshal(config, &list); err != nil {
+	var state State
+	if err := yaml.Unmarshal(config, &state); err != nil {
 		return nil, err
 	}
 
-	return &list, nil
+	return &state, nil
 }
 
 // LoadConfig loads configuration with automatic discovery
-func LoadConfig() (*BinaryList, error) {
+func LoadConfig() (*State, error) {
 	configPath, err := path.FindConfigFile()
 	if err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ func LoadConfig() (*BinaryList, error) {
 }
 
 // SaveConfig saves the configuration to the specified path
-func SaveConfig(config *BinaryList, configPath string) error {
+func SaveConfig(config *State, configPath string) error {
 	// Ensure directory exists
 	dir := filepath.Dir(configPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -60,9 +60,11 @@ func SaveConfig(config *BinaryList, configPath string) error {
 
 // CreateDefaultConfig creates a default b.yaml configuration file
 func CreateDefaultConfig(configPath string) error {
-	defaultConfig := BinaryList{
-		&binary.LocalBinary{
-			Name: "b",
+	defaultConfig := State{
+		Binaries: BinaryList{
+			&binary.LocalBinary{
+				Name: "b",
+			},
 		},
 	}
 	return SaveConfig(&defaultConfig, configPath)

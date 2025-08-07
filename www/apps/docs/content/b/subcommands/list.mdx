@@ -1,0 +1,73 @@
+---
+description: "List installed binaries and their versions"
+---
+
+# b list
+
+The `b list` command displays all installed binaries and their current versions.
+
+## Synopsis
+
+```bash
+b list [options] [binary...]
+```
+
+## Description
+
+The `list` command shows information about installed binaries, including their versions, installation paths, and configuration status.
+
+## Options
+
+- `--quiet, -q`: Show only binary names and versions
+- `--help, -h`: Show help information
+
+## Examples
+
+### List All Binaries
+
+```bash
+# List all installed binaries
+b list
+```
+
+Output:
+```
+jq          1.6      ~/.local/share/b/bin/jq
+kubectl     1.28.0   ~/.local/share/b/bin/kubectl
+terraform   1.5.7    ~/.local/share/b/bin/terraform
+```
+
+### List Specific Binaries
+
+```bash
+# List specific binaries
+b list jq kubectl
+```
+
+### Quiet Mode
+
+```bash
+# Show only names and versions
+b list --quiet
+```
+
+Output:
+```
+jq 1.6
+kubectl 1.28.0
+terraform 1.5.7
+```
+
+## Output Format
+
+The default output includes:
+- **Binary Name**: The name of the installed binary
+- **Version**: The currently installed version
+- **Path**: The full path to the binary
+
+## Configuration Status
+
+The list command shows which binaries are:
+- ✅ **Configured**: Listed in b.yaml
+- ⚠️ **Installed but not configured**: Installed but not in b.yaml
+- ❌ **Configured but not installed**: Listed in b.yaml but not installed

@@ -1,2 +1,5 @@
-b:
-jq:
+
+binaries:
+  jq:
+    version: jq-1.7
+  kubectl: {}
