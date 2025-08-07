@@ -8,6 +8,7 @@ import (
 	"github.com/fentas/b/pkg/binaries/argsh"
 	"github.com/fentas/b/pkg/binaries/b"
 	"github.com/fentas/b/pkg/binaries/clusterctl"
+	"github.com/fentas/b/pkg/binaries/curl"
 	compose "github.com/fentas/b/pkg/binaries/docker-compose"
 	"github.com/fentas/b/pkg/binaries/gh"
 	"github.com/fentas/b/pkg/binaries/hcloud"
@@ -45,6 +46,7 @@ func main() {
 		b.Binary(o),
 		compose.Binary(o),
 		clusterctl.Binary(o),
+		curl.Binary(o),
 		gh.Binary(o),
 		hcloud.Binary(o),
 		jq.Binary(o),

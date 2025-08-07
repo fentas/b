@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/fentas/goodies/progress"
+	"github.com/ulikunitz/xz"
 )
 
 func (b *Binary) githubURL() (string, error) {
@@ -24,13 +25,28 @@ func (b *Binary) githubURL() (string, error) {
 	return fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", b.GitHubRepo, b.Version, file), err
 }
 
-func (b *Binary) extractSingleFileFromTarGz(stream io.Reader) error {
-	gzipReader, err := gzip.NewReader(stream)
-	if err != nil {
-		return err
+// extractSingleFileFromTar extracts a single file from a tar archive.
+// compression can be "gz" or "xz".
+func (b *Binary) extractSingleFileFromTar(stream io.Reader, compression string) error {
+	var tarReader *tar.Reader
+
+	switch compression {
+	case "gz":
+		gzipReader, err := gzip.NewReader(stream)
+		if err != nil {
+			return err
+		}
+		defer gzipReader.Close()
+		tarReader = tar.NewReader(gzipReader)
+	case "xz":
+		xzReader, err := xz.NewReader(stream)
+		if err != nil {
+			return err
+		}
+		tarReader = tar.NewReader(xzReader)
+	default:
+		return fmt.Errorf("unknown compression type: %s", compression)
 	}
-	tarReader := tar.NewReader(gzipReader)
-	defer gzipReader.Close()
 
 	for {
 		header, err := tarReader.Next()
@@ -177,7 +193,10 @@ func (b *Binary) downloadBinary() error {
 		reader = progress.NewReader(resp.Body, b.Tracker)
 	}
 	if b.IsTarGz {
-		return b.extractSingleFileFromTarGz(reader)
+		return b.extractSingleFileFromTar(reader, "gz")
+	}
+	if b.IsTarXz {
+		return b.extractSingleFileFromTar(reader, "xz")
 	}
 	if b.IsZip {
 		return b.extractSingleFileFromZip(reader)
