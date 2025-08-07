@@ -159,17 +159,16 @@ set -euo pipefail
 export PATH_BASE PATH_BIN
 ```
 
-This is all you need or have a look [here](./.envrc).
+This is all you need; alternatively, you can refer to [here](./.envrc).
 
 &nbsp;
 
 ### 🎯 Short term goals
 
-- [ ] Recognise the operating system and architecture and offer the correct binary
-- [ ] Enforce min and max versions
-- [ ] Create a logo
-- [ ] Docs
-- [ ] Tests
+- [ ] Recognise the operating system and architecture and offer the correct binary (Windows support)
+- [ ] Update docs
+- [ ] Extends tests
+- [ ] Advanced configurations, e.g. Proxy
 
 &nbsp;
 
@@ -192,5 +191,5 @@ Thanks to all tools and projects that developing this project made possible.
 
 &nbsp;
 
-<p align="center">Copyright &copy; 2024-present <a href="https://github.com/fentas" target="_blank">Fentas</a>
+<p align="center">Copyright &copy; 2024-present <a href="https://github.com/fentas" target="_blank">fentas</a>
 <p align="center"><a href="https://github.com/fentas/b/blob/main/LICENSE"><img src="https://img.shields.io/static/v1.svg?style=for-the-badge&label=License&message=MIT&logoColor=d9e0ee&colorA=302d41&colorB=b7bdf8"/></a></p>
