@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/fentas/b/compare/v2.1.0...v2.2.0) (2025-08-07)
+
+
+### Features
+
+* add dynamic file extension detection and cilium binary support ([#54](https://github.com/fentas/b/issues/54)) ([c504a7c](https://github.com/fentas/b/commit/c504a7c5932cb4c1b84a54b9e40528932d04e2a3))
+
 ## [2.1.0](https://github.com/fentas/b/compare/v2.0.0...v2.1.0) (2025-08-07)
 
 
