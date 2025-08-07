@@ -25,6 +25,7 @@ The package includes a `Binary` struct that represents a binary file, including 
 
 ```bash
 # Initialise a new project with b.yaml config and direnv
+# (tip) init is optional; you use b without it
 b init
 
 # List all configured binaries
