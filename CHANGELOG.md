@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.0](https://github.com/fentas/b/compare/v2.3.0...v3.0.0) (2025-08-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* initialize documentation site and restructure config yaml ([#59](https://github.com/fentas/b/issues/59))
+
+### Features
+
+* initialize documentation site and restructure config yaml ([#59](https://github.com/fentas/b/issues/59)) ([97fd28c](https://github.com/fentas/b/commit/97fd28ce9595d1f1a1380b0650c8a8b875c7796c))
+
 ## [2.3.0](https://github.com/fentas/b/compare/v2.2.0...v2.3.0) (2025-08-07)
 
 
