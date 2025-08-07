@@ -40,7 +40,11 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 			if err != nil {
 				return "", err
 			}
-			return strings.Split(s, " ")[1], nil
+			parts := strings.Split(s, " ")
+			if len(parts) < 2 {
+				return "", fmt.Errorf("unexpected output format from curl --version: %q", s)
+			}
+			return parts[1], nil
 		},
 	}
 }
