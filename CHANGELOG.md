@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/fentas/b/compare/v2.0.0...v2.1.0) (2025-08-07)
+
+
+### Features
+
+* add curl binary support with tar.xz extraction capability ([#52](https://github.com/fentas/b/issues/52)) ([51d7c4b](https://github.com/fentas/b/commit/51d7c4b69079e121b9dd69af65129d3feeceb209))
+
 ## [2.0.0](https://github.com/fentas/b/compare/v1.10.1...v2.0.0) (2025-08-06)
 
 
