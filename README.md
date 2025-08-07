@@ -1,5 +1,5 @@
 <h3 align="center">
-	b
+	<img width="130" alt="Stargazers" src="./logo.svg">
 </h3>
 
 <p align="center">
