@@ -16,7 +16,7 @@ const (
 
 var (
 	// List of special extensions to try
-	Extentions = []string{"tar.gz", "tar.xz"}
+	Extensions = []string{"tar.gz", "tar.xz"}
 )
 
 func GithubLatest(b *Binary) (string, error) {
@@ -51,7 +51,7 @@ func GetFileExtensionFromURL(rawURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, ext := range Extentions {
+	for _, ext := range Extensions {
 		if strings.HasSuffix(u.Path, "."+ext) {
 			return ext, nil
 		}
