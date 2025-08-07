@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.0](https://github.com/fentas/b/compare/v2.2.0...v2.3.0) (2025-08-07)
+
+
+### Features
+
+* add hubble binary support with GitHub release integration ([#57](https://github.com/fentas/b/issues/57)) ([c95d52d](https://github.com/fentas/b/commit/c95d52d6bf9b3cc9ef99ac4f892c89e568cf962b))
+
 ## [2.2.0](https://github.com/fentas/b/compare/v2.1.0...v2.2.0) (2025-08-07)
 
 
