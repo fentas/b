@@ -10,7 +10,7 @@ This glossary defines key terms and concepts used throughout the **b** documenta
 
 **b** - A modern binary manager for developers that simplifies installation, versioning, and management of command-line tools.
 
-**b.yaml** - The configuration file that defines binary dependencies for a project. Contains version specifications and metadata.
+**.bin/b.yaml** - The configuration file that defines binary dependencies for a project, typically located in the `.bin` directory. Contains version specifications and metadata.
 
 **Binary** - An executable command-line tool managed by **b** (e.g., `jq`, `kubectl`, `terraform`).
 
@@ -20,7 +20,7 @@ This glossary defines key terms and concepts used throughout the **b** documenta
 
 **CLI** - Command Line Interface. The text-based interface used to interact with **b**.
 
-**Configuration Discovery** - The process by which **b** automatically locates and loads the nearest `b.yaml` file in the directory hierarchy.
+**Configuration Discovery** - The process by which **b** automatically locates and loads the nearest `.bin/b.yaml` file in the directory hierarchy.
 
 **Context-Aware** - **b**'s ability to automatically detect and use project-specific configurations without explicit file paths.
 
@@ -54,7 +54,7 @@ This glossary defines key terms and concepts used throughout the **b** documenta
 
 **PATH Management** - **b**'s automatic handling of adding managed binaries to the system PATH.
 
-**Project-Based Configuration** - Using **b.yaml** files to define tool requirements specific to individual projects.
+**Project-Based Configuration** - Using `.bin/b.yaml` files to define tool requirements specific to individual projects.
 
 ## S
 

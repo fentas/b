@@ -1,85 +1,72 @@
 ---
-description: "Install and manage binaries with b CLI"
+description: "Install binaries from b.yaml or ad-hoc"
 ---
 
 # b install
 
-The `b install` command downloads and installs binaries, managing their versions and updating your project configuration.
+Install binaries. If no arguments are given, `b` installs all binaries from the `b.yaml` configuration file. You can also install specific binaries on-the-fly.
 
-## Synopsis
+## Usage
 
 ```bash
-b install [options] [binary[@version]...]
+b install [binary...] [flags]
 ```
-
-## Description
-
-The `install` command downloads binaries from GitHub releases and makes them available in your project. It can install specific versions, update existing installations, and automatically manage your `b.yaml` configuration.
-
-## Options
-
-- `--add, -a`: Add installed binaries to b.yaml configuration
-- `--force, -f`: Force reinstallation even if already installed
-- `--quiet, -q`: Run in quiet mode with minimal output
-- `--help, -h`: Show help information
 
 ## Examples
 
-### Install Specific Binaries
+### Install all binaries from config
+
+If a `b.yaml` file is present, this command will install all the binaries listed in it.
 
 ```bash
-# Install latest version
-b install jq
-
-# Install specific version
-b install jq@1.6
-
-# Install multiple binaries
-b install jq kubectl terraform
-```
-
-### Install and Add to Configuration
-
-```bash
-# Install and add to b.yaml
-b install --add jq@1.6
-
-# Install multiple with specific versions
-b install --add jq@1.6 kubectl@1.28.0
-```
-
-### Install from Configuration
-
-```bash
-# Install all binaries from b.yaml
 b install
-
-# Force reinstall all
-b install --force
 ```
 
-## Version Resolution
+### Install a specific binary
 
-The install command supports flexible version specifications:
+Install the latest version of a specific binary.
 
-- `latest`: Always installs the most recent version
-- `1.6`: Installs exactly version 1.6
-- `1.6.0`: Installs exactly version 1.6.0
+```bash
+b install jq
+```
 
-## Installation Process
+### Install a specific version
 
-1. **Version Resolution**: Determines the exact version to install
-2. **Download**: Fetches the binary from GitHub releases
-3. **Verification**: Validates the downloaded binary
-4. **Installation**: Places the binary in the managed directory
-5. **PATH Management**: Ensures the binary is available in PATH
-6. **Configuration Update**: Updates b.yaml if `--add` is specified
+Append `@<version>` to the binary name to install a specific version.
 
-## Error Handling
+```bash
+b install jq@jq-1.7
+```
 
-Common issues and solutions:
+### Install and add to config
 
-- **Version not found**: Check available versions with `b search <binary>`
-- **Download failed**: Verify internet connection and GitHub access
-- **Permission denied**: Ensure write permissions to installation directory
-- **Binary not executable**: The install command automatically sets execute permissions
+Use the `--add` flag to install a binary and simultaneously add it to your `b.yaml`.
+
+```bash
+b install --add kubectl
+```
+
+### Force an installation
+
+Use the `--force` flag to overwrite an existing binary.
+
+```bash
+b install --force jq
+```
+
+## Flags
+
+| Flag         | Description                               |
+|--------------|-------------------------------------------|
+| `--add`      | Add binary to b.yaml during install       |
+| `--fix`      | Pin the specified version in b.yaml       |
+| `-h`, `--help` | help for install                          |
+
+## Global Flags
+
+| Flag                 | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
+| `--force`            | Force operations, overwriting existing binaries                          |
+| `-q`, `--quiet`      | Quiet mode                                                               |
+| `-v`, `--version`    | Print version information and quit                                       |

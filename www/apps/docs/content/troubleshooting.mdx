@@ -39,9 +39,9 @@ source ~/.zshrc
 
 ## Configuration Issues
 
-### b.yaml Not Found
+### .bin/b.yaml Not Found
 
-**Problem**: `b.yaml configuration file not found`
+**Problem**: `configuration file not found`
 
 **Solution**:
 ```bash
@@ -49,28 +49,29 @@ source ~/.zshrc
 cd your-project
 b init
 
-# Or create b.yaml manually
-cat > b.yaml << EOF
+# Or create .bin/b.yaml manually
+mkdir -p .bin
+cat > .bin/b.yaml << EOF
 binaries: {}
 EOF
 ```
 
 ### Invalid Configuration
 
-**Problem**: YAML parsing errors in **b.yaml**
+**Problem**: YAML parsing errors in `.bin/b.yaml`
 
 **Solution**:
 ```bash
 # Validate your YAML syntax
 # Check for proper indentation and structure
-cat b.yaml
+cat .bin/b.yaml
 
 # Example valid format:
 binaries:
   jq:
-    version: "jq-1.6"
+    version: "1.7"
   kubectl:
-    version: "v1.28.0"
+    version: "1.28.0"
 ```
 
 ## Binary Installation Issues
@@ -84,11 +85,11 @@ binaries:
 # Check your internet connection
 curl -I https://github.com
 
-# Try with verbose output for debugging
-b install --verbose jq
-
 # Check GitHub API rate limits
 curl -H "Accept: application/vnd.github.v3+json" https://api.github.com/rate_limit
+
+# If you are using a proxy, make sure your shell environment is configured correctly
+# (e.g., HTTP_PROXY, HTTPS_PROXY environment variables).
 ```
 
 ### Version Not Found
@@ -182,10 +183,8 @@ speedtest-cli
 # Check cache size
 du -sh ~/.local/share/b/
 
-# Clean up old versions (if implemented)
-b clean
-
-# Manually remove old binaries
+# Manually remove old binaries from the cache.
+# Note: A 'b clean' command is planned for a future release.
 rm -rf ~/.local/share/b/cache/
 ```
 
@@ -255,7 +254,7 @@ echo $SHELL
 echo $PATH
 
 # Configuration
-cat b.yaml
+cat .bin/b.yaml
 
 # Installed binaries
 b list

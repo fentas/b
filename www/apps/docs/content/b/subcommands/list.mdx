@@ -1,73 +1,63 @@
 ---
-description: "List installed binaries and their versions"
+description: "List project binaries and their installation status"
 ---
 
 # b list
 
-The `b list` command displays all installed binaries and their current versions.
+Lists all binaries defined in the project's `b.yaml` and their installation status.
 
-## Synopsis
+## Aliases
+
+- `ls`
+- `l`
+
+## Usage
 
 ```bash
-b list [options] [binary...]
+b list [flags]
 ```
-
-## Description
-
-The `list` command shows information about installed binaries, including their versions, installation paths, and configuration status.
-
-## Options
-
-- `--quiet, -q`: Show only binary names and versions
-- `--help, -h`: Show help information
 
 ## Examples
 
-### List All Binaries
+### List all binaries
+
+This command lists all binaries from the `b.yaml` file and shows whether they are installed.
 
 ```bash
-# List all installed binaries
+# List all binaries from b.yaml
 b list
 ```
 
-Output:
-```
-jq          1.6      ~/.local/share/b/bin/jq
-kubectl     1.28.0   ~/.local/share/b/bin/kubectl
-terraform   1.5.7    ~/.local/share/b/bin/terraform
-```
+### List as JSON
 
-### List Specific Binaries
+Use the `--output` global flag to format the list as JSON.
 
 ```bash
-# List specific binaries
-b list jq kubectl
+# List as JSON
+b list --output json
 ```
 
-### Quiet Mode
+### List as YAML
+
+Use the `--output` global flag to format the list as YAML.
 
 ```bash
-# Show only names and versions
-b list --quiet
+# List as YAML
+b list --output yaml
 ```
 
-Output:
-```
-jq 1.6
-kubectl 1.28.0
-terraform 1.5.7
-```
+## Flags
 
-## Output Format
+| Flag         | Description              |
+|--------------|--------------------------|
+| `-h`, `--help` | help for list            |
 
-The default output includes:
-- **Binary Name**: The name of the installed binary
-- **Version**: The currently installed version
-- **Path**: The full path to the binary
+## Global Flags
 
-## Configuration Status
-
-The list command shows which binaries are:
-- ✅ **Configured**: Listed in b.yaml
-- ⚠️ **Installed but not configured**: Installed but not in b.yaml
-- ❌ **Configured but not installed**: Listed in b.yaml but not installed
+| Flag                 | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
+| `--force`            | Force operations, overwriting existing binaries                          |
+| `-o`, `--output stringArray` | output options: json|yaml|format                                     |
+| `-q`, `--quiet`      | Quiet mode                                                               |
+| `-v`, `--version`    | Print version information and quit                                       |
