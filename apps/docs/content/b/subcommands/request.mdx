@@ -1,52 +1,46 @@
 ---
-description: "Request new binaries to be added to b CLI"
+description: "Request a binary by creating a GitHub issue with a prefilled template"
 ---
 
 # b request
 
-The `b request` command helps users request new binaries to be added to the b CLI ecosystem by creating GitHub issues with the appropriate template.
+Request a binary by creating a GitHub issue with a prefilled template. This command streamlines the process of requesting new binaries to be added to `b`.
 
-## Synopsis
+## Usage
 
 ```bash
-b request [options] <binary-name>
+b request <binary-name> [flags]
 ```
-
-## Description
-
-The `request` command streamlines the process of requesting new binaries to be added to the b CLI. It opens your default web browser to create a new GitHub issue with a pre-filled template, making it easy to request new tools.
-
-## Options
-
-- `--help, -h`: Show help information
 
 ## Examples
 
-### Basic Usage
+### Request a new binary
 
 ```bash
-# Request a new binary to be added
-b request my-cool-tool
+# Request a new binary
+b request terraform
 ```
 
-## Request Process
+### Request with a description
 
-When you submit a request:
+If the binary name contains spaces or special characters, wrap it in quotes.
 
-1. The command collects information about your system
-2. Opens a new issue in the b CLI GitHub repository
-3. Pre-fills a template with:
-   - Requested binary name
-   - Your system information
-   - Any additional notes you provided
-   - Version of b CLI you're using
+```bash
+# Request with description
+b request "my-custom-tool"
+```
 
-## Request Guidelines
+## Flags
 
-For the best chance of your request being accepted:
+| Flag         | Description               |
+|--------------|---------------------------|
+| `-h`, `--help` | help for request          |
 
-1. **Check existing issues** first to avoid duplicates
-2. **Provide a clear use case** for the binary
-3. **Include relevant links** to the project's homepage
-4. **Mention any alternatives** you've considered
-5. **Be specific** about versions or features needed
+## Global Flags
+
+| Flag                 | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
+| `--force`            | Force operations, overwriting existing binaries                          |
+| `-q`, `--quiet`      | Quiet mode                                                               |
+| `-v`, `--version`    | Print version information and quit                                       |

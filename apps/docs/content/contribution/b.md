@@ -13,12 +13,12 @@ b is a binary manager for developers that simplifies installation, versioning, a
 
 ### Binaries
 
-Binaries are the actual command-line tools that are managed by b. They are stored in the `binaries` directory in the b repository and registered in `cmd/b/main.go`.
+Binaries are the command-line tools managed by b. Their definitions are stored as individual Go files in the `pkg/binaries` directory. Adding a new file to this directory is sufficient to register a new binary; no manual registration in `cmd/b/main.go` is needed.
 
 ```
 ├── cmd
 │   └── b
-│       └── # All supported binaries are added here
+│       └── # Root command where subcommands are registered
 ├── pkg
 │   ├── binaries
 │   │   └── # Binary definitions

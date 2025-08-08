@@ -48,7 +48,7 @@ This creates a `b.yaml` file in your project root.
 
 ```bash
 # Install specific versions
-b install jq@jq-1.6 kubectl@v1.28.0
+b install jq@jq-1.7 kubectl@v1.28.0
 
 # Install latest versions
 b install terraform helm
@@ -62,8 +62,8 @@ b install --add docker-compose@v2.20.0
 Tools are automatically available in your PATH:
 
 ```bash
-jq --version     # 1.6
-kubectl version  # 1.28.0
+jq --version     # jq-1.7
+kubectl version  # v1.28.0
 ```
 
 ## Common Workflows
@@ -74,10 +74,10 @@ Share tool requirements with your team:
 
 ```bash
 # Add tools to b.yaml
-b install --add jq@jq-1.6 kubectl@v1.28.0
+b install --add jq@jq-1.7 kubectl@v1.28.0
 
 # Commit b.yaml to version control
-git add b.yaml
+git add .bin/b.yaml
 git commit -m "Add project tool requirements"
 
 # Team members can install the same tools
@@ -93,6 +93,7 @@ Use **b** in your CI/CD pipelines:
 steps:
   - uses: actions/checkout@v4
   - name: Install b
+    # todo: wrong url; create install script
     run: curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
   - name: Install project tools
     run: b install
@@ -105,31 +106,31 @@ steps:
 ### Version Management
 
 ```bash
-# List installed tools
+# List configured tools and their status
 b list
 
-# Update tools to latest versions
+# Update all tools to latest versions
 b update
 
 # Update specific tools
-b update kubectl terraform
+b update kubectl
 
 # Search for available tools
-b search docker
+b search terraform
 ```
 
 ## Configuration
 
-The `b.yaml` file defines your project's tool requirements:
+The `.bin/b.yaml` file defines your project's tool requirements:
 
 ```yaml
 binaries:
   jq:
-    version: "jq-1.6"
+    version: "jq-1.7"
   kubectl:
     version: "v1.28.0"
+  # leave empty for latest version
   terraform:
-    version: "latest"
 ```
 
 ## Next Steps
