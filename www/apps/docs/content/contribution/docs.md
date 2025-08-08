@@ -9,7 +9,7 @@ Thank you for your interest in contributing to the documentation! You will be he
 
 :::tip
 
-This guide is specific to contributing to the documentation. If you’re interested in contributing to b’s codebase, check out the [contributing guidelines in the Medusa GitHub repository](https://github.com/fentas/b/blob/develop/CONTRIBUTING.md).
+This guide is specific to contributing to the documentation. If you’re interested in contributing to b’s codebase, check out the [contributing guidelines in the b GitHub repository](https://github.com/fentas/b/blob/main/CONTRIBUTING.md).
 
 :::
 
@@ -310,19 +310,19 @@ import TabItem from '@theme/TabItem';
 
 
 <Tabs groupId="request-type" isCodeTabs={true}>
-  <TabItem value="globally" label="Install global" default>
+  <TabItem value="install" label="Install Binary" default>
 
     ```bash
-    curl -sL https://get.arg.sh | sudo tee /usr/local/bin/argsh > /dev/null
-    sudo chmod +x /usr/local/bin/argsh
+    # Install the latest version of a binary
+    b install jq
     ```
 
   </TabItem>
-  <TabItem value="locally" label="Withing a project">
+  <TabItem value="add" label="Add to Config">
 
     ```bash
-    curl -sL https://get.arg.sh > .bin/argsh
-    chmod +x .bin/argsh
+    # Install a binary and add it to your b.yaml
+    b install --add jq
     ```
 
   </TabItem>
@@ -360,7 +360,7 @@ For example:
 
 ~~~md
 ```bash noReport
-b install argsh
+b install jq
 ```
 ~~~
 
@@ -381,7 +381,7 @@ source ~/.bashrc
 
 ## Linting with Vale
 
-Argsh uses [Vale](https://vale.sh/) to lint documentation pages and perform checks on incoming PRs into the repository.
+b uses [Vale](https://vale.sh/) to lint documentation pages and perform checks on incoming PRs into the repository.
 
 ### Result of Vale PR Checks
 
@@ -391,12 +391,12 @@ You can check the result of running the "lint" action on your PR by clicking the
 
 If you want to check your work locally, you can do that by:
 
-1. [Installing direnv](https://direnv.net/) and running `direnv allow` in the root directory of the argsh repository.
+1. [Installing direnv](https://direnv.net/) and running `direnv allow` in the root directory of the b repository.
 2. Linting with `vale`:
 
 ```bash
 # to lint content for the main documentation
-argsh lint --vale error
+vale www/apps/docs/content
 ```
 
 ### VS Code Extension
@@ -420,7 +420,7 @@ You can also disable specific rules. For example:
 ```md
 <!-- vale docs.Numbers = NO -->
 
-Argsh supports Bash version 4.3 and later.
+b supports Bash version 4.3 and later.
 
 <!-- vale docs.Numbers = YES -->
 ```
@@ -431,24 +431,16 @@ If you use this in your PR, you must justify its usage.
 
 ## Linting with ESLint
 
-Argsh uses ESlint to lint code blocks both in the content and the code base of the documentation apps.
+b uses ESlint to lint code blocks both in the content and the code base of the documentation apps.
 
 ### Linting Code/Content with ESLint
 
 Each PR runs through a check that lints the code in the content files using ESLint. The action's name is `code-docs-eslint`.
 
-If you want to check code ESLint errors locally and fix them, you can do that by:
-
-1\. Set up [direnv](https://direnv.net/) then run in the `root` directory:
+If you want to check code ESLint errors locally and fix them, you can do that by running the following command from the `www` directory:
 
 ```bash
-direnv allow
-```
-
-2\. Then execute the following command anywhere:
-
-```bash
-gofmt -s -w .
+yarn lint:fix
 ```
 
 This will fix any fixable errors, and show errors that require your action.

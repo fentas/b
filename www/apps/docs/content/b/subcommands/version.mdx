@@ -1,113 +1,78 @@
 ---
-description: "Display version information for b CLI and installed binaries"
+description: "Show version information for b and installed binaries"
 ---
 
 # b version
 
-The `b version` command displays version information about the b CLI tool and its installed binaries, helping you track which versions are currently in use.
+List all versions. If arguments are given, it shows the version of the specified binaries.
 
-## Synopsis
+## Alias
+
+- `v`
+
+## Usage
 
 ```bash
-b version [options] [binary...]
+b version [binary...] [flags]
 ```
-
-## Description
-
-The `version` command shows detailed version information about the b CLI itself and any installed binaries. It's useful for debugging, reporting issues, and ensuring compatibility between different components.
-
-## Options
-
-- `--short, -s`: Show only version numbers
-- `--json`: Output in JSON format
-- `--all, -a`: Show versions of all installed binaries
-- `--help, -h`: Show help information
 
 ## Examples
 
-### Basic Usage
+### Show all versions
+
+Run without arguments to see the version of `b` and all binaries in your `b.yaml`.
 
 ```bash
-# Show b CLI version
 b version
-
-# Show version in short format
-b version --short
 ```
 
-### Check Binary Versions
+### Show specific binary version
+
+Pass a binary name to see its version.
 
 ```bash
-# Check version of specific binaries
-b version jq kubectl
-
-# Show versions of all installed binaries
-b version --all
-
-# Get version information in JSON format
-b version --json
+b version jq
 ```
 
-## Version Information
+### Show multiple binary versions
 
-The version command displays several types of version information:
-
-1. **CLI Version**: The version of the b CLI tool
-2. **Runtime Information**: Go version and build platform
-3. **Binary Versions**: For each specified binary:
-   - Installed version
-   - Latest available version
-   - Whether an update is available
-   - Source of installation
-   - Last checked/updated timestamp
-
-## Output Formats
-
-### Standard Output
-```
-b version 1.2.3 (go1.19.5 darwin/amd64)
-
-jq: jq-1.6 (latest: jq-1.7) [Update available]
-kubectl: v1.28.0 (latest: v1.28.0) [Up to date]
+```bash
+b version jq kubectl helm
 ```
 
-### JSON Output (--json)
-```json
-{
-  "cli": {
-    "version": "1.2.3",
-    "goVersion": "go1.19.5",
-    "platform": "darwin/amd64"
-  },
-  "binaries": {
-    "jq": {
-      "installed": "jq-1.6",
-      "latest": "jq-1.7",
-      "updateAvailable": true,
-      "source": "github.com/stedolan/jq"
-    }
-  }
-}
+### Show only local versions
+
+The `--local` flag prevents `b` from checking for new remote versions.
+
+```bash
+b version --local
 ```
 
-## Integration with CI/CD
+### Check if versions are up to date
 
-The `--short` and `--json` flags are particularly useful in CI/CD pipelines:
+The `--check` flag can be used in scripts to verify if binaries are up to date. It will exit with a non-zero status code if any binary is outdated.
 
-```yaml
-# Example GitHub Actions workflow step
-- name: Verify binary versions
-  run: |
-    if [ "$(b version --short jq)" != "1.6" ]; then
-      echo "Incorrect jq version"
-      exit 1
-    fi
+```bash
+# Check if all versions are up to date (exit code based)
+b version --quiet --check
+
+# Check specific binaries
+b version jq kubectl --check
 ```
 
-## Error Handling
+## Flags
 
-Common issues and solutions:
+| Flag         | Description                                         |
+|--------------|-----------------------------------------------------|
+| `--check`    | Check if versions are up to date (exit code based)  |
+| `-h`, `--help`   | help for version                                    |
+| `--local`    | Only show local versions, no lookup for new versions|
 
-- **Binary not found**: The specified binary is not installed
-- **Version check failed**: Could not determine latest version (check network connection)
-- **Permission denied**: Insufficient permissions to read version information
+## Global Flags
+
+| Flag                 | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
+| `--force`            | Force operations, overwriting existing binaries                          |
+| `-q`, `--quiet`      | Quiet mode                                                               |
+| `-v`, `--version`    | Print version information and quit                                       |

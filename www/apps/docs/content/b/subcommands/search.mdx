@@ -1,44 +1,59 @@
 ---
-description: "Search for available binaries in the b CLI ecosystem"
+description: "Search available binaries"
 ---
 
 # b search
 
-The `b search` command helps you discover binaries available in the b CLI ecosystem, showing detailed information about each package including versions, descriptions, and installation commands.
+Discovers all binaries available for installation. The search can be filtered with a query.
 
-## Synopsis
+## Alias
+
+- `s`
+
+## Usage
 
 ```bash
-b search [options] [query]
+b search [query] [flags]
 ```
-
-## Description
-
-The `search` command queries the b CLI package registry to find binaries matching your search criteria. It's the best way to discover new tools and check available versions before installation.
-
-## Options
-
-- `--output, -o`: Output format (json, yaml, table)
-- `--help, -h`: Show help information
 
 ## Examples
 
-### Basic Search
+### List all available binaries
+
+Run the command without a query to see all available binaries.
 
 ```bash
-# Search for a specific binary
-b search jq
-
-# Search with partial match
-b search py
-```
-
-### Advanced Search
-
-```bash
-# Show all available packages
 b search
-
-# Get results in JSON format
-b search --output json jq
 ```
+
+### Search for specific binaries
+
+Provide a query to filter the results.
+
+```bash
+b search jq
+```
+
+### Search with JSON output
+
+Use the `--output` global flag to get the results in JSON format.
+
+```bash
+b search --output json
+```
+
+## Flags
+
+| Flag         | Description               |
+|--------------|---------------------------|
+| `-h`, `--help` | help for search           |
+
+## Global Flags
+
+| Flag                 | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
+| `--force`            | Force operations, overwriting existing binaries                          |
+| `-o`, `--output stringArray` | output options: json|yaml|format                                     |
+| `-q`, `--quiet`      | Quiet mode                                                               |
+| `-v`, `--version`    | Print version information and quit                                       |
