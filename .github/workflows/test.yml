@@ -3,8 +3,20 @@ name: Tests
 on:
   push:
     branches: [ main, develop ]
+    paths:
+      - 'cmd/**'
+      - 'pkg/**'
+      - 'test/**'
+      - 'go.mod'
+      - 'go.sum'
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
+    paths:
+      - 'cmd/**'
+      - 'pkg/**'
+      - 'test/**'
+      - 'go.mod'
+      - 'go.sum'
 
 jobs:
   test:
