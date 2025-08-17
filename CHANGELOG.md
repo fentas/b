@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.0.1](https://github.com/fentas/b/compare/v3.0.0...v3.0.1) (2025-08-17)
+
+
+### Bug Fixes
+
+* argsh wrong repo ([#68](https://github.com/fentas/b/issues/68)) ([55f5c79](https://github.com/fentas/b/commit/55f5c79b61ba44b4a73d70fc036c2acf297501ca))
+
 ## [3.0.0](https://github.com/fentas/b/compare/v2.3.0...v3.0.0) (2025-08-07)
 
 
