@@ -85,6 +85,12 @@ This will ensure that `jq`, `kind`, and `tilt` are installed and at the correct 
 
 &nbsp;
 
+### 📚 Documentation
+
+All related documentation, including the source for the website, is located on the [`docs` branch](https://github.com/fentas/b/tree/docs).
+
+&nbsp;
+
 ### 🏗️ Manual build
 
 If you have Go installed, you can build and install the latest version of `b` with:
