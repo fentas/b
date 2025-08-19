@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"io"
 
 	"github.com/fentas/b/pkg/binary"
@@ -122,10 +123,9 @@ func (o *SharedOptions) GetBinariesFromConfig() []*binary.Binary {
 	for _, lb := range o.Config.Binaries {
 		if b, ok := o.resolveBinary(lb); ok {
 			result = append(result, b)
+		} else {
+			fmt.Fprintf(o.IO.ErrOut, "Warning: referenced binary '%s' could not be resolved and will be skipped.\n", lb.Name)
 		}
-		// Note: if resolveBinary returns false, we skip this entry
-		// This happens when a referenced binary is not found
-		// todo error?
 	}
 
 	return result
