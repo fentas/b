@@ -117,11 +117,11 @@ const config = {
       respectPrefersColorScheme: true,
     },
     algoliaConfig: {
-      appId: process.env.ALGOLIA_APP_ID || "temp",
-      apiKey: process.env.ALGOLIA_API_KEY || "temp",
+      appId: process.env.ALGOLIA_APP_ID || "V3H4RER5Z2",
+      apiKey: process.env.ALGOLIA_API_KEY || "f859879b45dd23d8d1e22c8e2876f745",
       indexNames: {
-        docs: process.env.DOCS_ALGOLIA_INDEX_NAME,
-        api: process.env.API_ALGOLIA_INDEX_NAME,
+        docs: "binary_help_v3h4rer5z2_pages",
+        // api: process.env.API_ALGOLIA_INDEX_NAME,
       },
       filters: [
         {
