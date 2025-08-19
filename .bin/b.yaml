@@ -1,5 +1,5 @@
-
 binaries:
-  jq:
-    version: jq-1.7
+  envsubst:
+    alias: renvsubst
+  jq: {}
   kubectl: {}

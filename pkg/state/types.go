@@ -57,10 +57,22 @@ func (list *BinaryList) MarshalYAML() (interface{}, error) {
 	result := make(map[string]interface{})
 	for _, b := range *list {
 		if b.Name != "" {
+			// Build the binary configuration
+			config := make(map[string]string)
+
+			// Add version if enforced
 			if b.Enforced != "" {
-				result[b.Name] = map[string]string{
-					"version": b.Enforced,
-				}
+				config["version"] = b.Enforced
+			}
+
+			// Add alias if specified
+			if b.Alias != "" {
+				config["alias"] = b.Alias
+			}
+
+			// If we have any configuration, use it; otherwise use empty struct
+			if len(config) > 0 {
+				result[b.Name] = config
 			} else {
 				result[b.Name] = &struct{}{}
 			}

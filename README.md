@@ -79,9 +79,13 @@ binaries:
     version: jq-1.8.1
   kind:
   tilt:
+	# alias to renvsubst
+	envsubst:
+		alias: renvsubst
 ```
 
-This will ensure that `jq`, `kind`, and `tilt` are installed and at the correct version. If you don't specify a version, `b` will install the latest version.
+This will ensure that `jq`, `kind`, `renvsubst` and `tilt` are installed and at the correct version. If you don't specify a version, `b` will install the latest version.
+Note that `renvsubst` is installed as `envsubst`.
 
 &nbsp;
 
@@ -143,6 +147,7 @@ Have a look at [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 - [kustomize](https://github.com/kubernetes-sigs/kustomize) - Kubernetes native configuration management
 - [mkcert](https://github.com/FiloSottile/mkcert) - Create locally-trusted development certificates
 - [packer](https://github.com/hashicorp/packer) - Packer is a tool for creating machine and container images
+- [renvsubst](https://github.com/containeroo/renvsubst) - envsubst with some extra features written in Rust
 - [sops](https://github.com/getsops/sops) - Secure processing of configuration files
 - [stern](https://github.com/stern/stern) - Simultaneous log tailing for multiple Kubernetes pods and containers
 - [tilt](https://github.com/tilt-dev/tilt) - Local Kubernetes development with no stress

@@ -23,6 +23,7 @@ func (b *Binary) LocalBinary(remote bool) *LocalBinary {
 	}
 	return &LocalBinary{
 		Name:     b.Name,
+		Alias:    b.Alias,
 		File:     file,
 		Version:  version,
 		Latest:   latest,
@@ -35,15 +36,12 @@ func (b *Binary) BinaryPath() string {
 		return b.File
 	}
 
-	// if we find the binary in the PATH, we are done
-	// var err error
-	// if b.File, err = exec.LookPath(b.Name); err == nil {
-	// 	// todo should we block the binary from being updated?
-	// 	return b.File
-	// }
-
+	name := b.Alias
+	if name == "" {
+		name = b.Name
+	}
 	path := path.GetBinaryPath()
-	b.File = filepath.Join(path, b.Name)
+	b.File = filepath.Join(path, name)
 	return b.File
 }
 
