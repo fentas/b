@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/fentas/goodies/progress"
 	"github.com/fentas/goodies/templates"
 	"github.com/spf13/cobra"
@@ -20,6 +21,7 @@ type InstallOptions struct {
 	*SharedOptions
 	Add               bool             // Add to b.yaml during install
 	Fix               bool             // Pin version in b.yaml
+	Alias             string           // Alias for the binary
 	specifiedBinaries []*binary.Binary // Binaries specified on command line
 }
 
@@ -49,6 +51,9 @@ func NewInstallCmd(shared *SharedOptions) *cobra.Command {
 
 			# Force install (overwrite existing)
 			b install --force jq
+
+			# Install with alias
+			b install --alias envsubst renvsubst
 		`),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := o.Complete(args); err != nil {
@@ -63,7 +68,7 @@ func NewInstallCmd(shared *SharedOptions) *cobra.Command {
 
 	cmd.Flags().BoolVar(&o.Add, "add", false, "Add binary to b.yaml during install")
 	cmd.Flags().BoolVar(&o.Fix, "fix", false, "Pin the specified version in b.yaml")
-
+	cmd.Flags().StringVar(&o.Alias, "alias", "", "Alias for the binary")
 	return cmd
 }
 
@@ -96,7 +101,7 @@ func (o *InstallOptions) Complete(args []string) error {
 			// For now, we'll validate during installation
 		}
 
-		// Add to specified binaries list
+		b.Alias = o.Alias
 		o.specifiedBinaries = append(o.specifiedBinaries, b)
 	}
 
@@ -163,9 +168,13 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 				err = b.EnsureBinary(false) // Don't update, just ensure
 			}
 
+			name := b.Name
+			if b.Alias != "" {
+				name = b.Alias + " (" + color.New(color.FgYellow).Sprint(b.Name) + ")"
+			}
 			progress.ProgressDone(
 				b.Tracker,
-				fmt.Sprintf("%s installed", b.Name),
+				name,
 				err,
 			)
 		}(b)
@@ -218,6 +227,10 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 				if o.Fix {
 					entry.Enforced = b.Version
 				}
+			}
+			if b.Alias != "" {
+				entry.Name = b.Alias
+				entry.Alias = b.Name
 			}
 			config.Binaries = append(config.Binaries, entry)
 		}

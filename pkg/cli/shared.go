@@ -62,10 +62,54 @@ func (o *SharedOptions) LoadConfig() error {
 	return err
 }
 
+// resolveBinary resolves a binary from config, handling references
+func (o *SharedOptions) resolveBinary(lb *binary.LocalBinary) (*binary.Binary, bool) {
+	b := &binary.Binary{}
+	var ab *binary.Binary
+	var ok bool
+
+	// Handle reference field - if a binary references another, use the referenced binary
+	if lb.Alias != "" {
+		if ab, ok = o.lookup[lb.Alias]; ok {
+			*b = *ab
+			b.Alias = lb.Name
+		}
+	} else {
+		if ab, ok = o.lookup[lb.Name]; ok {
+			*b = *ab
+		}
+	}
+
+	if ok {
+		// Apply config overrides
+		if lb.Version != "" {
+			b.Version = lb.Version
+		}
+		if lb.Enforced != "" {
+			b.Version = lb.Enforced
+		}
+	}
+
+	return b, ok
+}
+
 // GetBinary returns a binary by name
 func (o *SharedOptions) GetBinary(name string) (*binary.Binary, bool) {
-	b, ok := o.lookup[name]
-	return b, ok
+	// First try direct lookup
+	if b, ok := o.lookup[name]; ok {
+		return b, ok
+	}
+
+	// If not found and we have config, check if this is a reference alias
+	if o.Config != nil {
+		for _, lb := range o.Config.Binaries {
+			if lb.Name == name {
+				return o.resolveBinary(lb)
+			}
+		}
+	}
+
+	return nil, false
 }
 
 // GetBinariesFromConfig returns binaries that are defined in the config
@@ -76,11 +120,12 @@ func (o *SharedOptions) GetBinariesFromConfig() []*binary.Binary {
 
 	var result []*binary.Binary
 	for _, lb := range o.Config.Binaries {
-		if b, ok := o.lookup[lb.Name]; ok {
-			// Set version from config
-			b.Version = lb.Version
+		if b, ok := o.resolveBinary(lb); ok {
 			result = append(result, b)
 		}
+		// Note: if resolveBinary returns false, we skip this entry
+		// This happens when a referenced binary is not found
+		// todo error?
 	}
 
 	return result

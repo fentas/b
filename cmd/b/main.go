@@ -22,6 +22,7 @@ import (
 	"github.com/fentas/b/pkg/binaries/kustomize"
 	"github.com/fentas/b/pkg/binaries/mkcert"
 	"github.com/fentas/b/pkg/binaries/packer"
+	"github.com/fentas/b/pkg/binaries/renvsubst"
 	"github.com/fentas/b/pkg/binaries/sops"
 	"github.com/fentas/b/pkg/binaries/stern"
 	"github.com/fentas/b/pkg/binaries/tilt"
@@ -61,6 +62,7 @@ func main() {
 		kustomize.Binary(o),
 		mkcert.Binary(o),
 		packer.Binary(o),
+		renvsubst.Binary(o),
 		sops.Binary(o),
 		stern.Binary(o),
 		tilt.Binary(o),

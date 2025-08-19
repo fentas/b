@@ -300,7 +300,7 @@ func TestE2E_Performance(t *testing.T) {
 
 	// Test version command performance
 	start = time.Now()
-	cmd = exec.Command(binaryPath, "version")
+	cmd = exec.Command(binaryPath, "version", "--local")
 	_, err = cmd.CombinedOutput()
 	duration = time.Since(start)
 
@@ -308,7 +308,7 @@ func TestE2E_Performance(t *testing.T) {
 		t.Fatalf("Version command failed: %v", err)
 	}
 
-	if duration > 5*time.Second {
+	if duration > 1*time.Second {
 		t.Errorf("Version command took too long: %v", duration)
 	}
 

@@ -25,6 +25,7 @@ type Binary struct {
 	Version       string          `json:"-"`
 	VersionF      Callback        `json:"-"`
 	VersionLocalF Callback        `json:"-"`
+	Alias         string          `json:"-"`
 	Name          string          `json:"name" yaml:"name"`
 	File          string          `json:"-"`
 	IsTarGz       bool            `json:"-"`
@@ -45,4 +46,7 @@ type LocalBinary struct {
 	Version  string `json:"version,omitempty"`
 	Latest   string `json:"latest"`
 	Enforced string `json:"enforced,omitempty"`
+	// alias is the name of the binary that this binary is a reference to
+	// yaml config sets this as reference
+	Alias string `json:"alias,omitempty"`
 }
