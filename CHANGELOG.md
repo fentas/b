@@ -1,5 +1,53 @@
 # Changelog
 
+## [4.0.0](https://github.com/fentas/b/compare/v3.0.1...v4.0.0) (2025-08-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* initialize documentation site and restructure config yaml ([#59](https://github.com/fentas/b/issues/59))
+* new cli ([#50](https://github.com/fentas/b/issues/50))
+* change bin names to params not flags ([#4](https://github.com/fentas/b/issues/4))
+
+### Features
+
+* add b binary (selfupdate) ([#10](https://github.com/fentas/b/issues/10)) ([b6ab725](https://github.com/fentas/b/commit/b6ab725b2b4278770b3eda607d95407eac9f697c))
+* add clusterctl ([#23](https://github.com/fentas/b/issues/23)) ([f6949ba](https://github.com/fentas/b/commit/f6949ba015e13d52fc1e4a12dfa6324c92d3c3f9))
+* add curl binary support with tar.xz extraction capability ([#52](https://github.com/fentas/b/issues/52)) ([9d2dc57](https://github.com/fentas/b/commit/9d2dc5777a2faf12d74a49013bc697969cadc735))
+* add docker-compose ([#8](https://github.com/fentas/b/issues/8)) ([c3f91f9](https://github.com/fentas/b/commit/c3f91f94278282af7f1931836d8ab4ec539845d5))
+* add dynamic file extension detection and cilium binary support ([#54](https://github.com/fentas/b/issues/54)) ([73e87ba](https://github.com/fentas/b/commit/73e87ba4e7eddbcf87909ae682ba524be2f6065a))
+* add gh ([#7](https://github.com/fentas/b/issues/7)) ([81e9e03](https://github.com/fentas/b/commit/81e9e03b0e3d3f10f51702f18d368944c7a3d527))
+* add hubble binary support with GitHub release integration ([#57](https://github.com/fentas/b/issues/57)) ([63084dc](https://github.com/fentas/b/commit/63084dc7b2c7f5d9268bcc27cc66857c93317d03))
+* add kubeseal ([#46](https://github.com/fentas/b/issues/46)) ([6c313e3](https://github.com/fentas/b/commit/6c313e3aba68eeb810cfade15cf0efdadc36819c))
+* add kustomize ([#35](https://github.com/fentas/b/issues/35)) ([99fc757](https://github.com/fentas/b/commit/99fc757fb057aa00eb005f8723e1432aa29859cb))
+* add packer and zip support ([#43](https://github.com/fentas/b/issues/43)) ([664a657](https://github.com/fentas/b/commit/664a657140dca269fa34e0a67fc4b975054b6b12))
+* add sops ([#40](https://github.com/fentas/b/issues/40)) ([35356d4](https://github.com/fentas/b/commit/35356d4a1d9a34c81b1924dea9f342dc75c67c0c))
+* add state and change --all behaviour ([edf3100](https://github.com/fentas/b/commit/edf3100a1f696879acc6a8318452ee013bf9fcd5))
+* add stern ([#38](https://github.com/fentas/b/issues/38)) ([670894a](https://github.com/fentas/b/commit/670894abfb71edb44759124c198731be1ebb7c4f))
+* change bin names to params not flags ([#4](https://github.com/fentas/b/issues/4)) ([3f12359](https://github.com/fentas/b/commit/3f12359017b49fb1bbbd4e7168f43d938fcf5aac))
+* fix release-please version management for 1.1.2 ([#14](https://github.com/fentas/b/issues/14)) ([74bb689](https://github.com/fentas/b/commit/74bb689017d3abd380c369c9d9f8f7d82dfc565c))
+* initialize documentation site and restructure config yaml ([#59](https://github.com/fentas/b/issues/59)) ([20dc4e3](https://github.com/fentas/b/commit/20dc4e3ef22f49136a037b1dce4bfb55b8cf8b41))
+* Make config optional ([#3](https://github.com/fentas/b/issues/3)) ([20d7875](https://github.com/fentas/b/commit/20d7875284866f198680234622e6fdb9c58cc10e))
+* update GPG signing configuration ([#19](https://github.com/fentas/b/issues/19)) ([06cea06](https://github.com/fentas/b/commit/06cea0612365c2fbbf4657d9ce1be4571a8fc934))
+* update release-please to use bot token for workflow triggering ([#21](https://github.com/fentas/b/issues/21)) ([5bb0957](https://github.com/fentas/b/commit/5bb0957470b001922c9b62141f284e2a598e0f81))
+
+
+### Bug Fixes
+
+* add argsh binary ([#5](https://github.com/fentas/b/issues/5)) ([0262cfc](https://github.com/fentas/b/commit/0262cfc6b220d7765b4b6e268f4eabd66dca2955))
+* add argsh to readme ([090a9ba](https://github.com/fentas/b/commit/090a9ba6ac84da330cf8bdaa32029417ba391ac8))
+* Add progress tracking for zip extraction ([#48](https://github.com/fentas/b/issues/48)) ([f6749a4](https://github.com/fentas/b/commit/f6749a47712c3317e67a32e97de811d1415b47e8))
+* argsh wrong repo ([#68](https://github.com/fentas/b/issues/68)) ([d860d91](https://github.com/fentas/b/commit/d860d91e0510c57e9d11780c346663be7ba1c886))
+* clusterctl version ([#31](https://github.com/fentas/b/issues/31)) ([87fbb6a](https://github.com/fentas/b/commit/87fbb6ab8142939ea3697b82a2d2db94e50e624a))
+* NoConfig logic wrong ([#11](https://github.com/fentas/b/issues/11)) ([3fc224d](https://github.com/fentas/b/commit/3fc224d9c3f99962fc86d9503644181a17149f61))
+* quiet mode ([#33](https://github.com/fentas/b/issues/33)) ([4de443c](https://github.com/fentas/b/commit/4de443cc622c41f3b3dd457edbc158ee5072885d))
+* quiet mode and clusterctl version check ([#25](https://github.com/fentas/b/issues/25)) ([d9d5115](https://github.com/fentas/b/commit/d9d5115de46bcc61cb336bba0c71dd38add4d246))
+
+
+### Code Refactoring
+
+* new cli ([#50](https://github.com/fentas/b/issues/50)) ([eecf81b](https://github.com/fentas/b/commit/eecf81bb04852cb154b6557b09272af87ab25401))
+
 ## [3.0.1](https://github.com/fentas/b/compare/v3.0.0...v3.0.1) (2025-08-17)
 
 
