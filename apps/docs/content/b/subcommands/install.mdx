@@ -54,11 +54,36 @@ Use the `--force` flag to overwrite an existing binary.
 b install --force jq
 ```
 
+### Install with an alias
+
+Use the `--alias` flag to install a binary under a different name. This is useful when you want to use a custom name for a binary while still using the original binary's implementation.
+
+```bash
+b install --alias envsubst renvsubst
+```
+
+This installs `renvsubst` but makes it available as `envsubst`. The alias binary will:
+- Download and install the original binary (`renvsubst`)
+- Create the alias binary file (`envsubst`) 
+- Work with all commands like version detection and execution
+- Show in listings with the alias relationship: `renvsubst (envsubst)`
+
+You can combine `--alias` with other flags:
+
+```bash
+# Install with alias and add to config
+b install --alias envsubst --add renvsubst
+
+# Install specific version with alias
+b install --alias myenvsubst renvsubst@v0.10.0
+```
+
 ## Flags
 
 | Flag         | Description                               |
 |--------------|-------------------------------------------|
 | `--add`      | Add binary to b.yaml during install       |
+| `--alias`    | Install binary under a different name     |
 | `--fix`      | Pin the specified version in b.yaml       |
 | `-h`, `--help` | help for install                          |
 

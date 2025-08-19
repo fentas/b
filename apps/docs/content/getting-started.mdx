@@ -131,7 +131,30 @@ binaries:
     version: "v1.28.0"
   # leave empty for latest version
   terraform:
+  # alias: install one binary under a different name
+  envsubst:
+    alias: renvsubst
 ```
+
+### Binary Aliases
+
+You can create aliases for binaries using the `alias` field. This installs one binary but makes it available under a different name:
+
+```yaml
+binaries:
+  # This installs 'renvsubst' but makes it available as 'envsubst'
+  envsubst:
+    alias: renvsubst
+  # You can combine alias with version constraints
+  myenvsubst:
+    alias: renvsubst
+    version: "v0.10.0"
+```
+
+Aliases are useful when:
+- You want to use a standard name for a tool that has a different actual name
+- You need multiple versions of the same tool with different names
+- You want to maintain compatibility with existing scripts while using a different implementation
 
 ## Next Steps
 
