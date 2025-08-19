@@ -103,7 +103,7 @@ go install github.com/fentas/b/b@latest
 
 &nbsp;
 
-### 📚 How to use `b` as go import 
+### 🧬 How to use `b` as go import 
 
 To use this package, you need to import it into your Go project:
 
