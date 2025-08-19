@@ -70,7 +70,12 @@ func (list *BinaryList) MarshalYAML() (interface{}, error) {
 				config["alias"] = b.Alias
 			}
 
-			result[b.Name] = config
+			// If we have any configuration, use it; otherwise use empty struct
+			if len(config) > 0 {
+				result[b.Name] = config
+			} else {
+				result[b.Name] = &struct{}{}
+			}
 		}
 	}
 	return result, nil
