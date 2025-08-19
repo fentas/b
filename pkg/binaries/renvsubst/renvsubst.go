@@ -15,11 +15,13 @@ func sys() string {
 		return "x86_64-apple-darwin"
 	case "linux":
 		switch runtime.GOARCH {
+		case "amd64":
+			return "x86_64-unknown-linux-musl"
 		case "arm":
 			return "armv7-unknown-linux-musleabihf"
 		}
 	}
-	return "x86_64-unknown-linux-musl"
+	return ""
 }
 
 func Binary(options *binaries.BinaryOptions) *binary.Binary {
@@ -36,9 +38,13 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 		Name:       "renvsubst",
 		GitHubRepo: "containeroo/renvsubst",
 		GitHubFileF: func(b *binary.Binary) (string, error) {
+			s := sys()
+			if s == "" {
+				return "", fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
+			}
 			return fmt.Sprintf("renvsubst-%s-%s.tar.gz",
 				b.Version,
-				sys(),
+				s,
 			), nil
 		},
 		IsTarGz:  true,
