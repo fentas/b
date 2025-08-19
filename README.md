@@ -14,9 +14,11 @@
 &nbsp;
 
 <p align="left">
+	
 `b` is a binary or a Go package that provides a set of utilities for managing and executing binary files. It is particularly useful for binaries hosted on GitHub.
 
 The package includes a `Binary` struct that represents a binary file, including its name, file path, version, and other related properties. You can create a `Binary` struct by providing the binary name and version, and then use the `EnsureBinary` method to ensure that the binary is available on the system.
+
 </p>
 
 &nbsp;
@@ -38,6 +40,9 @@ b i kubectl helm
 
 # Install and add binary to config
 b install --add jq@1.7
+
+# Install with alias
+b i --alias envsubst renvsubst
 
 # Update all binaries
 b update
@@ -79,9 +84,9 @@ binaries:
     version: jq-1.8.1
   kind:
   tilt:
-	# alias to renvsubst
-	envsubst:
-		alias: renvsubst
+  # alias to renvsubst
+  envsubst:
+    alias: renvsubst
 ```
 
 This will ensure that `jq`, `kind`, `renvsubst` and `tilt` are installed and at the correct version. If you don't specify a version, `b` will install the latest version.
