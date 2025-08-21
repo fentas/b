@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.0](https://github.com/fentas/b/compare/v4.0.0...v4.1.0) (2025-08-21)
+
+
+### Features
+
+* add kubelogin binary support for Kubernetes OpenID Connect authentication ([#74](https://github.com/fentas/b/issues/74)) ([5dfdde6](https://github.com/fentas/b/commit/5dfdde600fb2eb7c538ca862c8b48bf0fbfd3db8))
+
 ## [4.0.0](https://github.com/fentas/b/compare/v3.0.1...v4.0.0) (2025-08-19)
 
 
