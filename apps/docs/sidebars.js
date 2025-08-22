@@ -38,6 +38,15 @@ module.exports = {
     },
     {
       type: "doc",
+      id: "docker",
+      label: "Docker Usage",
+      customProps: {
+        sidebar_icon: "cube",
+      },
+      className: "homepage-sidebar-item",
+    },
+    {
+      type: "doc",
       id: "troubleshooting",
       label: "Troubleshooting",
       customProps: {

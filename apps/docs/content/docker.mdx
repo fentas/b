@@ -1,0 +1,200 @@
+---
+description: 'Use b with Docker containers and integrate into your Docker workflows'
+---
+
+# Using b with Docker
+
+**b** provides official Docker images that make it easy to use binary management in containerized environments without installing **b** locally.
+
+## Docker Images
+
+The official Docker images are available at `ghcr.io/fentas/b` with support for both AMD64 and ARM64 architectures.
+
+### Quick Usage
+
+```bash
+# List available binaries
+docker run --rm -v ./.bin:/.bin ghcr.io/fentas/b list
+
+# Install binaries using Docker
+docker run --rm -v ./.bin:/.bin ghcr.io/fentas/b install jq kubectl
+
+# Install b itself and other tools
+docker run --rm -v ./.bin:/.bin ghcr.io/fentas/b install b jq kubectl
+```
+
+## Volume Mounting
+
+The key to using **b** with Docker is properly mounting your binary directory:
+
+- **Host path**: `./.bin` (your local binary directory)
+- **Container path**: `/.bin` (where b expects to find/install binaries)
+
+```bash
+# Mount current directory's .bin folder
+docker run --rm -v ./.bin:/.bin ghcr.io/fentas/b install terraform
+
+# Use absolute paths if needed
+docker run --rm -v /path/to/project/.bin:/.bin ghcr.io/fentas/b list
+```
+
+## Environment Variables
+
+You can also use environment variables to control where **b** installs binaries:
+
+```bash
+# Set PATH_BIN to specify installation directory
+docker run --rm -v ./.bin:/usr/local/bin -e PATH_BIN=/usr/local/bin ghcr.io/fentas/b install helm
+
+# Set PATH_BASE for project-relative installation
+docker run --rm -v ./:/app -e PATH_BASE=/app ghcr.io/fentas/b install kubectl
+```
+
+## Using in Your Own Dockerfiles
+
+### Multi-stage Copy
+
+Copy the **b** binary from the official image into your own containers:
+
+```dockerfile
+FROM alpine:latest
+
+# Copy the b binary from the official image
+COPY --from=ghcr.io/fentas/b:latest /b /usr/local/bin/b
+
+# Set up environment for b to work
+ENV PATH_BIN=/usr/local/bin
+
+# Install binaries during build
+RUN b install jq kubectl helm
+
+# Your application code
+COPY . /app
+WORKDIR /app
+```
+
+### CI/CD Integration
+
+Use **b** in your CI/CD pipelines with Docker:
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install project tools with b
+        run: |
+          docker run --rm -v ./.bin:/.bin ghcr.io/fentas/b install jq kubectl
+          
+      - name: Add tools to PATH
+        run: echo "${{ github.workspace }}/.bin" >> $GITHUB_PATH
+        
+      - name: Use installed tools
+        run: |
+          kubectl version --client
+          jq --version
+```
+
+### Docker Compose
+
+Integrate **b** into your Docker Compose workflows:
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+services:
+  tools:
+    image: ghcr.io/fentas/b:latest
+    volumes:
+      - ./.bin:/.bin
+    command: install kubectl helm terraform
+    
+  app:
+    build: .
+    depends_on:
+      - tools
+    volumes:
+      - ./.bin:/usr/local/bin
+    environment:
+      - PATH=/usr/local/bin:$PATH
+```
+
+## Available Tags
+
+- `ghcr.io/fentas/b:latest` - Latest stable version (multi-arch)
+- `ghcr.io/fentas/b:v4.3.0` - Specific version (multi-arch)
+- `ghcr.io/fentas/b:latest-amd64` - AMD64 specific
+- `ghcr.io/fentas/b:latest-arm64` - ARM64 specific
+
+## Best Practices
+
+### 1. Use Volume Mounts
+
+Always mount your binary directory to persist installed tools:
+
+```bash
+# ✅ Good - tools persist after container exits
+docker run --rm -v ./.bin:/.bin ghcr.io/fentas/b install jq
+
+# ❌ Bad - tools are lost when container exits
+docker run --rm ghcr.io/fentas/b install jq
+```
+
+### 2. Pin Versions in Production
+
+Use specific image tags in production environments:
+
+```dockerfile
+# ✅ Good - predictable builds
+COPY --from=ghcr.io/fentas/b:v4.3.0 /b /usr/local/bin/b
+
+# ❌ Avoid in production - may break with updates
+COPY --from=ghcr.io/fentas/b:latest /b /usr/local/bin/b
+```
+
+### 3. Set Environment Variables
+
+Explicitly set PATH_BIN when using custom installation directories:
+
+```dockerfile
+ENV PATH_BIN=/usr/local/bin
+RUN b install kubectl
+```
+
+## Troubleshooting
+
+### Permission Issues
+
+If you encounter permission issues with volume mounts:
+
+```bash
+# Run with current user ID
+docker run --rm --user $(id -u):$(id -g) -v ./.bin:/.bin ghcr.io/fentas/b install jq
+```
+
+### Binary Not Found
+
+Ensure your PATH includes the binary directory:
+
+```bash
+# Add .bin to PATH
+export PATH="$PWD/.bin:$PATH"
+
+# Or use absolute path
+/path/to/project/.bin/kubectl version
+```
+
+### Environment Configuration
+
+If **b** fails to install, ensure environment variables are set:
+
+```bash
+# Check if PATH_BIN or PATH_BASE is needed
+docker run --rm -e PATH_BIN=/.bin -v ./.bin:/.bin ghcr.io/fentas/b install jq
+```
