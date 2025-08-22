@@ -148,6 +148,7 @@ Have a look at [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 - [k9s](https://github.com/derailed/k9s) - Kubernetes CLI to manage your clusters
 - [kind](https://github.com/kubernetes-sigs/kind) - Kubernetes IN Docker
 - [kubectl](https://github.com/kubernetes/kubectl) - Kubernetes CLI to manage your clusters
+- [kubectl-cnpg](https://github.com/cloudnative-pg/cloudnative-pg) - CloudNativePG kubectl plugin to manage PostgreSQL databases
 - [kubelogin - int128](https://github.com/int128/kubelogin) - kubectl plugin for Kubernetes OpenID Connect authentication (kubectl oidc-login)
 - [kubeseal](https://github.com/bitnami-labs/sealed-secrets) - A Kubernetes controller and tool for one-way encrypted Secrets
 - [kustomize](https://github.com/kubernetes-sigs/kustomize) - Kubernetes native configuration management
