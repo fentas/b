@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.2.0](https://github.com/fentas/b/compare/v4.1.0...v4.2.0) (2025-08-22)
+
+
+### Features
+
+* add ssh-to-age binary support for converting SSH Ed25519 keys to age keys ([#77](https://github.com/fentas/b/issues/77)) ([8837eab](https://github.com/fentas/b/commit/8837eab23623702f0a5c3c1172a9d18abce57e89))
+
 ## [4.1.0](https://github.com/fentas/b/compare/v4.0.0...v4.1.0) (2025-08-21)
 
 
