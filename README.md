@@ -106,7 +106,23 @@ docker run --rm -v ./.bin:/.bin ghcr.io/fentas/b list
 docker run --rm -v ./.bin:/.bin ghcr.io/fentas/b install b jq kubectl
 ```
 
-The Docker image is available for both AMD64 and ARM64 architectures and will automatically select the correct one for your system.
+#### Using in your own Dockerfile
+
+You can also copy the `b` binary into your own Docker images:
+
+```dockerfile
+FROM alpine:latest
+
+# Copy the b binary from the official image
+COPY --from=ghcr.io/fentas/b:latest /b /usr/local/bin/b
+
+# Install binaries during build
+RUN b install jq kubectl helm
+
+# Your application code
+COPY . /app
+WORKDIR /app
+```
 
 &nbsp;
 
