@@ -57,5 +57,22 @@ archives:
       - LICENSE
       - README.md
 
+dockers:
+  - image_templates:
+      - "ghcr.io/fentas/b:{{ .Tag }}"
+      - "ghcr.io/fentas/b:v{{ .Major }}"
+      - "ghcr.io/fentas/b:v{{ .Major }}.{{ .Minor }}"
+      - "ghcr.io/fentas/b:latest"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--platform=linux/amd64,linux/arm64"
+
 release:
   draft: false
