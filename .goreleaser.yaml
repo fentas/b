@@ -58,11 +58,12 @@ archives:
       - README.md
 
 dockers:
-  - image_templates:
-      - "ghcr.io/fentas/b:{{ .Tag }}"
-      - "ghcr.io/fentas/b:v{{ .Major }}"
-      - "ghcr.io/fentas/b:v{{ .Major }}.{{ .Minor }}"
-      - "ghcr.io/fentas/b:latest"
+  - id: amd64
+    image_templates:
+      - "ghcr.io/fentas/b:{{ .Tag }}-amd64"
+      - "ghcr.io/fentas/b:v{{ .Major }}-amd64"
+      - "ghcr.io/fentas/b:v{{ .Major }}.{{ .Minor }}-amd64"
+      - "ghcr.io/fentas/b:latest-amd64"
     dockerfile: Dockerfile
     use: buildx
     build_flag_templates:
@@ -72,7 +73,43 @@ dockers:
       - "--label=org.opencontainers.image.revision={{.FullCommit}}"
       - "--label=org.opencontainers.image.version={{.Version}}"
       - "--label=org.opencontainers.image.source={{.GitURL}}"
-      - "--platform=linux/amd64,linux/arm64"
+      - "--platform=linux/amd64"
+    goarch: amd64
+  - id: arm64
+    image_templates:
+      - "ghcr.io/fentas/b:{{ .Tag }}-arm64"
+      - "ghcr.io/fentas/b:v{{ .Major }}-arm64"
+      - "ghcr.io/fentas/b:v{{ .Major }}.{{ .Minor }}-arm64"
+      - "ghcr.io/fentas/b:latest-arm64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--platform=linux/arm64"
+    goarch: arm64
+
+docker_manifests:
+  - name_template: "ghcr.io/fentas/b:{{ .Tag }}"
+    image_templates:
+      - "ghcr.io/fentas/b:{{ .Tag }}-amd64"
+      - "ghcr.io/fentas/b:{{ .Tag }}-arm64"
+  - name_template: "ghcr.io/fentas/b:v{{ .Major }}"
+    image_templates:
+      - "ghcr.io/fentas/b:v{{ .Major }}-amd64"
+      - "ghcr.io/fentas/b:v{{ .Major }}-arm64"
+  - name_template: "ghcr.io/fentas/b:v{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - "ghcr.io/fentas/b:v{{ .Major }}.{{ .Minor }}-amd64"
+      - "ghcr.io/fentas/b:v{{ .Major }}.{{ .Minor }}-arm64"
+  - name_template: "ghcr.io/fentas/b:latest"
+    image_templates:
+      - "ghcr.io/fentas/b:latest-amd64"
+      - "ghcr.io/fentas/b:latest-arm64"
 
 release:
   draft: false
