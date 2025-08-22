@@ -94,6 +94,22 @@ Note that `renvsubst` is installed as `envsubst`.
 
 &nbsp;
 
+### 🐳 Using Docker
+
+You can run `b` using Docker without installing it locally:
+
+```bash
+# Run b with volume mount to access .bin directory
+docker run --rm -v ./.bin:/.bin ghcr.io/fentas/b list
+
+# Install binaries using Docker
+docker run --rm -v ./.bin:/.bin ghcr.io/fentas/b install b jq kubectl
+```
+
+The Docker image is available for both AMD64 and ARM64 architectures and will automatically select the correct one for your system.
+
+&nbsp;
+
 ### 📚 Documentation
 
 All related documentation, including the source for the website, is located on the [`docs` branch](https://github.com/fentas/b/tree/docs).
