@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.3.0](https://github.com/fentas/b/compare/v4.2.0...v4.3.0) (2025-08-22)
+
+
+### Features
+
+* add kubectl-cnpg plugin support for CloudNativePG management ([#82](https://github.com/fentas/b/issues/82)) ([f38878a](https://github.com/fentas/b/commit/f38878a79769cb6ba63133cc38cd7884b7e207fa))
+
+
+### Bug Fixes
+
+* docker build for goreleaser ([#85](https://github.com/fentas/b/issues/85)) ([0c19bae](https://github.com/fentas/b/commit/0c19bae39b41a9d5fea401390ce12c72d30b21fe))
+* split docker builds into separate amd64/arm64 manifests with multi-arch support ([#84](https://github.com/fentas/b/issues/84)) ([4dda766](https://github.com/fentas/b/commit/4dda766e83fd40fb5f8c3af3331188320bce46fe))
+
 ## [4.2.0](https://github.com/fentas/b/compare/v4.1.0...v4.2.0) (2025-08-22)
 
 
