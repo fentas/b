@@ -117,7 +117,8 @@ FROM alpine:latest
 COPY --from=ghcr.io/fentas/b:latest /b /usr/local/bin/b
 
 # Install binaries during build
-RUN b install jq kubectl helm
+ENV PATH_BIN=/usr/local/bin
+RUN b install curl jq
 
 # Your application code
 COPY . /app
