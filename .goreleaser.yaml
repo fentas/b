@@ -61,8 +61,6 @@ dockers:
   - id: amd64
     image_templates:
       - "ghcr.io/fentas/b:{{ .Tag }}-amd64"
-      - "ghcr.io/fentas/b:v{{ .Major }}-amd64"
-      - "ghcr.io/fentas/b:v{{ .Major }}.{{ .Minor }}-amd64"
       - "ghcr.io/fentas/b:latest-amd64"
     dockerfile: Dockerfile
     use: buildx
@@ -78,8 +76,6 @@ dockers:
   - id: arm64
     image_templates:
       - "ghcr.io/fentas/b:{{ .Tag }}-arm64"
-      - "ghcr.io/fentas/b:v{{ .Major }}-arm64"
-      - "ghcr.io/fentas/b:v{{ .Major }}.{{ .Minor }}-arm64"
       - "ghcr.io/fentas/b:latest-arm64"
     dockerfile: Dockerfile
     use: buildx
@@ -98,14 +94,6 @@ docker_manifests:
     image_templates:
       - "ghcr.io/fentas/b:{{ .Tag }}-amd64"
       - "ghcr.io/fentas/b:{{ .Tag }}-arm64"
-  - name_template: "ghcr.io/fentas/b:v{{ .Major }}"
-    image_templates:
-      - "ghcr.io/fentas/b:v{{ .Major }}-amd64"
-      - "ghcr.io/fentas/b:v{{ .Major }}-arm64"
-  - name_template: "ghcr.io/fentas/b:v{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - "ghcr.io/fentas/b:v{{ .Major }}.{{ .Minor }}-amd64"
-      - "ghcr.io/fentas/b:v{{ .Major }}.{{ .Minor }}-arm64"
   - name_template: "ghcr.io/fentas/b:latest"
     image_templates:
       - "ghcr.io/fentas/b:latest-amd64"
