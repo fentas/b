@@ -11,6 +11,8 @@ import (
 	"github.com/fentas/b/pkg/binary"
 )
 
+var versionRegexp = regexp.MustCompile(`Version:([\d.]+)`)
+
 func Binary(options *binaries.BinaryOptions) *binary.Binary {
 	if options == nil {
 		options = &binaries.BinaryOptions{
@@ -42,7 +44,7 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 			if err != nil {
 				return "", err
 			}
-			v := regexp.MustCompile(`Version:([\d.]+)`).FindStringSubmatch(s)
+			v := versionRegexp.FindStringSubmatch(s)
 			if len(v) < 2 {
 				return "", fmt.Errorf("version not found")
 			}
