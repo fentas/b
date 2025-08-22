@@ -61,7 +61,6 @@ dockers:
   - image_templates:
       - "ghcr.io/fentas/b:{{ .Tag }}"
       - "ghcr.io/fentas/b:v{{ .Major }}"
-      - "ghcr.io/fentas/b:v{{ .Major }}.{{ .Minor }}"
       - "ghcr.io/fentas/b:latest"
     dockerfile: Dockerfile
     use: buildx
