@@ -17,7 +17,7 @@ RUN go mod download
 COPY . .
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-w -s" \
     -o b \
     ./cmd/b/main.go
