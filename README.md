@@ -155,6 +155,7 @@ Have a look at [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 - [packer](https://github.com/hashicorp/packer) - Packer is a tool for creating machine and container images
 - [renvsubst](https://github.com/containeroo/renvsubst) - envsubst with some extra features written in Rust
 - [sops](https://github.com/getsops/sops) - Secure processing of configuration files
+- [ssh-to-age](https://github.com/Mic92/ssh-to-age) - Convert SSH Ed25519 keys to age keys
 - [stern](https://github.com/stern/stern) - Simultaneous log tailing for multiple Kubernetes pods and containers
 - [tilt](https://github.com/tilt-dev/tilt) - Local Kubernetes development with no stress
 - [yq](https://github.com/mikefarah/yq) - Command-line YAML processor
