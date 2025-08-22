@@ -25,6 +25,7 @@ import (
 	"github.com/fentas/b/pkg/binaries/packer"
 	"github.com/fentas/b/pkg/binaries/renvsubst"
 	"github.com/fentas/b/pkg/binaries/sops"
+	sshtoage "github.com/fentas/b/pkg/binaries/ssh-to-age"
 	"github.com/fentas/b/pkg/binaries/stern"
 	"github.com/fentas/b/pkg/binaries/tilt"
 	"github.com/fentas/b/pkg/binaries/yq"
@@ -66,6 +67,7 @@ func main() {
 		packer.Binary(o),
 		renvsubst.Binary(o),
 		sops.Binary(o),
+		sshtoage.Binary(o),
 		stern.Binary(o),
 		tilt.Binary(o),
 		yq.Binary(o),
