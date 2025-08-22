@@ -18,6 +18,7 @@ import (
 	"github.com/fentas/b/pkg/binaries/k9s"
 	"github.com/fentas/b/pkg/binaries/kind"
 	"github.com/fentas/b/pkg/binaries/kubectl"
+	kubectlcnpg "github.com/fentas/b/pkg/binaries/kubectl-cnpg"
 	"github.com/fentas/b/pkg/binaries/kubelogin"
 	"github.com/fentas/b/pkg/binaries/kubeseal"
 	"github.com/fentas/b/pkg/binaries/kustomize"
@@ -60,6 +61,7 @@ func main() {
 		k9s.Binary(o),
 		kind.Binary(o),
 		kubectl.Binary(o),
+		kubectlcnpg.Binary(o),
 		kubelogin.Binary(o),
 		kubeseal.Binary(o),
 		kustomize.Binary(o),
