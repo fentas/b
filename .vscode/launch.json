@@ -10,7 +10,7 @@
       "request": "launch",
       "mode": "debug",
       "program": "${workspaceRoot}/cmd/b/main.go",
-      "args": ["v", "envsubst"]
+      "args": ["v", "argocd"]
     } 
   ]
 }

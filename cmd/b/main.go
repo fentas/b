@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/fentas/b/pkg/binaries"
+	"github.com/fentas/b/pkg/binaries/argocd"
 	"github.com/fentas/b/pkg/binaries/argsh"
 	"github.com/fentas/b/pkg/binaries/b"
 	"github.com/fentas/b/pkg/binaries/cilium"
@@ -48,6 +49,7 @@ func main() {
 	}
 
 	binaries := []*binary.Binary{
+		argocd.Binary(o),
 		argsh.Binary(o),
 		b.Binary(o),
 		cilium.Binary(o),
