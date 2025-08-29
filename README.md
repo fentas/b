@@ -168,6 +168,7 @@ Have a look at [pkg/binary](./pkg/binary/) for more details.
 
 Have a look at [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 
+- [argocd](https://github.com/argoproj/argo-cd) - Declarative Continuous Deployment for Kubernetes
 - [argsh](https://github.com/arg-sh/argsh) - Utilities for Bash script quality
 - `b` - (Selfupdate) Manage and execute binary files
 - [cilium](https://github.com/cilium/cilium-cli) - Providing, securing, and observing network connectivity between workloads

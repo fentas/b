@@ -1,14 +1,17 @@
-package packer
+// Package argocd implements the argocd binary.
+package argocd
 
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"runtime"
-	"strings"
 
 	"github.com/fentas/b/pkg/binaries"
 	"github.com/fentas/b/pkg/binary"
 )
+
+var argocdVersionRegex = regexp.MustCompile(`argocd: (v[\.\d]+)`)
 
 func Binary(options *binaries.BinaryOptions) *binary.Binary {
 	if options == nil {
@@ -21,28 +24,22 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 		Envs:       options.Envs,
 		Tracker:    options.Tracker,
 		Version:    options.Version,
-		Name:       "packer",
-		GitHubRepo: "hashicorp/packer",
-		URLF: func(b *binary.Binary) (string, error) {
-			// https://releases.hashicorp.com/packer/1.13.1/packer_1.13.1_linux_amd64.zip
-			return fmt.Sprintf(
-				"https://releases.hashicorp.com/packer/%s/packer_%s_%s_%s.zip",
-				b.Version[1:],
-				b.Version[1:],
-				runtime.GOOS,
-				runtime.GOARCH,
-			), nil
-		},
-		VersionF: binary.GithubLatest,
-		IsZip:    true,
+		Name:       "argocd",
+		GitHubRepo: "argoproj/argo-cd",
+		GitHubFile: fmt.Sprintf("argocd-%s-%s", runtime.GOOS, runtime.GOARCH),
+		VersionF:   binary.GithubLatest,
+		IsTarGz:    false,
 		VersionLocalF: func(b *binary.Binary) (string, error) {
 			b.Envs = map[string]string{"HOME": "/tmp"}
-			s, err := b.Exec("version")
+			s, err := b.Exec("version", "--client", "--short")
 			if err != nil {
 				return "", err
 			}
-			v := strings.Split(s, " ")
-			return v[len(v)-1], nil
+			v := argocdVersionRegex.FindStringSubmatch(s)
+			if len(v) != 2 {
+				return "", fmt.Errorf("argocd version regex did not match")
+			}
+			return v[1], nil
 		},
 	}
 }
