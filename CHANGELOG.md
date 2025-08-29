@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.4.0](https://github.com/fentas/b/compare/v4.3.0...v4.4.0) (2025-08-29)
+
+
+### Features
+
+* add argocd binary support and fix packer environment setup ([#87](https://github.com/fentas/b/issues/87)) ([5dd946e](https://github.com/fentas/b/commit/5dd946e4d4b5a3a9a7db9f7872267ee1e7c2db25))
+
 ## [4.3.0](https://github.com/fentas/b/compare/v4.2.0...v4.3.0) (2025-08-22)
 
 
