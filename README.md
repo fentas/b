@@ -87,10 +87,19 @@ binaries:
   # alias to renvsubst
   envsubst:
     alias: renvsubst
+  # custom binary with specific file path
+  kubectl:
+    file: ../kc  # absolute or relative to config file
 ```
 
 This will ensure that `jq`, `kind`, `renvsubst` and `tilt` are installed and at the correct version. If you don't specify a version, `b` will install the latest version.
 Note that `renvsubst` is installed as `envsubst`.
+
+You can also specify custom file paths using the `file` field:
+
+- **Relative paths** (like `../kc` or `./bin/tool`) are resolved relative to the config file location
+- **Absolute paths** (like `/usr/local/bin/tool`) are used as-is (be aware of permissions)
+- This allows you to point to existing binaries or specify custom installation locations
 
 &nbsp;
 
