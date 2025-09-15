@@ -25,6 +25,14 @@ func LoadConfigFromPath(configPath string) (*State, error) {
 		return nil, err
 	}
 
+	// Resolve relative file paths relative to config file location
+	configDir := filepath.Dir(configPath)
+	for _, b := range state.Binaries {
+		if b.File != "" && !filepath.IsAbs(b.File) {
+			b.File = filepath.Join(configDir, b.File)
+		}
+	}
+
 	return &state, nil
 }
 

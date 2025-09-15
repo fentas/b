@@ -89,6 +89,9 @@ func (o *SharedOptions) resolveBinary(lb *binary.LocalBinary) (*binary.Binary, b
 		if lb.Enforced != "" {
 			b.Version = lb.Enforced
 		}
+		if lb.File != "" {
+			b.File = lb.File
+		}
 	}
 
 	return b, ok

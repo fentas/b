@@ -70,6 +70,11 @@ func (list *BinaryList) MarshalYAML() (interface{}, error) {
 				config["alias"] = b.Alias
 			}
 
+			// Add file if specified
+			if b.File != "" {
+				config["file"] = b.File
+			}
+
 			// If we have any configuration, use it; otherwise use empty struct
 			if len(config) > 0 {
 				result[b.Name] = config
