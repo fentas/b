@@ -134,6 +134,11 @@ binaries:
   # alias: install one binary under a different name
   envsubst:
     alias: renvsubst
+  # custom file paths
+  custom-kubectl:
+    file: ../bin/kubectl  # relative to config file
+  system-tool:
+    file: /usr/local/bin/tool  # absolute path
 ```
 
 ### Binary Aliases
@@ -155,6 +160,36 @@ Aliases are useful when:
 - You want to use a standard name for a tool that has a different actual name
 - You need multiple versions of the same tool with different names
 - You want to maintain compatibility with existing scripts while using a different implementation
+
+### Custom File Paths
+
+You can specify custom file paths for binaries using the `file` field. This allows you to:
+- Point to existing binaries on your system
+- Specify custom installation locations
+- Use binaries from different directories
+
+```yaml
+binaries:
+  # Relative paths are resolved relative to the config file location
+  kubectl:
+    file: ../bin/kubectl
+    version: "v1.28.0"
+  
+  # Absolute paths are used as-is
+  custom-tool:
+    file: /usr/local/bin/custom-tool
+  
+  # Combine with other options
+  my-jq:
+    file: ./tools/jq
+    version: "jq-1.7"
+    alias: jq
+```
+
+**Path Resolution:**
+- **Relative paths** (like `../bin/tool` or `./tools/binary`) are resolved relative to the config file's directory
+- **Absolute paths** (like `/usr/local/bin/tool`) are used exactly as specified (mind the permissions)
+- This feature is particularly useful for pointing to pre-existing binaries or organizing tools in custom directory structures
 
 ## Next Steps
 
