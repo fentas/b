@@ -3,3 +3,4 @@ binaries:
     alias: renvsubst
   jq: {}
   kubectl: {}
+  khelm: {}

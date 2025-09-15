@@ -189,6 +189,7 @@ Have a look at [pkg/binaries](./pkg/binaries/) for prepackaged binaries.
 - [hubble](https://github.com/cilium/hubble) - Fully distributed networking and security observability platform
 - [jq](https://github.com/jqlang/jq) - Command-line JSON processor
 - [k9s](https://github.com/derailed/k9s) - Kubernetes CLI to manage your clusters
+- [khelm](https://github.com/mgoltzsche/khelm) - A Helm chart templating CLI, kustomize plugin and containerized kustomize/kpt KRM function
 - [kind](https://github.com/kubernetes-sigs/kind) - Kubernetes IN Docker
 - [kubectl](https://github.com/kubernetes/kubectl) - Kubernetes CLI to manage your clusters
 - [kubectl-cnpg](https://github.com/cloudnative-pg/cloudnative-pg) - CloudNativePG kubectl plugin to manage PostgreSQL databases

@@ -17,6 +17,7 @@ import (
 	"github.com/fentas/b/pkg/binaries/hubble"
 	"github.com/fentas/b/pkg/binaries/jq"
 	"github.com/fentas/b/pkg/binaries/k9s"
+	"github.com/fentas/b/pkg/binaries/khelm"
 	"github.com/fentas/b/pkg/binaries/kind"
 	"github.com/fentas/b/pkg/binaries/kubectl"
 	kubectlcnpg "github.com/fentas/b/pkg/binaries/kubectl-cnpg"
@@ -61,6 +62,7 @@ func main() {
 		hubble.Binary(o),
 		jq.Binary(o),
 		k9s.Binary(o),
+		khelm.Binary(o),
 		kind.Binary(o),
 		kubectl.Binary(o),
 		kubectlcnpg.Binary(o),
