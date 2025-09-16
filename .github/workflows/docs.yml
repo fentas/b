@@ -2,7 +2,7 @@ name: Deploy Documentation
 
 on:
   push:
-    branches: [ docs, main ]
+    branches: [ docs ]
   pull_request:
     branches: [ docs ]
 
@@ -16,58 +16,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      deploy: ${{ steps.condition.outputs.deploy }}
-      is_docs_pr: ${{ steps.condition.outputs.is_docs_pr }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Detect changes
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            docs_main:
-              - 'docs/**'
-      
-      - name: Set deploy condition
-        id: condition
-        run: |
-          # deploy if docs branch or main branch and docs_main changed
-          echo "deploy=${{ github.ref == 'refs/heads/docs' || (github.ref == 'refs/heads/main' && steps.filter.outputs.docs_main == 'true') }}" >> "$GITHUB_OUTPUT"
-          # filter if docs branch and pr
-          echo "is_docs_pr=${{ github.event_name == 'pull_request' && github.base_ref == 'docs' }}" >> "$GITHUB_OUTPUT"
-
   build:
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.is_docs_pr == 'true' || needs.changes.outputs.deploy == 'true'
     steps:
-      - name: Checkout docs branch
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: docs
-
-      - name: Checkout main branch docs content
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          path: main-repo
-          sparse-checkout: |
-            docs
-          sparse-checkout-cone-mode: false
-
-      - name: Copy main branch docs to content directory
-        run: |
-          if [ -d "main-repo/docs" ]; then
-            rm -rf apps/docs/content
-            cp -r main-repo/docs/ apps/docs/content
-            echo "Copied docs from main branch"
-          else
-            echo "No docs directory found in main branch, using existing content"
-          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -85,17 +38,17 @@ jobs:
           yarn run build
 
       - name: Setup Pages
-        if: needs.changes.outputs.deploy == 'true'
+        if: github.ref == 'refs/heads/docs'
         uses: actions/configure-pages@v4
 
       - name: Upload artifact
-        if: needs.changes.outputs.deploy == 'true'
+        if: github.ref == 'refs/heads/docs'
         uses: actions/upload-pages-artifact@v3
         with:
           path: apps/docs/build
 
   deploy:
-    if: needs.changes.outputs.deploy == 'true'
+    if: github.ref == 'refs/heads/docs'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
