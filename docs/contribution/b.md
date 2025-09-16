@@ -16,6 +16,7 @@ b is a binary manager for developers that simplifies installation, versioning, a
 Binaries are the command-line tools managed by b. Their definitions are stored as individual Go files in the `pkg/binaries` directory. Adding a new file to this directory is sufficient to register a new binary; no manual registration in `cmd/b/main.go` is needed.
 
 ```
+├── docs # Documentation for b
 ├── cmd
 │   └── b
 │       └── # Root command where subcommands are registered
