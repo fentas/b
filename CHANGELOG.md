@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.5.0](https://github.com/fentas/b/compare/v4.4.0...v4.5.0) (2025-09-15)
+
+
+### Features
+
+* add khelm binary for Helm chart templating ([2dd1d55](https://github.com/fentas/b/commit/2dd1d5541732c38e0fe71c71fd0d5a390e62418f))
+* add support for custom binary file paths in config ([#89](https://github.com/fentas/b/issues/89)) ([d1c0b07](https://github.com/fentas/b/commit/d1c0b07f2ccf2bd2338d766aa0f1edada0dba313))
+
 ## [4.4.0](https://github.com/fentas/b/compare/v4.3.0...v4.4.0) (2025-08-29)
 
 
