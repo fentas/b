@@ -2,9 +2,10 @@ name: Deploy Documentation
 
 on:
   push:
-    branches: [ docs ]
+    branches: [ main ]
+    
   pull_request:
-    branches: [ docs ]
+    branches: [ main ]
 
 permissions:
   contents: read
@@ -19,8 +20,29 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout docs branch
         uses: actions/checkout@v4
+        with:
+          ref: docs
+
+      - name: Checkout main branch docs content
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-repo
+          sparse-checkout: |
+            docs
+          sparse-checkout-cone-mode: false
+
+      - name: Copy main branch docs to content directory
+        run: |
+          if [ -d "main-repo/docs" ]; then
+            rm -rf apps/docs/content
+            cp -r main-repo/docs/ apps/docs/content
+            echo "Copied docs from main branch"
+          else
+            echo "No docs directory found in main branch, using existing content"
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
