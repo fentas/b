@@ -1,0 +1,48 @@
+---
+description: "Create new b.yaml config"
+---
+
+# b init
+
+Creates a new `.bin/b.yaml` configuration file in the current directory. Environment variables have precedence over the configuration file.
+
+## Usage
+
+```bash
+b init [flags]
+```
+
+## Examples
+
+### Create default config
+
+This command creates a new `b.yaml` in the `.bin` directory of your current location.
+
+```bash
+# Create new b.yaml in current directory
+b init
+```
+
+### Create with custom path
+
+You can specify a custom path for the configuration file using the `--config` global flag.
+
+```bash
+# Create with custom path
+b init --config ./custom/b.yaml
+```
+
+## Flags
+
+| Flag         | Description              |
+|--------------|--------------------------|
+| `-h`, `--help` | help for init            |
+
+## Global Flags
+
+| Flag                 | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
+| `--force`            | Force operations, overwriting existing binaries                          |
+| `-q`, `--quiet`      | Quiet mode                                                               |
+| `-v`, `--version`    | Print version information and quit                                       |

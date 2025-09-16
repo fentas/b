@@ -1,0 +1,58 @@
+---
+description: "Update binaries to their latest versions"
+---
+
+# b update
+
+Update binaries. If no arguments are given, `b` updates all binaries from the `b.yaml` configuration file.
+
+## Alias
+
+- `u`
+
+## Usage
+
+```bash
+b update [binary...] [flags]
+```
+
+## Examples
+
+### Update all binaries
+
+If a `b.yaml` file is present, this command will update all the binaries listed in it to their latest available versions.
+
+```bash
+b update
+```
+
+### Update a specific binary
+
+Update a single binary to its latest version.
+
+```bash
+b update jq
+```
+
+### Force an update
+
+Force an update even if the binary is already at the latest version. This is useful for re-installing a corrupted binary.
+
+```bash
+b update --force kubectl
+```
+
+## Flags
+
+| Flag         | Description               |
+|--------------|---------------------------|
+| `-h`, `--help` | help for update           |
+
+## Global Flags
+
+| Flag                 | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
+| `--force`            | Force operations, overwriting existing binaries                          |
+| `-q`, `--quiet`      | Quiet mode                                                               |
+| `-v`, `--version`    | Print version information and quit                                       |

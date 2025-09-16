@@ -1,0 +1,109 @@
+---
+description: "Generate the autocompletion script for the specified shell."
+---
+
+# b completion
+
+Generate the autocompletion script for `b` for the specified shell. See each sub-command's help for details on how to use the generated script.
+
+## Usage
+
+```bash
+b completion [command]
+```
+
+## Available Commands
+
+| Command      | Description                                  |
+|--------------|----------------------------------------------|
+| `bash`       | Generate the autocompletion script for bash  |
+| `fish`       | Generate the autocompletion script for fish  |
+| `powershell` | Generate the autocompletion script for powershell |
+| `zsh`        | Generate the autocompletion script for zsh   |
+
+## Flags
+
+| Flag     | Description           |
+|----------|-----------------------|
+| `-h`, `--help` | help for completion   |
+
+## Installation
+
+To use shell completion, you need to generate the script for your shell and source it.
+
+### Bash
+
+Add the following to your `~/.bashrc` or `~/.bash_profile`:
+
+```bash
+# Bash completion for b CLI
+source <(b completion bash)
+```
+
+For a better completion experience with bash, consider installing the `bash-completion` package:
+
+```bash
+# On macOS with Homebrew
+brew install bash-completion
+
+# On Ubuntu/Debian
+sudo apt-get install bash-completion
+```
+
+### Zsh
+
+Add the following to your `~/.zshrc`:
+
+```zsh
+# Zsh completion for b CLI
+if [ $commands[b] ]; then
+  source <(b completion zsh)
+fi
+```
+
+If you're using Oh My Zsh, the completion should work out of the box after installation.
+
+### Fish
+
+Save the completion script to your Fish completions directory:
+
+```bash
+# Create completions directory if it doesn't exist
+mkdir -p ~/.config/fish/completions
+
+# Generate and save completion script
+b completion fish > ~/.config/fish/completions/b.fish
+```
+
+### PowerShell
+
+Add the following to your PowerShell profile (`$PROFILE`):
+
+```powershell
+# PowerShell completion for b CLI
+b completion powershell | Out-String | Invoke-Expression
+```
+
+## Examples
+
+### Generate and Save Completion Script
+
+```bash
+# Generate bash completion script and save it
+b completion bash > /etc/bash_completion.d/b
+
+# Generate zsh completion script for Oh My Zsh
+b completion zsh > "${fpath[1]}/_b"
+```
+
+### Use in Current Session
+
+For a single session without modifying your shell configuration:
+
+```bash
+# Bash/Zsh
+source <(b completion bash)
+
+# Fish
+b completion fish | source
+```

@@ -1,0 +1,97 @@
+---
+description: "Install binaries from b.yaml or ad-hoc"
+---
+
+# b install
+
+Install binaries. If no arguments are given, `b` installs all binaries from the `b.yaml` configuration file. You can also install specific binaries on-the-fly.
+
+## Usage
+
+```bash
+b install [binary...] [flags]
+```
+
+## Examples
+
+### Install all binaries from config
+
+If a `b.yaml` file is present, this command will install all the binaries listed in it.
+
+```bash
+b install
+```
+
+### Install a specific binary
+
+Install the latest version of a specific binary.
+
+```bash
+b install jq
+```
+
+### Install a specific version
+
+Append `@<version>` to the binary name to install a specific version.
+
+```bash
+b install jq@jq-1.7
+```
+
+### Install and add to config
+
+Use the `--add` flag to install a binary and simultaneously add it to your `b.yaml`.
+
+```bash
+b install --add kubectl
+```
+
+### Force an installation
+
+Use the `--force` flag to overwrite an existing binary.
+
+```bash
+b install --force jq
+```
+
+### Install with an alias
+
+Use the `--alias` flag to install a binary under a different name. This is useful when you want to use a custom name for a binary while still using the original binary's implementation.
+
+```bash
+b install --alias envsubst renvsubst
+```
+
+This installs `renvsubst` but makes it available as `envsubst`. The alias binary will:
+- Download and install the original binary (`renvsubst`)
+- Create the alias binary file (`envsubst`) 
+- Work with all commands like version detection and execution
+- Show in listings with the alias relationship: `renvsubst (envsubst)`
+
+You can combine `--alias` with other flags:
+
+```bash
+# Install with alias and add to config
+b install --alias envsubst --add renvsubst
+
+# Install specific version with alias
+b install --alias myenvsubst renvsubst@v0.10.0
+```
+
+## Flags
+
+| Flag         | Description                               |
+|--------------|-------------------------------------------|
+| `--add`      | Add binary to b.yaml during install       |
+| `--alias`    | Install binary under a different name     |
+| `--fix`      | Pin the specified version in b.yaml       |
+| `-h`, `--help` | help for install                          |
+
+## Global Flags
+
+| Flag                 | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
+| `--force`            | Force operations, overwriting existing binaries                          |
+| `-q`, `--quiet`      | Quiet mode                                                               |
+| `-v`, `--version`    | Print version information and quit                                       |

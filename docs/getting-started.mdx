@@ -1,0 +1,196 @@
+---
+description: 'Install b and get started with binary management for your development projects'
+---
+
+# Getting Started with b
+
+Get up and running with **b** in just a few minutes. **b** helps you manage command-line tools and binaries for your development projects with automatic PATH management and version control.
+
+## Installation
+
+### Quick Install (Recommended)
+
+```bash
+# Install b
+curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+
+# Or using wget
+wget -qO- https://github.com/fentas/b/releases/latest/download/install.sh | bash
+```
+
+### Manual Installation
+
+1. Download the latest release for your platform from [GitHub Releases](https://github.com/fentas/b/releases)
+2. Extract the binary to a directory in your PATH
+3. Make it executable: `chmod +x b`
+
+### Verify Installation
+
+```bash
+b version
+```
+
+## Quick Start
+
+### 1. Initialize a Project
+
+```bash
+# Navigate to your project directory
+cd my-project
+
+# Initialize b configuration
+b init
+```
+
+This creates a `b.yaml` file in your project root.
+
+### 2. Install Tools
+
+```bash
+# Install specific versions
+b install jq@jq-1.7 kubectl@v1.28.0
+
+# Install latest versions
+b install terraform helm
+
+# Install and add to b.yaml
+b install --add docker-compose@v2.20.0
+```
+
+### 3. Use Your Tools
+
+Tools are automatically available in your PATH:
+
+```bash
+jq --version     # jq-1.7
+kubectl version  # v1.28.0
+```
+
+## Common Workflows
+
+### Team Collaboration
+
+Share tool requirements with your team:
+
+```bash
+# Add tools to b.yaml
+b install --add jq@jq-1.7 kubectl@v1.28.0
+
+# Commit b.yaml to version control
+git add .bin/b.yaml
+git commit -m "Add project tool requirements"
+
+# Team members can install the same tools
+b install  # Installs all tools from b.yaml
+```
+
+### CI/CD Integration
+
+Use **b** in your CI/CD pipelines:
+
+```yaml
+# .github/workflows/ci.yml
+steps:
+  - uses: actions/checkout@v4
+  - name: Install b
+    # todo: wrong url; create install script
+    run: curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+  - name: Install project tools
+    run: b install
+  - name: Run tests
+    run: |
+      kubectl version --client
+      jq --version
+```
+
+### Version Management
+
+```bash
+# List configured tools and their status
+b list
+
+# Update all tools to latest versions
+b update
+
+# Update specific tools
+b update kubectl
+
+# Search for available tools
+b search terraform
+```
+
+## Configuration
+
+The `.bin/b.yaml` file defines your project's tool requirements:
+
+```yaml
+binaries:
+  jq:
+    version: "jq-1.7"
+  kubectl:
+    version: "v1.28.0"
+  # leave empty for latest version
+  terraform:
+  # alias: install one binary under a different name
+  envsubst:
+    alias: renvsubst
+  # custom file paths
+  custom-kubectl:
+    file: ../bin/kubectl  # relative to config file
+  system-tool:
+    file: /usr/local/bin/tool  # absolute path
+```
+
+### Binary Aliases
+
+You can create aliases for binaries using the `alias` field. This installs one binary but makes it available under a different name:
+
+```yaml
+binaries:
+  # This installs 'renvsubst' but makes it available as 'envsubst'
+  envsubst:
+    alias: renvsubst
+  # You can combine alias with version constraints
+  myenvsubst:
+    alias: renvsubst
+    version: "v0.10.0"
+```
+
+Aliases are useful when:
+- You want to use a standard name for a tool that has a different actual name
+- You need multiple versions of the same tool with different names
+- You want to maintain compatibility with existing scripts while using a different implementation
+
+### Custom File Paths
+
+You can specify custom file paths for binaries using the `file` field. This allows you to:
+- Point to existing binaries on your system
+- Specify custom installation locations
+- Use binaries from different directories
+
+```yaml
+binaries:
+  # Relative paths are resolved relative to the config file location
+  kubectl:
+    file: ../bin/kubectl
+    version: "v1.28.0"
+  
+  # Absolute paths are used as-is
+  custom-tool:
+    file: /usr/local/bin/custom-tool
+  
+  # Combine with other options
+  my-jq:
+    file: ./tools/jq
+    version: "jq-1.7"
+    alias: jq
+```
+
+**Path Resolution:**
+- **Relative paths** (like `../bin/tool` or `./tools/binary`) are resolved relative to the config file's directory
+- **Absolute paths** (like `/usr/local/bin/tool`) are used exactly as specified (mind the permissions)
+- This feature is particularly useful for pointing to pre-existing binaries or organizing tools in custom directory structures
+
+## Next Steps
+
+- [CLI Reference](/b/overview) - Complete command reference

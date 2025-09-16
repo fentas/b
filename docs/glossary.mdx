@@ -1,0 +1,71 @@
+---
+description: "Learn about the different terms related to b"
+---
+
+# Glossary
+
+This glossary defines key terms and concepts used throughout the **b** documentation.
+
+## B
+
+**b** - A modern binary manager for developers that simplifies installation, versioning, and management of command-line tools.
+
+**.bin/b.yaml** - The configuration file that defines binary dependencies for a project, typically located in the `.bin` directory. Contains version specifications and metadata.
+
+**Binary** - An executable command-line tool managed by **b** (e.g., `jq`, `kubectl`, `terraform`).
+
+**Binary Manager** - A tool that automates the installation, versioning, and PATH management of command-line utilities.
+
+## C
+
+**CLI** - Command Line Interface. The text-based interface used to interact with **b**.
+
+**Configuration Discovery** - The process by which **b** automatically locates and loads the nearest `.bin/b.yaml` file in the directory hierarchy.
+
+**Context-Aware** - **b**'s ability to automatically detect and use project-specific configurations without explicit file paths.
+
+## D
+
+**Dependency Management** - The process of managing tool versions and ensuring consistent environments across different systems.
+
+**Download Cache** - Local storage where **b** keeps downloaded binaries to avoid re-downloading.
+
+## E
+
+**Environment Isolation** - Keeping project-specific tool versions separate from system-wide installations.
+
+**Executable** - A binary file that can be run as a command.
+
+## G
+
+**GitHub Releases** - The source from which **b** downloads most binaries, using GitHub's release API.
+
+**Global Installation** - Installing **b** system-wide, making it available to all users.
+
+## I
+
+**Installation Path** - The directory where **b** installs and manages binaries (typically `~/.local/share/b/bin/`).
+
+**Isolation** - Keeping different projects' tool versions separate to avoid conflicts.
+
+## P
+
+**PATH** - The environment variable that tells the shell where to find executable programs.
+
+**PATH Management** - **b**'s automatic handling of adding managed binaries to the system PATH.
+
+**Project-Based Configuration** - Using `.bin/b.yaml` files to define tool requirements specific to individual projects.
+
+## S
+
+**Subcommand** - A secondary command that follows the main **b** command (e.g., `install`, `update`, `list`).
+
+**Symlink** - A symbolic link that points to the actual binary location, used for PATH management.
+
+## V
+
+**Version Constraint** - Specifications in **b.yaml** that define which version of a tool to use (e.g., `"1.6"`, `"latest"`).
+
+**Version Resolution** - The process of determining which specific version to install based on constraints.
+
+**Versioning** - Managing different versions of the same tool for different projects or requirements.

@@ -1,0 +1,46 @@
+---
+description: "Request a binary by creating a GitHub issue with a prefilled template"
+---
+
+# b request
+
+Request a binary by creating a GitHub issue with a prefilled template. This command streamlines the process of requesting new binaries to be added to `b`.
+
+## Usage
+
+```bash
+b request <binary-name> [flags]
+```
+
+## Examples
+
+### Request a new binary
+
+```bash
+# Request a new binary
+b request terraform
+```
+
+### Request with a description
+
+If the binary name contains spaces or special characters, wrap it in quotes.
+
+```bash
+# Request with description
+b request "my-custom-tool"
+```
+
+## Flags
+
+| Flag         | Description               |
+|--------------|---------------------------|
+| `-h`, `--help` | help for request          |
+
+## Global Flags
+
+| Flag                 | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
+| `--force`            | Force operations, overwriting existing binaries                          |
+| `-q`, `--quiet`      | Quiet mode                                                               |
+| `-v`, `--version`    | Print version information and quit                                       |

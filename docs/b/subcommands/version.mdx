@@ -1,0 +1,78 @@
+---
+description: "Show version information for b and installed binaries"
+---
+
+# b version
+
+List all versions. If arguments are given, it shows the version of the specified binaries.
+
+## Alias
+
+- `v`
+
+## Usage
+
+```bash
+b version [binary...] [flags]
+```
+
+## Examples
+
+### Show all versions
+
+Run without arguments to see the version of `b` and all binaries in your `b.yaml`.
+
+```bash
+b version
+```
+
+### Show specific binary version
+
+Pass a binary name to see its version.
+
+```bash
+b version jq
+```
+
+### Show multiple binary versions
+
+```bash
+b version jq kubectl helm
+```
+
+### Show only local versions
+
+The `--local` flag prevents `b` from checking for new remote versions.
+
+```bash
+b version --local
+```
+
+### Check if versions are up to date
+
+The `--check` flag can be used in scripts to verify if binaries are up to date. It will exit with a non-zero status code if any binary is outdated.
+
+```bash
+# Check if all versions are up to date (exit code based)
+b version --quiet --check
+
+# Check specific binaries
+b version jq kubectl --check
+```
+
+## Flags
+
+| Flag         | Description                                         |
+|--------------|-----------------------------------------------------|
+| `--check`    | Check if versions are up to date (exit code based)  |
+| `-h`, `--help`   | help for version                                    |
+| `--local`    | Only show local versions, no lookup for new versions|
+
+## Global Flags
+
+| Flag                 | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
+| `--force`            | Force operations, overwriting existing binaries                          |
+| `-q`, `--quiet`      | Quiet mode                                                               |
+| `-v`, `--version`    | Print version information and quit                                       |

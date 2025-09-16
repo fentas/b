@@ -1,0 +1,63 @@
+---
+description: "List project binaries and their installation status"
+---
+
+# b list
+
+Lists all binaries defined in the project's `b.yaml` and their installation status.
+
+## Aliases
+
+- `ls`
+- `l`
+
+## Usage
+
+```bash
+b list [flags]
+```
+
+## Examples
+
+### List all binaries
+
+This command lists all binaries from the `b.yaml` file and shows whether they are installed.
+
+```bash
+# List all binaries from b.yaml
+b list
+```
+
+### List as JSON
+
+Use the `--output` global flag to format the list as JSON.
+
+```bash
+# List as JSON
+b list --output json
+```
+
+### List as YAML
+
+Use the `--output` global flag to format the list as YAML.
+
+```bash
+# List as YAML
+b list --output yaml
+```
+
+## Flags
+
+| Flag         | Description              |
+|--------------|--------------------------|
+| `-h`, `--help` | help for list            |
+
+## Global Flags
+
+| Flag                 | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
+| `--force`            | Force operations, overwriting existing binaries                          |
+| `-o`, `--output stringArray` | output options: json|yaml|format                                     |
+| `-q`, `--quiet`      | Quiet mode                                                               |
+| `-v`, `--version`    | Print version information and quit                                       |
