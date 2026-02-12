@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fatih/color"
 	"github.com/fentas/goodies/progress"
 	"github.com/fentas/goodies/templates"
 	"github.com/spf13/cobra"
@@ -22,8 +23,10 @@ import (
 // UpdateOptions holds options for the update command
 type UpdateOptions struct {
 	*SharedOptions
-	specifiedArgs []string // args from CLI (binary names or env refs)
-	Strategy      string   // strategy flag override: replace, client, merge
+	specifiedArgs     []string         // args from CLI (binary names or env refs)
+	specifiedBinaries []*binary.Binary // resolved binaries from CLI args
+	specifiedEnvRefs  []string         // resolved env refs from CLI args
+	Strategy          string           // strategy flag override: replace, client, merge
 }
 
 // NewUpdateCmd creates the update subcommand
@@ -88,24 +91,25 @@ func (o *UpdateOptions) Complete(args []string) error {
 
 	o.specifiedArgs = args
 
-	// Validate specified args (binaries or env refs)
+	// Resolve specified args (binaries or env refs) and store them
 	for _, arg := range args {
 		name, version := parseBinaryArg(arg)
 
 		// Check if it's an env ref
 		if o.Config != nil && o.Config.Envs.Get(name) != nil {
+			o.specifiedEnvRefs = append(o.specifiedEnvRefs, name)
 			continue
 		}
 
-		// Check if it's a binary
-		if _, ok := o.GetBinary(name); !ok {
+		// Resolve binary once and keep the reference
+		b, ok := o.GetBinary(name)
+		if !ok {
 			return fmt.Errorf("unknown binary or env: %s", name)
 		}
 		if version != "" {
-			if b, ok := o.GetBinary(name); ok {
-				b.Version = version
-			}
+			b.Version = version
 		}
+		o.specifiedBinaries = append(o.specifiedBinaries, b)
 	}
 
 	return nil
@@ -126,8 +130,12 @@ func (o *UpdateOptions) Validate() error {
 
 // Run executes the update operation
 func (o *UpdateOptions) Run() error {
-	if len(o.specifiedArgs) > 0 {
+	if len(o.specifiedBinaries) > 0 || len(o.specifiedEnvRefs) > 0 {
 		return o.runSpecified()
+	}
+	if len(o.specifiedArgs) > 0 {
+		// All args were resolved in Complete; nothing left
+		return nil
 	}
 	return o.runAll()
 }
@@ -158,30 +166,14 @@ func (o *UpdateOptions) runAll() error {
 
 // runSpecified updates only the specified binaries/envs.
 func (o *UpdateOptions) runSpecified() error {
-	var binariesToUpdate []*binary.Binary
-	var envRefs []string
-
-	for _, arg := range o.specifiedArgs {
-		name, _ := parseBinaryArg(arg)
-
-		if o.Config != nil && o.Config.Envs.Get(name) != nil {
-			envRefs = append(envRefs, name)
-			continue
-		}
-
-		if b, ok := o.GetBinary(name); ok {
-			binariesToUpdate = append(binariesToUpdate, b)
-		}
-	}
-
-	if len(binariesToUpdate) > 0 {
-		if err := o.updateBinaries(binariesToUpdate); err != nil {
+	if len(o.specifiedBinaries) > 0 {
+		if err := o.updateBinaries(o.specifiedBinaries); err != nil {
 			return err
 		}
 	}
 
-	if len(envRefs) > 0 {
-		if err := o.updateEnvs(envRefs); err != nil {
+	if len(o.specifiedEnvRefs) > 0 {
+		if err := o.updateEnvs(o.specifiedEnvRefs); err != nil {
 			return err
 		}
 	}
@@ -396,7 +388,12 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 		go func(b *binary.Binary) {
 			defer wg.Done()
 
-			tracker := pw.AddTracker(fmt.Sprintf("Updating %s", b.Name), 0)
+			name := b.Name
+			if b.Alias != "" {
+				name = b.Alias
+			}
+
+			tracker := pw.AddTracker(fmt.Sprintf("Updating %s", name), 0)
 			b.Tracker = tracker
 			b.Writer = pw
 
@@ -407,9 +404,13 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 				err = b.EnsureBinary(true) // Force update
 			}
 
+			doneLabel := name + " updated"
+			if b.Alias != "" {
+				doneLabel = b.Alias + " (" + color.New(color.FgYellow).Sprint(b.Name) + ") updated"
+			}
 			progress.ProgressDone(
 				b.Tracker,
-				fmt.Sprintf("%s updated", b.Name),
+				doneLabel,
 				err,
 			)
 		}(b)
