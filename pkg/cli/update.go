@@ -81,6 +81,11 @@ func (o *UpdateOptions) Complete(args []string) error {
 		return err
 	}
 
+	// Reset from any previous invocation
+	o.specifiedArgs = nil
+	o.specifiedBinaries = nil
+	o.specifiedEnvRefs = nil
+
 	if len(args) == 0 {
 		// Update all from config
 		if o.Config == nil {
@@ -132,10 +137,6 @@ func (o *UpdateOptions) Validate() error {
 func (o *UpdateOptions) Run() error {
 	if len(o.specifiedBinaries) > 0 || len(o.specifiedEnvRefs) > 0 {
 		return o.runSpecified()
-	}
-	if len(o.specifiedArgs) > 0 {
-		// All args were resolved in Complete; nothing left
-		return nil
 	}
 	return o.runAll()
 }

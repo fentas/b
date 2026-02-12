@@ -60,8 +60,8 @@ func TestStrategyConstants(t *testing.T) {
 // retains the @version for aliased binaries by storing resolved binaries. Issue #79.
 func TestUpdateAlias_VersionRetained(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("B_BIN_PATH", tmpDir)
-	defer os.Unsetenv("B_BIN_PATH")
+	os.Setenv("PATH_BIN", tmpDir)
+	defer os.Unsetenv("PATH_BIN")
 
 	presets := []*binary.Binary{
 		{Name: "renvsubst", Version: "1.0"},
@@ -194,8 +194,8 @@ func TestUpdateAlias_PresetVersionNotMutated(t *testing.T) {
 // the @version for aliased binaries specified on the command line.
 func TestUpdateComplete_AliasVersionFromArg(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("B_BIN_PATH", tmpDir)
-	defer os.Unsetenv("B_BIN_PATH")
+	os.Setenv("PATH_BIN", tmpDir)
+	defer os.Unsetenv("PATH_BIN")
 
 	presets := []*binary.Binary{
 		{Name: "renvsubst", Version: "1.0"},
@@ -238,8 +238,8 @@ func TestUpdateComplete_AliasVersionFromArg(t *testing.T) {
 // TestUpdateComplete_EnvRefsStored tests that Complete separates env refs from binaries.
 func TestUpdateComplete_EnvRefsStored(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("B_BIN_PATH", tmpDir)
-	defer os.Unsetenv("B_BIN_PATH")
+	os.Setenv("PATH_BIN", tmpDir)
+	defer os.Unsetenv("PATH_BIN")
 
 	presets := []*binary.Binary{
 		{Name: "jq", Version: "1.7"},
@@ -278,8 +278,8 @@ func TestUpdateComplete_EnvRefsStored(t *testing.T) {
 // TestUpdateComplete_PresetVersionFromArg tests that @version works for direct preset binaries too.
 func TestUpdateComplete_PresetVersionFromArg(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("B_BIN_PATH", tmpDir)
-	defer os.Unsetenv("B_BIN_PATH")
+	os.Setenv("PATH_BIN", tmpDir)
+	defer os.Unsetenv("PATH_BIN")
 
 	presets := []*binary.Binary{
 		{Name: "jq", Version: "1.6"},
