@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -20,6 +21,17 @@ import (
 	"github.com/fentas/b/pkg/lock"
 )
 
+// Test hooks — production code uses the defaults; tests can override.
+var (
+	syncEnvFunc    = env.SyncEnv
+	resolveRefFunc = gitcache.ResolveRef
+	ensureCloneF   = gitcache.EnsureClone
+	fetchFunc      = gitcache.Fetch
+	showFileFunc   = gitcache.ShowFile
+	diffNoIndexF   = gitcache.DiffNoIndex
+	isTTYFunc      = isTTY
+)
+
 // UpdateOptions holds options for the update command
 type UpdateOptions struct {
 	*SharedOptions
@@ -27,6 +39,8 @@ type UpdateOptions struct {
 	specifiedBinaries []*binary.Binary // resolved binaries from CLI args
 	specifiedEnvRefs  []string         // resolved env refs from CLI args
 	Strategy          string           // strategy flag override: replace, client, merge
+	stdinReader       io.Reader        // overridden by tests; nil means os.Stdin
+	updateBinariesF   func([]*binary.Binary) error // overridden by tests; nil means o.updateBinaries
 }
 
 // NewUpdateCmd creates the update subcommand
@@ -146,7 +160,7 @@ func (o *UpdateOptions) runAll() error {
 	// Update binaries
 	binariesToUpdate := o.GetBinariesFromConfig()
 	if len(binariesToUpdate) > 0 {
-		if err := o.updateBinaries(binariesToUpdate); err != nil {
+		if err := o.callUpdateBinaries(binariesToUpdate); err != nil {
 			return err
 		}
 	}
@@ -168,7 +182,7 @@ func (o *UpdateOptions) runAll() error {
 // runSpecified updates only the specified binaries/envs.
 func (o *UpdateOptions) runSpecified() error {
 	if len(o.specifiedBinaries) > 0 {
-		if err := o.updateBinaries(o.specifiedBinaries); err != nil {
+		if err := o.callUpdateBinaries(o.specifiedBinaries); err != nil {
 			return err
 		}
 	}
@@ -180,6 +194,14 @@ func (o *UpdateOptions) runSpecified() error {
 	}
 
 	return nil
+}
+
+// callUpdateBinaries delegates to the test hook or the real implementation.
+func (o *UpdateOptions) callUpdateBinaries(binaries []*binary.Binary) error {
+	if o.updateBinariesF != nil {
+		return o.updateBinariesF(binaries)
+	}
+	return o.updateBinaries(binaries)
 }
 
 // updateEnvs updates env entries from config. If refs is nil, updates all.
@@ -231,13 +253,13 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		}
 
 		// Set up interactive conflict resolver for replace strategy on TTY
-		if (strategy == "" || strategy == env.StrategyReplace) && isTTY() {
+		if (strategy == "" || strategy == env.StrategyReplace) && isTTYFunc() {
 			cfg.ResolveConflict = o.interactiveConflictResolver(ref, lk)
 		}
 
 		lockEntry := lk.FindEnv(ref, label)
 
-		result, err := env.SyncEnv(cfg, projectRoot, "", lockEntry)
+		result, err := syncEnvFunc(cfg, projectRoot, "", lockEntry)
 		if err != nil {
 			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %v\n", entry.Key, err)
 			continue
@@ -288,7 +310,11 @@ func (o *UpdateOptions) printFileStatus(f lock.LockFile) {
 
 // interactiveConflictResolver returns a ConflictFunc that prompts the user per-file.
 func (o *UpdateOptions) interactiveConflictResolver(ref string, lk *lock.Lock) env.ConflictFunc {
-	reader := bufio.NewReader(os.Stdin)
+	r := o.stdinReader
+	if r == nil {
+		r = os.Stdin
+	}
+	reader := bufio.NewReader(r)
 	return func(sourcePath, destPath string) string {
 		for {
 			fmt.Fprintf(o.IO.ErrOut, "    %s has local changes.\n", destPath)
@@ -335,29 +361,29 @@ func (o *UpdateOptions) showDiff(ref, sourcePath, destPath string, lk *lock.Lock
 	// Read upstream from cache (best effort — use HEAD of the cache)
 	baseRef := gitcache.RefBase(ref)
 	url := gitcache.GitURL(ref)
-	commit, err := gitcache.ResolveRef(url, "")
+	commit, err := resolveRefFunc(url, "")
 	if err != nil {
 		fmt.Fprintf(o.IO.ErrOut, "      Cannot resolve upstream for diff: %v\n", err)
 		return
 	}
 
 	cacheRoot := gitcache.DefaultCacheRoot()
-	if err := gitcache.EnsureClone(cacheRoot, baseRef, url); err != nil {
+	if err := ensureCloneF(cacheRoot, baseRef, url); err != nil {
 		fmt.Fprintf(o.IO.ErrOut, "      Cannot clone upstream for diff: %v\n", err)
 		return
 	}
-	if err := gitcache.Fetch(cacheRoot, baseRef, commit); err != nil {
+	if err := fetchFunc(cacheRoot, baseRef, commit); err != nil {
 		fmt.Fprintf(o.IO.ErrOut, "      Cannot fetch upstream for diff: %v\n", err)
 		return
 	}
 
-	upstream, err := gitcache.ShowFile(cacheRoot, baseRef, commit, sourcePath)
+	upstream, err := showFileFunc(cacheRoot, baseRef, commit, sourcePath)
 	if err != nil {
 		fmt.Fprintf(o.IO.ErrOut, "      Cannot read upstream file for diff: %v\n", err)
 		return
 	}
 
-	diff, err := gitcache.DiffNoIndex(local, upstream, "local", "upstream")
+	diff, err := diffNoIndexF(local, upstream, "local", "upstream")
 	if err != nil {
 		fmt.Fprintf(o.IO.ErrOut, "      Error computing diff: %v\n", err)
 		return
