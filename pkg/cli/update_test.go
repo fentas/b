@@ -32,7 +32,8 @@ func (sw *syncWriter) Write(p []byte) (int, error) {
 
 // --- helpers for mocking package-level hooks ---
 
-// saveHooks saves current function variables and returns a restore function.
+// saveHooks saves current function variables and restores them via t.Cleanup.
+// Tests using saveHooks must NOT call t.Parallel() (shared mutable state).
 func saveHooks(t *testing.T) {
 	t.Helper()
 	origSyncEnv := syncEnvFunc
@@ -104,7 +105,7 @@ func TestNewUpdateCmd(t *testing.T) {
 	if cmd.Use != "update [binary|env...]" {
 		t.Errorf("Use = %q", cmd.Use)
 	}
-	if cmd.Aliases[0] != "u" {
+	if len(cmd.Aliases) == 0 || cmd.Aliases[0] != "u" {
 		t.Errorf("Alias = %v", cmd.Aliases)
 	}
 	if cmd.Short == "" {
@@ -125,8 +126,7 @@ func TestNewUpdateCmd(t *testing.T) {
 
 func TestNewUpdateCmd_RunE_NoConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("PATH_BIN", tmpDir)
-	defer os.Unsetenv("PATH_BIN")
+	t.Setenv("PATH_BIN", tmpDir)
 
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
 	shared := NewSharedOptions(io, nil)
@@ -144,8 +144,7 @@ func TestNewUpdateCmd_RunE_NoConfig(t *testing.T) {
 
 func TestNewUpdateCmd_RunE_ValidateError(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("PATH_BIN", tmpDir)
-	defer os.Unsetenv("PATH_BIN")
+	t.Setenv("PATH_BIN", tmpDir)
 
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
 	shared := NewSharedOptions(io, nil)
@@ -168,8 +167,7 @@ func TestNewUpdateCmd_RunE_ValidateError(t *testing.T) {
 
 func TestUpdateComplete_NoConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("PATH_BIN", tmpDir)
-	defer os.Unsetenv("PATH_BIN")
+	t.Setenv("PATH_BIN", tmpDir)
 
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
 	shared := NewSharedOptions(io, nil)
@@ -184,8 +182,7 @@ func TestUpdateComplete_NoConfig(t *testing.T) {
 
 func TestUpdateComplete_UnknownBinary(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("PATH_BIN", tmpDir)
-	defer os.Unsetenv("PATH_BIN")
+	t.Setenv("PATH_BIN", tmpDir)
 
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
 	shared := NewSharedOptions(io, nil)
@@ -200,8 +197,7 @@ func TestUpdateComplete_UnknownBinary(t *testing.T) {
 
 func TestUpdateComplete_Resets(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("PATH_BIN", tmpDir)
-	defer os.Unsetenv("PATH_BIN")
+	t.Setenv("PATH_BIN", tmpDir)
 
 	presets := []*binary.Binary{{Name: "jq", Version: "1.7"}}
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
@@ -228,8 +224,7 @@ func TestUpdateComplete_Resets(t *testing.T) {
 
 func TestUpdateComplete_NoArgs_WithConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("PATH_BIN", tmpDir)
-	defer os.Unsetenv("PATH_BIN")
+	t.Setenv("PATH_BIN", tmpDir)
 
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
 	shared := NewSharedOptions(io, nil)
@@ -245,8 +240,7 @@ func TestUpdateComplete_NoArgs_WithConfig(t *testing.T) {
 
 func TestUpdateAlias_VersionRetained(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("PATH_BIN", tmpDir)
-	defer os.Unsetenv("PATH_BIN")
+	t.Setenv("PATH_BIN", tmpDir)
 
 	presets := []*binary.Binary{{Name: "renvsubst", Version: "1.0"}}
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
@@ -339,8 +333,7 @@ func TestUpdateAlias_PresetVersionNotMutated(t *testing.T) {
 
 func TestUpdateComplete_AliasVersionFromArg(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("PATH_BIN", tmpDir)
-	defer os.Unsetenv("PATH_BIN")
+	t.Setenv("PATH_BIN", tmpDir)
 
 	presets := []*binary.Binary{{Name: "renvsubst", Version: "1.0"}}
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
@@ -372,8 +365,7 @@ func TestUpdateComplete_AliasVersionFromArg(t *testing.T) {
 
 func TestUpdateComplete_EnvRefsStored(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("PATH_BIN", tmpDir)
-	defer os.Unsetenv("PATH_BIN")
+	t.Setenv("PATH_BIN", tmpDir)
 
 	presets := []*binary.Binary{{Name: "jq", Version: "1.7"}}
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
@@ -403,8 +395,7 @@ func TestUpdateComplete_EnvRefsStored(t *testing.T) {
 
 func TestUpdateComplete_PresetVersionFromArg(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("PATH_BIN", tmpDir)
-	defer os.Unsetenv("PATH_BIN")
+	t.Setenv("PATH_BIN", tmpDir)
 
 	presets := []*binary.Binary{{Name: "jq", Version: "1.6"}}
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
@@ -1400,8 +1391,7 @@ func TestCheckEnvConflicts_NilLock(t *testing.T) {
 
 func TestNewUpdateCmd_RunE_Success(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("PATH_BIN", tmpDir)
-	defer os.Unsetenv("PATH_BIN")
+	t.Setenv("PATH_BIN", tmpDir)
 
 	var outBuf bytes.Buffer
 	io := &streams.IO{Out: &outBuf, ErrOut: &bytes.Buffer{}}
@@ -1421,9 +1411,9 @@ func TestNewUpdateCmd_RunE_Success(t *testing.T) {
 // --- Complete: ValidateBinaryPath error ---
 
 func TestUpdateComplete_ValidateBinaryPathError(t *testing.T) {
-	// Ensure neither PATH_BIN nor PATH_BASE are set
-	os.Unsetenv("PATH_BIN")
-	os.Unsetenv("PATH_BASE")
+	// NOT parallel-safe: modifies process-wide cwd via os.Chdir.
+	t.Setenv("PATH_BIN", "")
+	t.Setenv("PATH_BASE", "")
 
 	// chdir to a non-git temp dir so GetBinaryPath returns ""
 	origDir, _ := os.Getwd()
@@ -1615,7 +1605,7 @@ func TestUpdateEnvs_ReadLockError(t *testing.T) {
 // --- interactiveConflictResolver with nil stdinReader (os.Stdin fallback) ---
 
 func TestInteractiveResolver_NilStdinReader(t *testing.T) {
-	// Replace os.Stdin with a pipe so the nil fallback path is covered
+	// NOT parallel-safe: replaces process-wide os.Stdin.
 	oldStdin := os.Stdin
 	r, w, err := os.Pipe()
 	if err != nil {
