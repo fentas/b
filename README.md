@@ -90,15 +90,6 @@ b cache path   # print cache directory
 b request
 ```
 
-#### Global flags
-
-| Flag | Short | Description |
-| ---- | ----- | ----------- |
-| `--config PATH` | `-c` | Path to configuration file |
-| `--force` | `-f` | Overwrite existing binaries |
-| `--quiet` | `-q` | Suppress output |
-| `--output FORMAT` | | Output format: `json`, `yaml`, or `text` |
-
 &nbsp;
 
 ### 🧾 Configuration, what to install
