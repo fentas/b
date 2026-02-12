@@ -9,6 +9,10 @@
 		<img alt="Releases" src="https://img.shields.io/github/release/fentas/b.svg?style=for-the-badge&logo=github&color=F2CDCD&logoColor=D9E0EE&labelColor=302D41"/></a>
 	<a href="https://github.com/fentas/b/issues">
 		<img alt="Issues" src="https://img.shields.io/github/issues/fentas/b?style=for-the-badge&logo=gitbook&color=B5E8E0&logoColor=D9E0EE&labelColor=302D41"></a>
+	<a href="https://codecov.io/gh/fentas/b">
+		<img alt="Coverage" src="https://img.shields.io/codecov/c/github/fentas/b?style=for-the-badge&logo=codecov&color=DDB6F2&logoColor=D9E0EE&labelColor=302D41"></a>
+	<a href="https://pkg.go.dev/github.com/fentas/b">
+		<img alt="Go Reference" src="https://img.shields.io/badge/go-reference-blue?style=for-the-badge&logo=go&color=89DCEB&logoColor=D9E0EE&labelColor=302D41"></a>
 </p>
 
 &nbsp;
