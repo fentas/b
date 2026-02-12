@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.0](https://github.com/fentas/b/compare/v4.5.0...v4.6.0) (2026-02-12)
+
+
+### Features
+
+* environment file sync, multi-provider install, and CI ([#94](https://github.com/fentas/b/issues/94)) ([41c6c2d](https://github.com/fentas/b/commit/41c6c2da871cfe6365667bbec7eefaf32fb33dbb))
+
 ## [4.5.0](https://github.com/fentas/b/compare/v4.4.0...v4.5.0) (2025-09-15)
 
 
