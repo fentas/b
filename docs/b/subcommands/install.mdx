@@ -1,22 +1,26 @@
 ---
-description: "Install binaries from b.yaml or ad-hoc"
+description: "Install binaries, GitHub releases, and env files"
 ---
 
 # b install
 
-Install binaries. If no arguments are given, `b` installs all binaries from the `b.yaml` configuration file. You can also install specific binaries on-the-fly.
+Install binaries and sync environment files. If no arguments are given, `b` installs all binaries and syncs all envs from the `b.yaml` configuration file. You can also install specific binaries or env files on-the-fly.
+
+## Alias
+
+- `i`
 
 ## Usage
 
 ```bash
-b install [binary...] [flags]
+b install [binary|env...] [flags]
 ```
 
 ## Examples
 
-### Install all binaries from config
+### Install all from config
 
-If a `b.yaml` file is present, this command will install all the binaries listed in it.
+If a `b.yaml` file is present, this command will install all binaries and sync all env files listed in it.
 
 ```bash
 b install
@@ -36,6 +40,18 @@ Append `@<version>` to the binary name to install a specific version.
 
 ```bash
 b install jq@jq-1.7
+```
+
+### Install any GitHub release
+
+Use a full provider reference to install any binary from GitHub releases.
+
+```bash
+# Install latest release
+b install github.com/derailed/k9s
+
+# Install specific version
+b install github.com/sharkdp/bat@v0.24.0
 ```
 
 ### Install and add to config
@@ -64,7 +80,7 @@ b install --alias envsubst renvsubst
 
 This installs `renvsubst` but makes it available as `envsubst`. The alias binary will:
 - Download and install the original binary (`renvsubst`)
-- Create the alias binary file (`envsubst`) 
+- Create the alias binary file (`envsubst`)
 - Work with all commands like version detection and execution
 - Show in listings with the alias relationship: `renvsubst (envsubst)`
 
@@ -78,11 +94,33 @@ b install --alias envsubst --add renvsubst
 b install --alias myenvsubst renvsubst@v0.10.0
 ```
 
+### Sync environment files (SCP syntax)
+
+Use SCP-style syntax to sync files from upstream git repositories:
+
+```bash
+# Sync files from a git repo to a local directory
+b install github.com/org/infra:/manifests/base/** ./base
+
+# Pin a version and sync
+b install github.com/org/infra@v2.0:/manifests/hetzner/** ./hetzner
+
+# Add to b.yaml and sync
+b install --add github.com/org/infra@v2.0:/manifests/base/** ./base
+```
+
+The SCP syntax is: `<repo>[@<version>]:/<glob> [<dest>]`
+
+- **repo** — A git-cloneable reference (e.g., `github.com/org/repo`)
+- **version** (optional) — A git tag, branch, or commit to pin
+- **glob** — A file pattern to match in the repository (e.g., `manifests/**`)
+- **dest** (optional) — Local directory for the synced files; defaults to the matched path structure
+
 ## Flags
 
 | Flag         | Description                               |
 |--------------|-------------------------------------------|
-| `--add`      | Add binary to b.yaml during install       |
+| `--add`      | Add binary/env to b.yaml during install   |
 | `--alias`    | Install binary under a different name     |
 | `--fix`      | Pin the specified version in b.yaml       |
 | `-h`, `--help` | help for install                          |

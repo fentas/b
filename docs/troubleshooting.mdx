@@ -174,18 +174,87 @@ speedtest-cli
 # Consider using a VPN if geographical restrictions apply
 ```
 
-### Large Binary Cache
+### Large Git Cache
 
-**Problem**: **b**'s cache directory is taking up too much space
+**Problem**: **b**'s git cache directory is taking up too much space
 
 **Solution**:
 ```bash
-# Check cache size
-du -sh ~/.local/share/b/
+# Check cache location and size
+b cache path
+du -sh $(b cache path)
 
-# Manually remove old binaries from the cache.
-# Note: A 'b clean' command is planned for a future release.
-rm -rf ~/.local/share/b/cache/
+# Clean the cache
+b cache clean
+```
+
+## Env File Sync Issues
+
+### Clone Failures
+
+**Problem**: `git clone` or `git fetch` fails when syncing env files
+
+**Solutions**:
+```bash
+# Check connectivity to the remote
+git ls-remote https://github.com/org/repo
+
+# Clean the cache and retry
+b cache clean
+b update
+
+# Ensure git is installed and SSH keys / credentials are configured
+```
+
+### Merge Conflicts
+
+**Problem**: `b update --strategy=merge` reports conflicts
+
+**Solution**:
+```bash
+# Conflicts are marked with standard conflict markers in the file
+# Open the conflicting file and resolve manually, then re-run:
+b update
+
+# Or use 'replace' to overwrite local changes
+b update --strategy=replace
+
+# Or use 'client' to keep your local version
+b update --strategy=client
+```
+
+### Env Destination Conflicts
+
+**Problem**: Two env entries write to the same destination file
+
+**Solution**:
+```yaml
+# Use distinct 'dest' values in b.yaml to avoid overlap
+envs:
+  github.com/org/infra:
+    files:
+      manifests/base/**:
+        dest: infra-base/
+  github.com/org/overrides:
+    files:
+      override/**:
+        dest: override-base/
+```
+
+### Verify Mismatches
+
+**Problem**: `b verify` reports sha256 mismatches
+
+**Solutions**:
+```bash
+# Check what changed locally
+b verify
+
+# Re-sync to restore upstream state
+b update --strategy=replace
+
+# Or if you want to keep local changes, update the lock
+b update --strategy=client
 ```
 
 ## CI/CD Issues

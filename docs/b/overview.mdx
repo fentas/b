@@ -8,11 +8,11 @@ import Icons from '@theme/Icon';
 
 # b reference
 
-**b** provides a comprehensive set of commands for managing binary dependencies in your projects. This reference covers all available commands, options, and usage patterns.
+**b** provides a comprehensive set of commands for managing binary dependencies and environment files in your projects. This reference covers all available commands, options, and usage patterns.
 
 ## Core
 
-**b** is built around a subcommand architecture that provides intuitive and powerful binary management capabilities.
+**b** is built around a subcommand architecture that provides intuitive and powerful binary and env management capabilities.
 
 ## Quick reference
 
@@ -22,9 +22,15 @@ Get started quickly with the most common commands:
 b init                    # Initialize a new project
 b install jq              # Install a specific binary
 b install --add jq@jq-1.6    # Install and add to b.yaml
-b list                    # List installed binaries
-b update                  # Update all binaries
+b list                    # List installed binaries and envs
+b update                  # Update all binaries and envs
+b update --strategy=merge # Update with three-way merge
 b search kubectl          # Search for available binaries
+b verify                  # Verify artifacts against b.lock
+b cache clean             # Remove cached git repos
+
+# Env file sync (SCP-style)
+b install github.com/org/infra:/manifests/** ./manifests
 ```
 
 <DocCardList colSize={4} items={[
@@ -80,6 +86,24 @@ b search kubectl          # Search for available binaries
     customProps: {
       icon: Icons['circle-dotted-line'],
       description: 'Display version information for b and installed binaries.'
+    }
+  },
+  {
+    type: 'link',
+    href: '/b/subcommands/verify',
+    label: 'b verify',
+    customProps: {
+      icon: Icons['check-badge'],
+      description: 'Verify installed artifacts against b.lock checksums.'
+    }
+  },
+  {
+    type: 'link',
+    href: '/b/subcommands/cache',
+    label: 'b cache',
+    customProps: {
+      icon: Icons['archive-box'],
+      description: 'Manage the local git cache for env file syncing.'
     }
   },
   {

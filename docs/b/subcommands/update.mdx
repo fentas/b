@@ -1,10 +1,10 @@
 ---
-description: "Update binaries to their latest versions"
+description: "Update binaries and env files to their latest versions"
 ---
 
 # b update
 
-Update binaries. If no arguments are given, `b` updates all binaries from the `b.yaml` configuration file.
+Update binaries and sync env files. If no arguments are given, `b` updates all binaries and envs from the `b.yaml` configuration file.
 
 ## Alias
 
@@ -13,14 +13,14 @@ Update binaries. If no arguments are given, `b` updates all binaries from the `b
 ## Usage
 
 ```bash
-b update [binary...] [flags]
+b update [binary|env...] [flags]
 ```
 
 ## Examples
 
-### Update all binaries
+### Update all binaries and envs
 
-If a `b.yaml` file is present, this command will update all the binaries listed in it to their latest available versions.
+If a `b.yaml` file is present, this command will update all binaries to their latest versions and re-sync all env files.
 
 ```bash
 b update
@@ -42,11 +42,52 @@ Force an update even if the binary is already at the latest version. This is use
 b update --force kubectl
 ```
 
+### Update with merge strategy
+
+Use the `--strategy` flag to control how env file updates handle local changes:
+
+```bash
+# Replace local files with upstream (default)
+b update --strategy=replace
+
+# Keep local files, only add new ones
+b update --strategy=client
+
+# Three-way merge: upstream changes + local changes
+b update --strategy=merge
+```
+
+### Merge strategies
+
+| Strategy  | Description |
+|-----------|-------------|
+| `replace` | Overwrite local files with upstream content (default) |
+| `client`  | Keep local files unchanged; only add new files from upstream |
+| `merge`   | Three-way merge using the lock file as a common ancestor. Detects conflicts and prompts for resolution |
+
+When using `merge`, **b** computes a three-way diff between:
+1. The **base** version (from `b.lock` — last known good state)
+2. The **upstream** version (latest from the remote repo)
+3. The **local** version (your current file on disk)
+
+If both upstream and local have changed the same region, a conflict marker is inserted and the user is prompted to resolve it.
+
+### Env conflict warnings
+
+When multiple env entries write to the same destination path, **b** warns about potential conflicts before syncing:
+
+```
+⚠ Conflict: config.yaml is written by both github.com/org/infra (base/config.yaml)
+  and github.com/org/overrides (override/config.yaml)
+  Hint: use 'dest' or 'ignore' in b.yaml to resolve
+```
+
 ## Flags
 
-| Flag         | Description               |
-|--------------|---------------------------|
-| `-h`, `--help` | help for update           |
+| Flag              | Description                               |
+|-------------------|-------------------------------------------|
+| `--strategy`      | Merge strategy for env updates: `replace`, `client`, or `merge` |
+| `-h`, `--help`    | help for update                           |
 
 ## Global Flags
 

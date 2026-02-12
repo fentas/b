@@ -1,7 +1,7 @@
 ---
 id: homepage
 title: b documentation
-description: "b is a binary manager for developers - install, manage, and version your command-line tools effortlessly."
+description: "b is a binary manager and environment file syncer for developers - install, manage, and version your tools and configuration effortlessly."
 slug: /
 hide_table_of_contents: true
 hide_footer: true
@@ -24,26 +24,28 @@ import ThemedImage from '@theme/ThemedImage';
   />
 </div>
 
-# 
+#
 
-**b** is a modern binary manager that simplifies how developers install, manage, and version their command-line tools. With project-based configuration and automatic PATH management, **b** ensures your development environment is consistent and reproducible.
+**b** is a modern binary manager and environment file syncer that simplifies how developers install, manage, and version their command-line tools and configuration files. With project-based configuration and automatic PATH management, **b** ensures your development environment is consistent and reproducible.
 
 ## Why b?
 
-Managing command-line tools across different projects and environments is challenging:
+Managing command-line tools and shared configuration across different projects and environments is challenging:
 
 - **Version Conflicts**: Different projects need different tool versions
 - **Environment Setup**: Complex PATH management and installation procedures
-- **Team Consistency**: Ensuring everyone uses the same tool versions
+- **Team Consistency**: Ensuring everyone uses the same tool versions and configs
 - **CI/CD Integration**: Reproducible builds with exact tool versions
+- **Config Drift**: Upstream configuration changes that need to be synced
 
 **b** solves these problems by providing:
 
-✅ **Project-based Configuration** - Each project defines its required tools  
-✅ **Automatic PATH Management** - Tools are available when you need them  
-✅ **Version Control** - Lock specific versions for reproducible builds  
-✅ **Team Collaboration** - Share tool requirements via `b.yaml`  
-✅ **CI/CD Ready** - Simple integration with build pipelines
+- **Project-based Configuration** - Each project defines its required tools and env files
+- **Automatic PATH Management** - Tools are available when you need them
+- **Version Control** - Lock specific versions for reproducible builds via `b.lock`
+- **Team Collaboration** - Share tool and config requirements via `b.yaml`
+- **CI/CD Ready** - Simple integration with build pipelines
+- **Env File Sync** - Sync configuration files from upstream git repos with three-way merge
 
 <DocCard item={{
   type: 'link',
@@ -65,7 +67,13 @@ b init
 # Install tools for your project
 b install jq@jq-1.7 kubectl@v1.28.0
 
-# Tools are now available
+# Install any GitHub release
+b install github.com/derailed/k9s
+
+# Sync env files from upstream
+b install github.com/org/infra:/manifests/** ./manifests
+
+# Tools and files are now available
 jq --version              # jq-1.7
 kubectl version --client  # v1.28.0
 ```
@@ -79,7 +87,7 @@ kubectl version --client  # v1.28.0
     label: 'Installation',
     customProps: {
       icon: Icons['arrow-down-tray'],
-      description: 'Install b and get started with binary management.'
+      description: 'Install b and get started with binary and env management.'
     }
   },
   {

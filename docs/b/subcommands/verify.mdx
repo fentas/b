@@ -1,0 +1,79 @@
+---
+description: "Verify installed artifacts against b.lock checksums"
+---
+
+# b verify
+
+Check every managed artifact (binaries and env files) against `b.lock` checksums. Exits with code 0 if all artifacts match, or code 1 if any mismatches are found.
+
+## Usage
+
+```bash
+b verify [flags]
+```
+
+## Examples
+
+### Verify all artifacts
+
+```bash
+b verify
+```
+
+Example output when everything is clean:
+
+```
+  jq                                       ✓
+  kubectl                                  ✓
+  github.com/org/infra
+    config.yaml                            ✓
+    ingress.yaml                           ✓
+
+All artifacts verified ✓
+```
+
+Example output with mismatches:
+
+```
+  jq                                       ✓
+  kubectl                                  ✗ sha256 mismatch
+  github.com/org/infra
+    config.yaml                            ✗ sha256 mismatch (local changes)
+    ingress.yaml                           ✗ missing
+
+FAIL: 3 artifact(s) differ from lock
+```
+
+### Use in CI/CD
+
+Use `b verify` in CI pipelines to ensure the working tree matches the lock file:
+
+```yaml
+steps:
+  - name: Verify artifacts
+    run: b verify
+```
+
+## How it works
+
+For each entry in `b.lock`:
+
+- **Binaries**: Computes SHA-256 of the installed binary file and compares against the lock checksum
+- **Env files**: Computes SHA-256 of each synced file at its destination path and compares against the lock checksum
+
+A mismatch means the file on disk differs from what was last synced — either due to local edits, corruption, or a missing file.
+
+## Flags
+
+| Flag         | Description              |
+|--------------|--------------------------|
+| `-h`, `--help` | help for verify          |
+
+## Global Flags
+
+| Flag                 | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
+| `--force`            | Force operations, overwriting existing binaries                          |
+| `-q`, `--quiet`      | Quiet mode                                                               |
+| `-v`, `--version`    | Print version information and quit                                       |
