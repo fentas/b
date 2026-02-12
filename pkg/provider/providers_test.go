@@ -1,6 +1,10 @@
 package provider
 
-import "testing"
+import (
+	"fmt"
+	"runtime"
+	"testing"
+)
 
 // TestDockerMatch tests Docker provider matching.
 func TestDockerMatch(t *testing.T) {
@@ -330,30 +334,39 @@ func TestShouldIgnore_Extra(t *testing.T) {
 	}
 }
 
+func testAssetName(base, ext string) string {
+	os := runtime.GOOS
+	arch := runtime.GOARCH
+	if arch == "amd64" {
+		arch = "amd64"
+	}
+	return fmt.Sprintf("%s_%s_%s%s", base, os, arch, ext)
+}
+
 func TestMatchAsset_PrefersTarGz(t *testing.T) {
 	assets := []Asset{
-		{Name: "tool_linux_amd64.zip", URL: "https://example.com/zip", Size: 1000},
-		{Name: "tool_linux_amd64.tar.gz", URL: "https://example.com/tgz", Size: 1000},
+		{Name: testAssetName("tool", ".zip"), URL: "https://example.com/zip", Size: 1000},
+		{Name: testAssetName("tool", ".tar.gz"), URL: "https://example.com/tgz", Size: 1000},
 	}
 	a, err := MatchAsset(assets, "tool")
 	if err != nil {
 		t.Fatalf("MatchAsset() error: %v", err)
 	}
-	if a.Name != "tool_linux_amd64.tar.gz" {
+	if a.Name != testAssetName("tool", ".tar.gz") {
 		t.Errorf("MatchAsset() = %q, want tar.gz preferred", a.Name)
 	}
 }
 
 func TestMatchAsset_PrefersArchive(t *testing.T) {
 	assets := []Asset{
-		{Name: "tool_linux_amd64", URL: "https://example.com/bin", Size: 1000},
-		{Name: "tool_linux_amd64.tar.gz", URL: "https://example.com/tgz", Size: 1000},
+		{Name: testAssetName("tool", ""), URL: "https://example.com/bin", Size: 1000},
+		{Name: testAssetName("tool", ".tar.gz"), URL: "https://example.com/tgz", Size: 1000},
 	}
 	a, err := MatchAsset(assets, "tool")
 	if err != nil {
 		t.Fatalf("MatchAsset() error: %v", err)
 	}
-	if a.Name != "tool_linux_amd64.tar.gz" {
+	if a.Name != testAssetName("tool", ".tar.gz") {
 		t.Errorf("MatchAsset() = %q, want archive preferred", a.Name)
 	}
 }

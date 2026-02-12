@@ -34,7 +34,7 @@ jobs:
         run: diff -u <(echo -n) <(gofmt -d -s $(find . -name '*.go' -not -path './vendor/*' | xargs -r dirname | sort -u))
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.9.0 # renovate: datasource=github-releases depName=golangci/golangci-lint
           args: --timeout 5m
