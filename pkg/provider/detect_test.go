@@ -82,7 +82,8 @@ func TestContainsWord(t *testing.T) {
 	}{
 		{"k9s_linux_amd64.tar.gz", "linux", true},
 		{"k9s_linux_amd64.tar.gz", "amd64", true},
-		{"charm_linux_amd64", "arm", false}, // "arm" inside "charm" should not match
+		{"charm_linux_amd64", "arm", false},  // "arm" inside "charm" should not match
+		{"charm_arm64_linux", "arm64", true}, // "arm" inside "charm" but "arm64" standalone later
 		{"tool-arm64-linux", "arm64", true},
 		{"tool_x86_64", "x86_64", true},
 	}

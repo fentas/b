@@ -169,26 +169,23 @@ func isArchive(lower string) bool {
 // containsWord checks if the name contains the word, bounded by
 // non-alphanumeric characters (to avoid matching "arm" in "charm").
 func containsWord(name, word string) bool {
-	idx := strings.Index(name, word)
-	if idx < 0 {
-		return false
-	}
-	// Check left boundary
-	if idx > 0 {
-		c := name[idx-1]
-		if isAlphaNum(c) {
+	for offset := 0; offset < len(name); {
+		idx := strings.Index(name[offset:], word)
+		if idx < 0 {
 			return false
 		}
-	}
-	// Check right boundary
-	end := idx + len(word)
-	if end < len(name) {
-		c := name[end]
-		if isAlphaNum(c) {
-			return false
+		abs := offset + idx
+		// Check left boundary
+		leftOK := abs == 0 || !isAlphaNum(name[abs-1])
+		// Check right boundary
+		end := abs + len(word)
+		rightOK := end >= len(name) || !isAlphaNum(name[end])
+		if leftOK && rightOK {
+			return true
 		}
+		offset = abs + 1
 	}
-	return true
+	return false
 }
 
 func isAlphaNum(c byte) bool {

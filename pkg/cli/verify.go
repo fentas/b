@@ -116,8 +116,7 @@ func (o *VerifyOptions) Run() error {
 	}
 
 	if failures > 0 {
-		fmt.Fprintf(o.IO.Out, "\nFAIL: %d artifact(s) differ from lock\n", failures)
-		os.Exit(1)
+		return fmt.Errorf("%d artifact(s) differ from lock", failures)
 	}
 	fmt.Fprintln(o.IO.Out, "\nAll artifacts verified ✓")
 	return nil
