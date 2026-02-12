@@ -400,7 +400,7 @@ func TestCheckEnvConflicts_SingleEnv(t *testing.T) {
 	var errBuf bytes.Buffer
 	o := &UpdateOptions{
 		SharedOptions: &SharedOptions{
-			IO:     &streams.IO{Out: &bytes.Buffer{}, ErrOut: &errBuf},
+			IO: &streams.IO{Out: &bytes.Buffer{}, ErrOut: &errBuf},
 			Config: &state.State{
 				Envs: state.EnvList{
 					{Key: "github.com/org/infra"},

@@ -409,7 +409,7 @@ envs:
 
 func TestEnvListMarshalYAML_AllForms(t *testing.T) {
 	list := EnvList{
-		{Key: "github.com/org/empty"},                                  // bare entry
+		{Key: "github.com/org/empty"},                                 // bare entry
 		{Key: "github.com/org/versioned", Version: "v2.0"},            // has version
 		{Key: "github.com/org/strategy", Strategy: "merge"},           // non-default strategy
 		{Key: "github.com/org/default-strategy", Strategy: "replace"}, // default strategy (should be omitted)
@@ -453,8 +453,8 @@ github.com/org/bare:
 
 func TestParseFilesMap_AllForms(t *testing.T) {
 	raw := map[string]interface{}{
-		"dir/**": nil,                                            // null
-		"file/*": "output/",                                      // string
+		"dir/**": nil,                                             // null
+		"file/*": "output/",                                       // string
 		"cfg/**": map[interface{}]interface{}{"dest": "configs/"}, // map with dest
 	}
 

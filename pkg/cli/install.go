@@ -348,7 +348,9 @@ func parseBinaryArg(arg string) (name, version string) {
 }
 
 // parseSCPArg tries to parse an SCP-style env install:
-//   ref@version:/glob [dest]
+//
+//	ref@version:/glob [dest]
+//
 // Returns the parsed envInstall, how many additional args were consumed, and whether it matched.
 func parseSCPArg(arg string, remaining []string) (envInstall, int, bool) {
 	// Look for colon that signals SCP syntax — must come after a ref (contains /)

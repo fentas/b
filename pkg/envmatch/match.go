@@ -142,14 +142,17 @@ func matchDoublestar(pattern, path string) bool {
 // computeDest computes the destination path for a matched file.
 //
 // For globs with a dest: strip the glob prefix, prepend dest.
-//   "manifests/hetzner/deploy.yaml" with prefix "manifests/hetzner/" dest "/hetzner"
-//   → "/hetzner/deploy.yaml"
+//
+//	"manifests/hetzner/deploy.yaml" with prefix "manifests/hetzner/" dest "/hetzner"
+//	→ "/hetzner/deploy.yaml"
 //
 // For globs without dest (bare key): keep original path.
-//   "manifests/base/deploy.yaml" → "manifests/base/deploy.yaml"
+//
+//	"manifests/base/deploy.yaml" → "manifests/base/deploy.yaml"
 //
 // For literal paths: dest is a prefix directory.
-//   "configs/ingress.yaml" with dest "/config" → "/config/ingress.yaml"
+//
+//	"configs/ingress.yaml" with dest "/config" → "/config/ingress.yaml"
 func computeDest(sourcePath, prefix, dest string) string {
 	if dest == "" {
 		// No dest specified — preserve original path

@@ -27,13 +27,13 @@ type ConflictFunc func(sourcePath, destPath string) string
 
 // EnvConfig is the parsed configuration for a single env entry from b.yaml.
 type EnvConfig struct {
-	Ref             string                        // e.g. "github.com/org/infra"
-	Label           string                        // fragment label (e.g. "monitoring")
-	Version         string                        // tag/branch (resolved to commit in lock)
-	Ignore          []string                      // global ignore patterns
-	Strategy        string                        // replace (default) | client | merge
+	Ref             string                         // e.g. "github.com/org/infra"
+	Label           string                         // fragment label (e.g. "monitoring")
+	Version         string                         // tag/branch (resolved to commit in lock)
+	Ignore          []string                       // global ignore patterns
+	Strategy        string                         // replace (default) | client | merge
 	Files           map[string]envmatch.GlobConfig // glob → config
-	ResolveConflict ConflictFunc                  // optional: called per-file when local changes detected
+	ResolveConflict ConflictFunc                   // optional: called per-file when local changes detected
 }
 
 // SyncResult is the result of syncing a single env.

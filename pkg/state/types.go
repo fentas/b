@@ -16,11 +16,11 @@ type State struct {
 
 // EnvEntry is a single env in b.yaml.
 type EnvEntry struct {
-	Key      string                        `yaml:"-"` // map key (e.g. "github.com/org/infra#label")
-	Version  string                        `yaml:"version,omitempty"`
-	Ignore   []string                      `yaml:"ignore,omitempty"`
-	Strategy string                        `yaml:"strategy,omitempty"`
-	Files    map[string]envmatch.GlobConfig `yaml:"-"` // custom unmarshal
+	Key      string                         `yaml:"-"` // map key (e.g. "github.com/org/infra#label")
+	Version  string                         `yaml:"version,omitempty"`
+	Ignore   []string                       `yaml:"ignore,omitempty"`
+	Strategy string                         `yaml:"strategy,omitempty"`
+	Files    map[string]envmatch.GlobConfig `yaml:"-"`               // custom unmarshal
 	RawFiles map[string]interface{}         `yaml:"files,omitempty"` // for marshal roundtrip
 }
 

@@ -12,8 +12,8 @@ func TestGitHubMatch(t *testing.T) {
 		{"github.com/derailed/k9s@v0.32.0", true},
 		{"github.com/org/repo", true},
 		{"gitlab.com/org/repo", false},
-		{"derailed/k9s", true},         // bare owner/repo
-		{"kubectl", false},             // just a name
+		{"derailed/k9s", true},              // bare owner/repo
+		{"kubectl", false},                  // just a name
 		{"go://github.com/org/repo", false}, // protocol prefix
 	}
 
@@ -27,9 +27,9 @@ func TestGitHubMatch(t *testing.T) {
 
 func TestGitHubOwnerRepo(t *testing.T) {
 	tests := []struct {
-		ref        string
-		wantOwner  string
-		wantRepo   string
+		ref       string
+		wantOwner string
+		wantRepo  string
 	}{
 		{"github.com/derailed/k9s", "derailed", "k9s"},
 		{"github.com/derailed/k9s@v0.32.0", "derailed", "k9s"},

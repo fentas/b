@@ -4,51 +4,51 @@ import "testing"
 
 func TestParseSCPArg(t *testing.T) {
 	tests := []struct {
-		arg       string
-		remaining []string
-		wantOk    bool
-		wantRef   string
-		wantVer   string
-		wantGlob  string
-		wantDest  string
+		arg          string
+		remaining    []string
+		wantOk       bool
+		wantRef      string
+		wantVer      string
+		wantGlob     string
+		wantDest     string
 		wantConsumed int
 	}{
 		{
-			arg:       "github.com/org/infra:/manifests/hetzner/**",
-			remaining: []string{"/hetzner"},
-			wantOk:    true,
-			wantRef:   "github.com/org/infra",
-			wantGlob:  "manifests/hetzner/**",
-			wantDest:  "/hetzner",
+			arg:          "github.com/org/infra:/manifests/hetzner/**",
+			remaining:    []string{"/hetzner"},
+			wantOk:       true,
+			wantRef:      "github.com/org/infra",
+			wantGlob:     "manifests/hetzner/**",
+			wantDest:     "/hetzner",
 			wantConsumed: 1,
 		},
 		{
-			arg:       "github.com/org/infra@v2.0:/manifests/base/**",
-			remaining: []string{"."},
-			wantOk:    true,
-			wantRef:   "github.com/org/infra",
-			wantVer:   "v2.0",
-			wantGlob:  "manifests/base/**",
-			wantDest:  ".",
+			arg:          "github.com/org/infra@v2.0:/manifests/base/**",
+			remaining:    []string{"."},
+			wantOk:       true,
+			wantRef:      "github.com/org/infra",
+			wantVer:      "v2.0",
+			wantGlob:     "manifests/base/**",
+			wantDest:     ".",
 			wantConsumed: 1,
 		},
 		{
-			arg:       "github.com/org/infra:/**",
-			remaining: nil,
-			wantOk:    true,
-			wantRef:   "github.com/org/infra",
-			wantGlob:  "**",
-			wantDest:  "",
+			arg:          "github.com/org/infra:/**",
+			remaining:    nil,
+			wantOk:       true,
+			wantRef:      "github.com/org/infra",
+			wantGlob:     "**",
+			wantDest:     "",
 			wantConsumed: 0,
 		},
 		{
 			// Without leading slash
-			arg:       "github.com/org/infra:manifests/**",
-			remaining: []string{"out"},
-			wantOk:    true,
-			wantRef:   "github.com/org/infra",
-			wantGlob:  "manifests/**",
-			wantDest:  "out",
+			arg:          "github.com/org/infra:manifests/**",
+			remaining:    []string{"out"},
+			wantOk:       true,
+			wantRef:      "github.com/org/infra",
+			wantGlob:     "manifests/**",
+			wantDest:     "out",
 			wantConsumed: 1,
 		},
 		{

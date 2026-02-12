@@ -25,7 +25,7 @@ type SharedOptions struct {
 	Output     string
 
 	// Internal
-	lookup         map[string]*binary.Binary
+	lookup           map[string]*binary.Binary
 	loadedConfigPath string // path where config was actually loaded from
 }
 
