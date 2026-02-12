@@ -53,6 +53,7 @@ type LockFile struct {
 	Dest   string `json:"dest"`
 	SHA256 string `json:"sha256"`
 	Mode   string `json:"mode"`
+	Status string `json:"-"` // runtime only: replaced, kept, merged, conflict
 }
 
 const lockFileName = "b.lock"

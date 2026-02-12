@@ -128,6 +128,83 @@ func outputBytes(args ...string) ([]byte, error) {
 	return out, nil
 }
 
+// Merge3Way performs a three-way merge using git merge-file.
+// Returns the merged content, whether conflicts exist, and any error.
+// Exit code 0 = clean merge, 1 = conflicts (markers in result), 2+ = error.
+func Merge3Way(local, base, upstream []byte) ([]byte, bool, error) {
+	tmpDir, err := os.MkdirTemp("", "b-merge-*")
+	if err != nil {
+		return nil, false, fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	localPath := filepath.Join(tmpDir, "local")
+	basePath := filepath.Join(tmpDir, "base")
+	upstreamPath := filepath.Join(tmpDir, "upstream")
+
+	if err := os.WriteFile(localPath, local, 0644); err != nil {
+		return nil, false, err
+	}
+	if err := os.WriteFile(basePath, base, 0644); err != nil {
+		return nil, false, err
+	}
+	if err := os.WriteFile(upstreamPath, upstream, 0644); err != nil {
+		return nil, false, err
+	}
+
+	cmd := exec.Command("git", "merge-file", "--diff3", localPath, basePath, upstreamPath)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	mergeErr := cmd.Run()
+
+	result, readErr := os.ReadFile(localPath)
+	if readErr != nil {
+		return nil, false, fmt.Errorf("reading merge result: %w", readErr)
+	}
+
+	if mergeErr != nil {
+		if exitErr, ok := mergeErr.(*exec.ExitError); ok {
+			if exitErr.ExitCode() > 0 {
+				// Exit code > 0 means conflicts (negative of conflict count on some systems,
+				// but typically 1 for "conflicts present")
+				return result, true, nil
+			}
+		}
+		return nil, false, fmt.Errorf("git merge-file: %w\n%s", mergeErr, stderr.String())
+	}
+
+	return result, false, nil
+}
+
+// DiffNoIndex returns a unified diff between two byte slices using git diff --no-index.
+func DiffNoIndex(a, b []byte, labelA, labelB string) (string, error) {
+	tmpDir, err := os.MkdirTemp("", "b-diff-*")
+	if err != nil {
+		return "", fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	pathA := filepath.Join(tmpDir, "a")
+	pathB := filepath.Join(tmpDir, "b")
+	if err := os.WriteFile(pathA, a, 0644); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(pathB, b, 0644); err != nil {
+		return "", err
+	}
+
+	cmd := exec.Command("git", "diff", "--no-index",
+		fmt.Sprintf("--src-prefix=%s/", labelA),
+		fmt.Sprintf("--dst-prefix=%s/", labelB),
+		pathA, pathB)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	_ = cmd.Run() // exit 1 means differences found, not an error
+
+	return stdout.String(), nil
+}
+
 // GitURL converts a ref like "github.com/org/repo" or "github.com/org/repo#label"
 // to a clone URL like "https://github.com/org/repo.git".
 func GitURL(ref string) string {

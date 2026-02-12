@@ -1,13 +1,17 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/fentas/goodies/progress"
 	"github.com/fentas/goodies/templates"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/env"
@@ -19,6 +23,7 @@ import (
 type UpdateOptions struct {
 	*SharedOptions
 	specifiedArgs []string // args from CLI (binary names or env refs)
+	Strategy      string   // strategy flag override: replace, client, merge
 }
 
 // NewUpdateCmd creates the update subcommand
@@ -44,6 +49,12 @@ func NewUpdateCmd(shared *SharedOptions) *cobra.Command {
 
 			# Force update (overwrite existing)
 			b update --force kubectl
+
+			# Update with merge strategy (three-way merge on local changes)
+			b update --strategy=merge
+
+			# Update keeping local changes
+			b update --strategy=client
 		`),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := o.Complete(args); err != nil {
@@ -55,6 +66,8 @@ func NewUpdateCmd(shared *SharedOptions) *cobra.Command {
 			return o.Run()
 		},
 	}
+
+	cmd.Flags().StringVar(&o.Strategy, "strategy", "", "Conflict strategy: replace (default), client, merge")
 
 	return cmd
 }
@@ -100,6 +113,14 @@ func (o *UpdateOptions) Complete(args []string) error {
 
 // Validate checks if the update operation is valid
 func (o *UpdateOptions) Validate() error {
+	if o.Strategy != "" {
+		switch o.Strategy {
+		case env.StrategyReplace, env.StrategyClient, env.StrategyMerge:
+			// valid
+		default:
+			return fmt.Errorf("invalid strategy %q: must be replace, client, or merge", o.Strategy)
+		}
+	}
 	return nil
 }
 
@@ -198,22 +219,27 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		label := gitcache.RefLabel(entry.Key)
 		ref := gitcache.RefBase(entry.Key)
 
+		// Determine strategy: CLI flag > config > default
+		strategy := entry.Strategy
+		if o.Strategy != "" {
+			strategy = o.Strategy
+		}
+
 		cfg := env.EnvConfig{
 			Ref:      ref,
 			Label:    label,
 			Version:  entry.Version,
 			Ignore:   entry.Ignore,
-			Strategy: entry.Strategy,
+			Strategy: strategy,
 			Files:    entry.Files,
 		}
 
-		lockEntry := lk.FindEnv(ref, label)
-
-		// For update: clear the version pin to get latest commit
-		// (ResolveRef with empty version resolves HEAD)
-		if cfg.Version == "" {
-			// Already will resolve HEAD
+		// Set up interactive conflict resolver for replace strategy on TTY
+		if (strategy == "" || strategy == env.StrategyReplace) && isTTY() {
+			cfg.ResolveConflict = o.interactiveConflictResolver(ref, lk)
 		}
+
+		lockEntry := lk.FindEnv(ref, label)
 
 		result, err := env.SyncEnv(cfg, projectRoot, "", lockEntry)
 		if err != nil {
@@ -226,13 +252,13 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			continue // don't overwrite lock entry when up-to-date
 		}
 
-		// Check for local changes that were overwritten (replace strategy)
-		if lockEntry != nil {
-			o.reportLocalChanges(lockEntry, result)
-		}
 		fmt.Fprintf(o.IO.Out, "  %-40s %s → %s (%s)\n", entry.Key, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)
 		for _, f := range result.Files {
-			fmt.Fprintf(o.IO.Out, "    → %-36s ✓ replaced\n", f.Dest)
+			o.printFileStatus(f)
+		}
+
+		if result.Conflicts > 0 {
+			fmt.Fprintf(o.IO.ErrOut, "    ⚠ %d file(s) have merge conflicts — resolve manually\n", result.Conflicts)
 		}
 
 		lk.UpsertEnv(lock.EnvEntry{
@@ -248,23 +274,99 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 	return lock.WriteLock(lockDir, lk, ">=5.0.0")
 }
 
-// reportLocalChanges warns about files that had local changes before being overwritten.
-func (o *UpdateOptions) reportLocalChanges(lockEntry *lock.EnvEntry, result *env.SyncResult) {
-	projectRoot := o.LockDir()
-	for _, oldFile := range lockEntry.Files {
-		// Check if local file SHA differs from lock (local changes)
-		localPath := oldFile.Dest
-		if localPath != "" && localPath[0] != '/' {
-			localPath = projectRoot + "/" + localPath
-		}
-		hash, err := lock.SHA256File(localPath)
-		if err != nil {
-			continue
-		}
-		if hash != oldFile.SHA256 {
-			fmt.Fprintf(o.IO.ErrOut, "    ⚠ %-36s (local changes overwritten)\n", oldFile.Dest)
+// printFileStatus prints a single file's sync status.
+func (o *UpdateOptions) printFileStatus(f lock.LockFile) {
+	switch {
+	case f.Status == "kept":
+		fmt.Fprintf(o.IO.Out, "    → %-36s ⊘ kept (local changes preserved)\n", f.Dest)
+	case f.Status == "merged":
+		fmt.Fprintf(o.IO.Out, "    → %-36s ✓ merged\n", f.Dest)
+	case f.Status == "conflict":
+		fmt.Fprintf(o.IO.ErrOut, "    → %-36s ✗ conflict (markers inserted)\n", f.Dest)
+	case strings.Contains(f.Status, "local changes overwritten"):
+		fmt.Fprintf(o.IO.ErrOut, "    → %-36s ⚠ replaced (local changes overwritten)\n", f.Dest)
+	default:
+		fmt.Fprintf(o.IO.Out, "    → %-36s ✓ replaced\n", f.Dest)
+	}
+}
+
+// interactiveConflictResolver returns a ConflictFunc that prompts the user per-file.
+func (o *UpdateOptions) interactiveConflictResolver(ref string, lk *lock.Lock) env.ConflictFunc {
+	reader := bufio.NewReader(os.Stdin)
+	return func(sourcePath, destPath string) string {
+		for {
+			fmt.Fprintf(o.IO.ErrOut, "    %s has local changes.\n", destPath)
+			fmt.Fprintf(o.IO.ErrOut, "      [r]eplace  [k]eep  [m]erge  [d]iff > ")
+
+			input, err := reader.ReadString('\n')
+			if err != nil {
+				return env.StrategyReplace // default on read error
+			}
+			input = strings.TrimSpace(strings.ToLower(input))
+
+			switch input {
+			case "r", "replace":
+				return env.StrategyReplace
+			case "k", "keep":
+				return env.StrategyClient
+			case "m", "merge":
+				return env.StrategyMerge
+			case "d", "diff":
+				o.showDiff(ref, sourcePath, destPath, lk)
+				continue // re-prompt
+			default:
+				fmt.Fprintf(o.IO.ErrOut, "      Invalid choice. Try r, k, m, or d.\n")
+				continue
+			}
 		}
 	}
+}
+
+// showDiff shows a unified diff between local file and upstream content.
+func (o *UpdateOptions) showDiff(ref, sourcePath, destPath string, lk *lock.Lock) {
+	local, err := os.ReadFile(destPath)
+	if err != nil {
+		fmt.Fprintf(o.IO.ErrOut, "      Error reading local file: %v\n", err)
+		return
+	}
+
+	// Find the env entry to get the new commit
+	// We can't easily get the upstream content here without the commit,
+	// so we show local vs lock SHA for context
+	fmt.Fprintf(o.IO.ErrOut, "\n--- local: %s\n", destPath)
+	fmt.Fprintf(o.IO.ErrOut, "+++ upstream: %s:%s\n", ref, sourcePath)
+
+	// Read upstream from cache (best effort — use HEAD of the cache)
+	baseRef := gitcache.RefBase(ref)
+	url := gitcache.GitURL(ref)
+	commit, err := gitcache.ResolveRef(url, "")
+	if err != nil {
+		fmt.Fprintf(o.IO.ErrOut, "      Cannot resolve upstream for diff: %v\n", err)
+		return
+	}
+
+	upstream, err := gitcache.ShowFile("", baseRef, commit, sourcePath)
+	if err != nil {
+		fmt.Fprintf(o.IO.ErrOut, "      Cannot read upstream file for diff: %v\n", err)
+		return
+	}
+
+	diff, err := gitcache.DiffNoIndex(local, upstream, "local", "upstream")
+	if err != nil {
+		fmt.Fprintf(o.IO.ErrOut, "      Error computing diff: %v\n", err)
+		return
+	}
+
+	if diff == "" {
+		fmt.Fprintf(o.IO.ErrOut, "      (no differences)\n\n")
+	} else {
+		fmt.Fprintf(o.IO.ErrOut, "%s\n", diff)
+	}
+}
+
+// isTTY returns true if stdout is a terminal (not piped/redirected).
+func isTTY() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 // updateBinaries updates the specified binaries with progress tracking
