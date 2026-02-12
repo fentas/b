@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.6.1](https://github.com/fentas/b/compare/v4.6.0...v4.6.1) (2026-02-12)
+
+
+### Bug Fixes
+
+* update command honors alias and preserves [@version](https://github.com/version) ([#97](https://github.com/fentas/b/issues/97)) ([d5c1a53](https://github.com/fentas/b/commit/d5c1a53e370ecc076d7285f4d68856c7f7275e7c))
+
 ## [4.6.0](https://github.com/fentas/b/compare/v4.5.0...v4.6.0) (2026-02-12)
 
 
