@@ -9,7 +9,7 @@ const createLatestReleaseRedirects = require("./src/utils/createLatestReleaseRed
 
 const announcementBar = JSON.parse(fs.readFileSync("./announcement.json"))
 
-/** @type {import('@medusajs/docs').MedusaDocusaurusConfig} */
+/** @type {import('@docusaurus/types').DocusaurusConfig} */
 const config = {
   title: "b",
   tagline: "Explore and learn how to use b",
@@ -223,7 +223,7 @@ const config = {
       {
         docs: {
           sidebarPath: require.resolve("./sidebars.js"),
-          editUrl: "https://github.com/fentas/b/edit/develop/www/apps/docs",
+          editUrl: "https://github.com/fentas/b/edit/main/docs",
           path: "content",
           routeBasePath: "/",
           remarkPlugins: [

@@ -1,6 +1,6 @@
-# Medusa Documentation
+# b Documentation
 
-The Medusa documentation website is built with Docusaurus v2. You can learn more about contributing [here](https://arg.sh/contribution-guidelines).
+The b documentation website is built with Docusaurus. See the [contribution guidelines](https://arg.sh/contribution-guidelines) for details.
 
 ## Components and Theme
 
@@ -8,6 +8,6 @@ The Medusa documentation website is built with Docusaurus v2. You can learn more
 
 Components that extend themes from Docusaurus or other plugins are placed under `src/theme`.
 
-### Medusa Docs Components
+### Custom Components
 
-Components created specifically for the Medusa Docs are placed under the `src/componenets` directory.
+Custom components for the docs site are placed under the `src/components` directory.
