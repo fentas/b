@@ -55,6 +55,12 @@ b install terraform helm
 
 # Install and add to b.yaml
 b install --add docker-compose@v2.20.0
+
+# Install from different providers
+b install gitlab.com/owner/repo
+b install codeberg.org/owner/repo
+b install go://github.com/jrhouston/tfk8s
+b install docker://hashicorp/terraform
 ```
 
 ### 3. Use Your Tools
@@ -129,6 +135,7 @@ binaries:
     version: "jq-1.7"
   kubectl:
     version: "v1.28.0"
+    enforced: true          # strict pin — never auto-upgrade
   # leave empty for latest version
   terraform:
   # alias: install one binary under a different name
@@ -139,6 +146,17 @@ binaries:
     file: ../bin/kubectl  # relative to config file
   system-tool:
     file: /usr/local/bin/tool  # absolute path
+```
+
+### Enforced Versions
+
+Use the `enforced` field to strictly pin a version. Unlike `version` (which can be auto-upgraded by `b update`), an enforced version is locked and never automatically changed.
+
+```yaml
+binaries:
+  kubectl:
+    version: "v1.28.0"
+    enforced: true
 ```
 
 ### Binary Aliases
@@ -191,6 +209,19 @@ binaries:
 - **Absolute paths** (like `/usr/local/bin/tool`) are used exactly as specified (mind the permissions)
 - This feature is particularly useful for pointing to pre-existing binaries or organizing tools in custom directory structures
 
+## Authentication
+
+For private repositories or to increase API rate limits, set provider-specific tokens as environment variables:
+
+```bash
+export GITHUB_TOKEN="ghp_..."
+export GITLAB_TOKEN="glpat-..."
+export GITEA_TOKEN="..."
+```
+
+See [Authentication](/authentication) for details.
+
 ## Next Steps
 
 - [CLI Reference](/b/overview) - Complete command reference
+- [Authentication](/authentication) - Configure tokens for private repos
