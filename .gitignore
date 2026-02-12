@@ -6,3 +6,4 @@ main
 !/.bin/b.yaml
 
 /.back
+/test/coverage/
