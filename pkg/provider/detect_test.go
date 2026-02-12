@@ -1,6 +1,9 @@
 package provider
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestMatchAsset(t *testing.T) {
 	assets := []Asset{
@@ -12,11 +15,27 @@ func TestMatchAsset(t *testing.T) {
 		{Name: "tool_Linux_x86_64.tar.gz.sha256", URL: "https://example.com/sha256", Size: 64},
 	}
 
-	// This test assumes GOOS=linux GOARCH=amd64
-	if a, err := MatchAsset(assets, "tool"); err != nil {
+	expected := map[string]map[string]string{
+		"linux":   {"amd64": "tool_Linux_x86_64.tar.gz"},
+		"darwin":  {"arm64": "tool_Darwin_arm64.tar.gz", "amd64": "tool_Darwin_x86_64.tar.gz"},
+		"windows": {"amd64": "tool_Windows_x86_64.zip"},
+	}
+
+	archMap, ok := expected[runtime.GOOS]
+	if !ok {
+		t.Skipf("no test assets for GOOS=%s", runtime.GOOS)
+	}
+	want, ok := archMap[runtime.GOARCH]
+	if !ok {
+		t.Skipf("no test asset for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+
+	a, err := MatchAsset(assets, "tool")
+	if err != nil {
 		t.Fatalf("MatchAsset() error: %v", err)
-	} else if a.Name != "tool_Linux_x86_64.tar.gz" {
-		t.Errorf("MatchAsset() = %q, want %q", a.Name, "tool_Linux_x86_64.tar.gz")
+	}
+	if a.Name != want {
+		t.Errorf("MatchAsset() = %q, want %q", a.Name, want)
 	}
 }
 
@@ -24,7 +43,9 @@ func TestMatchAssetNoMatch(t *testing.T) {
 	assets := []Asset{
 		{Name: "tool_Darwin_arm64.tar.gz", URL: "https://example.com/d.tar.gz", Size: 1000},
 	}
-	// On linux/amd64, this should not match
+	if runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" {
+		t.Skip("test only valid when GOOS/GOARCH != darwin/arm64")
+	}
 	_, err := MatchAsset(assets, "tool")
 	if err == nil {
 		t.Error("expected no match error")

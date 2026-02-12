@@ -348,7 +348,17 @@ func (o *UpdateOptions) showDiff(ref, sourcePath, destPath string, lk *lock.Lock
 		return
 	}
 
-	upstream, err := gitcache.ShowFile("", baseRef, commit, sourcePath)
+	cacheRoot := gitcache.DefaultCacheRoot()
+	if err := gitcache.EnsureClone(cacheRoot, baseRef, url); err != nil {
+		fmt.Fprintf(o.IO.ErrOut, "      Cannot clone upstream for diff: %v\n", err)
+		return
+	}
+	if err := gitcache.Fetch(cacheRoot, baseRef, commit); err != nil {
+		fmt.Fprintf(o.IO.ErrOut, "      Cannot fetch upstream for diff: %v\n", err)
+		return
+	}
+
+	upstream, err := gitcache.ShowFile(cacheRoot, baseRef, commit, sourcePath)
 	if err != nil {
 		fmt.Fprintf(o.IO.ErrOut, "      Cannot read upstream file for diff: %v\n", err)
 		return

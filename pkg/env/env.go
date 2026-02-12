@@ -123,15 +123,17 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 	conflicts := 0
 
 	for _, m := range matched {
-		// Path traversal check
-		if strings.Contains(m.DestPath, "..") {
-			return nil, fmt.Errorf("path traversal rejected: %s", m.DestPath)
-		}
-
 		// Resolve dest relative to project root
 		destPath := m.DestPath
 		if !filepath.IsAbs(destPath) {
 			destPath = filepath.Join(projectRoot, destPath)
+		}
+		destPath = filepath.Clean(destPath)
+
+		// Path traversal check: ensure resolved path stays under projectRoot
+		rel, err := filepath.Rel(projectRoot, destPath)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return nil, fmt.Errorf("path traversal rejected: %s resolves outside project root", m.DestPath)
 		}
 
 		// Read upstream content

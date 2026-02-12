@@ -229,10 +229,13 @@ func (b *Binary) downloadAsset(asset *provider.Asset) error {
 		if err != nil {
 			return err
 		}
-		_, err = io.Copy(file, reader)
-		file.Close()
-		if err != nil {
-			return err
+		_, copyErr := io.Copy(file, reader)
+		closeErr := file.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
 		}
 		return os.Chmod(b.File, 0755)
 	}
@@ -391,9 +394,12 @@ func (b *Binary) extractFromZipAuto(stream io.Reader) error {
 	if err != nil {
 		return err
 	}
-	defer outFile.Close()
 
 	if _, err := io.Copy(outFile, rc); err != nil {
+		outFile.Close()
+		return err
+	}
+	if err := outFile.Close(); err != nil {
 		return err
 	}
 	return os.Chmod(b.File, 0755)
@@ -491,10 +497,13 @@ func (b *Binary) downloadPreset() error {
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(file, reader)
-	file.Close()
-	if err != nil {
-		return err
+	_, copyErr := io.Copy(file, reader)
+	closeErr := file.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 
 	return os.Chmod(b.File, 0755)

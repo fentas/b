@@ -28,8 +28,8 @@ type EnvEntry struct {
 type EnvList []*EnvEntry
 
 func (list *EnvList) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	// We need ordered access, but yaml.v2 gives map[interface{}]interface{}.
-	// Parse as a raw map first.
+	// yaml.v2 gives map[interface{}]interface{} for nested maps,
+	// so we parse as a typed map first and convert to a slice.
 	var raw map[string]*envEntryRaw
 	if err := unmarshal(&raw); err != nil {
 		return err

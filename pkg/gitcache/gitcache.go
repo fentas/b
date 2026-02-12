@@ -32,6 +32,9 @@ func EnsureClone(root, ref, url string) error {
 	if _, err := os.Stat(dir); err == nil {
 		return nil // already cached
 	}
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return fmt.Errorf("creating cache root %s: %w", root, err)
+	}
 	// git clone --bare --depth 1 <url> <dir>
 	return run("git", "clone", "--bare", "--depth", "1", url, dir)
 }
@@ -164,9 +167,10 @@ func Merge3Way(local, base, upstream []byte) ([]byte, bool, error) {
 
 	if mergeErr != nil {
 		if exitErr, ok := mergeErr.(*exec.ExitError); ok {
-			if exitErr.ExitCode() > 0 {
-				// Exit code > 0 means conflicts (negative of conflict count on some systems,
-				// but typically 1 for "conflicts present")
+			code := exitErr.ExitCode()
+			if code > 0 && code < 128 {
+				// Exit code 1..127 = number of conflicts (markers in result)
+				// Exit code >= 128 = killed by signal (real error)
 				return result, true, nil
 			}
 		}
@@ -200,7 +204,13 @@ func DiffNoIndex(a, b []byte, labelA, labelB string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	_ = cmd.Run() // exit 1 means differences found, not an error
+	if err := cmd.Run(); err != nil {
+		// Exit code 1 = differences found (normal for diff)
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return stdout.String(), nil
+		}
+		return "", fmt.Errorf("git diff --no-index: %w\n%s", err, stderr.String())
+	}
 
 	return stdout.String(), nil
 }
