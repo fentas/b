@@ -55,6 +55,9 @@ b install docker://alpine/helm
 # Install and add to b.yaml
 b install --add jq@1.7
 
+# Install and pin version in b.yaml
+b install --fix jq@1.7
+
 # Sync env files from a git repository (SCP-style)
 b install github.com/org/infra:/manifests/hetzner/** /hetzner
 b install github.com/org/infra@v2.0:/manifests/base/** .
@@ -74,16 +77,27 @@ b search terraform
 # Show versions (with remote update check for envs)
 b version
 b version --local  # skip remote checks
+b version --check  # exit code 0 if up-to-date, 1 if not (CI-friendly)
 
 # Verify installed artifacts against b.lock checksums
 b verify
 
 # Manage git cache
 b cache clean  # remove all cached repos
+b cache path   # print cache directory
 
 # Request a new binary
 b request
 ```
+
+#### Global flags
+
+| Flag | Short | Description |
+| ---- | ----- | ----------- |
+| `--config PATH` | `-c` | Path to configuration file |
+| `--force` | `-f` | Overwrite existing binaries |
+| `--quiet` | `-q` | Suppress output |
+| `--output FORMAT` | | Output format: `json`, `yaml`, or `text` |
 
 &nbsp;
 
@@ -103,6 +117,8 @@ Create a `b.yaml` file in the binary directory to declare what to install. Here 
 binaries:
   jq:
     version: jq-1.8.1    # pin version
+  helm:
+    enforced: v3.14.0     # strict pin (never auto-upgrade)
   kind:
   tilt:
   envsubst:
@@ -129,13 +145,25 @@ envs:
   github.com/org/shared-config:
 ```
 
-**Binaries:** If you don't specify a version, `b` will install the latest. Custom file paths can be relative (resolved from config location) or absolute.
+**Binaries:** If you don't specify a version, `b` will install the latest. Use `enforced` instead of `version` to strictly pin a version (prevents auto-upgrade). Custom file paths can be relative (resolved from config location) or absolute.
 
 **Envs:** Sync configuration files from upstream git repositories. Strategy controls how local changes are handled during updates:
 
 - **replace** (default): Overwrite with upstream. Interactive prompt on TTY when local changes detected.
 - **client**: Keep local files when modified, skip upstream.
 - **merge**: Three-way merge via `git merge-file`. Conflict markers inserted on failure.
+
+&nbsp;
+
+### 🔑 Authentication
+
+Set environment variables to authenticate with providers for higher rate limits or private repositories:
+
+| Variable | Provider |
+| ---- | ---- |
+| `GITHUB_TOKEN` | GitHub |
+| `GITLAB_TOKEN` | GitLab |
+| `GITEA_TOKEN` | Gitea / Forgejo (Codeberg) |
 
 &nbsp;
 
