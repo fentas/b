@@ -93,7 +93,6 @@ Use **b** in your CI/CD pipelines:
 steps:
   - uses: actions/checkout@v4
   - name: Install b
-    # todo: wrong url; create install script
     run: curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
   - name: Install project tools
     run: b install
