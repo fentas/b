@@ -158,7 +158,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		// Determine per-file strategy
 		fileStrategy := strategy
 		if localChanged && cfg.ResolveConflict != nil {
-			fileStrategy = cfg.ResolveConflict(m.SourcePath, m.DestPath)
+			fileStrategy = cfg.ResolveConflict(m.SourcePath, destPath)
 		}
 
 		// Apply strategy
