@@ -205,6 +205,9 @@ func (o *SharedOptions) LockDir() string {
 	if o.ConfigPath != "" {
 		return filepath.Dir(o.ConfigPath)
 	}
+	if o.loadedConfigPath != "" {
+		return filepath.Dir(o.loadedConfigPath)
+	}
 	if p, _ := path.FindConfigFile(); p != "" {
 		return filepath.Dir(p)
 	}
