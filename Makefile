@@ -1,11 +1,12 @@
 .PHONY: build test coverage lint ci clean
 
-BINARY     := .bin/b
-MODULE     := github.com/fentas/b
-MAIN       := ./cmd/b
-COVER_DIR  := test/coverage
-COVER_FILE := $(COVER_DIR)/coverage.out
-COVER_JSON := $(COVER_DIR)/coverage.json
+BINARY      := .bin/b
+MODULE      := github.com/fentas/b
+MAIN        := ./cmd/b
+COVER_DIR   := test/coverage
+COVER_FILE  := $(COVER_DIR)/coverage.out
+COVER_JSON  := $(COVER_DIR)/coverage.json
+COVER_BADGE := $(COVER_DIR)/badge.json
 
 # Build flags (match goreleaser)
 LDFLAGS := -w
@@ -31,8 +32,21 @@ coverage: $(COVER_DIR)
 			printf "  {\"file\": \"%s\", \"function\": \"%s\", \"coverage\": %s}", $$1, $$2, $$NF \
 		} \
 		END{print "\n]"}' > "$(COVER_JSON)"
+	@# Generate shields.io endpoint badge
+	@go tool cover -func="$(COVER_FILE)" | tail -1 | \
+		awk '{ \
+			gsub(/%/,"",$$NF); pct=$$NF+0; \
+			if      (pct>=90) c="brightgreen"; \
+			else if (pct>=80) c="green"; \
+			else if (pct>=70) c="yellowgreen"; \
+			else if (pct>=50) c="yellow"; \
+			else if (pct>=30) c="orange"; \
+			else              c="red"; \
+			printf "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"%.1f%%\",\"color\":\"%s\"}\n", pct, c \
+		}' > "$(COVER_BADGE)"
 	@echo "Coverage report: $(COVER_FILE)"
 	@echo "Coverage JSON:   $(COVER_JSON)"
+	@echo "Coverage badge:  $(COVER_BADGE)"
 
 $(COVER_DIR):
 	mkdir -p $(COVER_DIR)
