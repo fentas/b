@@ -35,11 +35,11 @@ var (
 // UpdateOptions holds options for the update command
 type UpdateOptions struct {
 	*SharedOptions
-	specifiedArgs     []string         // args from CLI (binary names or env refs)
-	specifiedBinaries []*binary.Binary // resolved binaries from CLI args
-	specifiedEnvRefs  []string         // resolved env refs from CLI args
-	Strategy          string           // strategy flag override: replace, client, merge
-	stdinReader       io.Reader        // overridden by tests; nil means os.Stdin
+	specifiedArgs     []string                     // args from CLI (binary names or env refs)
+	specifiedBinaries []*binary.Binary             // resolved binaries from CLI args
+	specifiedEnvRefs  []string                     // resolved env refs from CLI args
+	Strategy          string                       // strategy flag override: replace, client, merge
+	stdinReader       io.Reader                    // overridden by tests; nil means os.Stdin
 	updateBinariesF   func([]*binary.Binary) error // overridden by tests; nil means o.updateBinaries
 }
 

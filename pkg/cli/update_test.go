@@ -1675,9 +1675,9 @@ func TestCheckEnvConflicts_ReadLockError(t *testing.T) {
 
 func TestPrintFileStatus_AllStatuses(t *testing.T) {
 	tests := []struct {
-		status    string
-		inOut     string
-		inErrOut  string
+		status   string
+		inOut    string
+		inErrOut string
 	}{
 		{"replaced", "replaced", ""},
 		{"kept", "kept", ""},
