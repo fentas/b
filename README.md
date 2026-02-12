@@ -19,12 +19,12 @@
 
 <p align="left">
 	
-`b` is a binary manager and environment file syncer for development projects. It manages binary installations from GitHub/GitLab releases and syncs configuration files from upstream git repositories.
+`b` is a binary manager and environment file syncer for development projects. It installs binaries from multiple sources and syncs configuration files from upstream git repositories.
 
 Features:
 
 - **30+ pre-packaged binaries** (kubectl, k9s, jq, helm, etc.) with auto-detection
-- **Install any GitHub/GitLab release** via `b install github.com/org/repo`
+- **Install from GitHub, GitLab, Gitea/Forgejo, Go modules, and Docker images** ([docs](https://binary.help/b/subcommands/install))
 - **Sync env files** from git repos with glob matching and three-way merge
 - **Lockfile** (`b.lock`) for reproducible installations with SHA256 verification
 - **direnv integration** for per-project binary management
@@ -45,9 +45,12 @@ b list
 # Install pre-packaged binaries
 b install jq kubectl helm
 
-# Install any GitHub/GitLab release (auto-detected)
+# Install from any supported provider
 b install github.com/derailed/k9s
-b install github.com/sharkdp/bat@v0.24.0
+b install gitlab.com/org/tool
+b install codeberg.org/user/app@v1.0
+b install go://golang.org/x/tools/cmd/goimports
+b install docker://alpine/helm
 
 # Install and add to b.yaml
 b install --add jq@1.7
@@ -106,7 +109,7 @@ binaries:
     alias: renvsubst      # alias to renvsubst
   kubectl:
     file: ../kc           # custom path (relative to config)
-  # Install any GitHub release by ref
+  # Install from any provider by ref (GitHub, GitLab, Gitea, go://, docker://)
   github.com/sharkdp/bat:
     version: v0.24.0
 
@@ -282,7 +285,7 @@ For more convoluted language, see the [LICENSE](https://github.com/fentas/b/blob
 
 ### ❤️ Gratitude
 
-Thanks to all tools and projects that developing this project made possible.
+Thanks to all tools and projects that developing this project made possible. Special thanks to [marcosnils/bin](https://github.com/marcosnils/bin) for the inspiration and code that helped bootstrap the provider and asset detection logic.
 
 &nbsp;
 
