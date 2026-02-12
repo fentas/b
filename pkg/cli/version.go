@@ -152,6 +152,7 @@ func (o *VersionOptions) Run() error {
 }
 
 // showEnvVersions displays version information for configured envs.
+// If Local is false, also checks remote for latest commit.
 func (o *VersionOptions) showEnvVersions() {
 	lk, _ := lock.ReadLock(o.LockDir())
 
@@ -167,10 +168,28 @@ func (o *VersionOptions) showEnvVersions() {
 			version = "(HEAD)"
 		}
 
-		if lockEntry != nil {
-			fmt.Fprintf(o.IO.Out, "  %-40s %s (pinned: %s)\n", entry.Key, version, shortCommit(lockEntry.Commit))
-		} else {
+		if lockEntry == nil {
 			fmt.Fprintf(o.IO.Out, "  %-40s %s (not synced)\n", entry.Key, version)
+			continue
+		}
+
+		if o.Local {
+			fmt.Fprintf(o.IO.Out, "  %-40s %s (pinned: %s)\n", entry.Key, version, shortCommit(lockEntry.Commit))
+			continue
+		}
+
+		// Check remote for latest commit
+		url := gitcache.GitURL(entry.Key)
+		latestCommit, err := gitcache.ResolveRef(url, entry.Version)
+		if err != nil {
+			fmt.Fprintf(o.IO.Out, "  %-40s %s (pinned: %s, remote: error)\n", entry.Key, version, shortCommit(lockEntry.Commit))
+			continue
+		}
+
+		if latestCommit == lockEntry.Commit {
+			fmt.Fprintf(o.IO.Out, "  %-40s %s @ %s (up to date)\n", entry.Key, version, shortCommit(lockEntry.Commit))
+		} else {
+			fmt.Fprintf(o.IO.Out, "  %-40s %s @ %s → %s (update available)\n", entry.Key, version, shortCommit(lockEntry.Commit), shortCommit(latestCommit))
 		}
 	}
 }

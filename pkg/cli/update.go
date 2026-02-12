@@ -195,6 +195,9 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		return nil
 	}
 
+	// Check for dest path conflicts between envs
+	o.checkEnvConflicts(refs)
+
 	lockDir := o.LockDir()
 	projectRoot := lockDir
 	lk, err := lock.ReadLock(lockDir)
@@ -405,4 +408,39 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	wg.Wait()
 	time.Sleep(200 * time.Millisecond)
 	return nil
+}
+
+// checkEnvConflicts detects when two env entries write to overlapping dest paths.
+// It checks the lock file for existing dest paths across all env entries.
+func (o *UpdateOptions) checkEnvConflicts(refs []string) {
+	if o.Config == nil || len(o.Config.Envs) < 2 {
+		return
+	}
+
+	lk, _ := lock.ReadLock(o.LockDir())
+	if lk == nil {
+		return
+	}
+
+	// Build a map of dest → env ref for all env entries in the lock
+	type destOwner struct {
+		ref  string
+		path string // source path
+	}
+	destMap := make(map[string]destOwner)
+
+	for _, envEntry := range lk.Envs {
+		key := envEntry.Ref
+		if envEntry.Label != "" {
+			key += "#" + envEntry.Label
+		}
+		for _, f := range envEntry.Files {
+			if existing, ok := destMap[f.Dest]; ok {
+				fmt.Fprintf(o.IO.ErrOut, "  ⚠ Conflict: %s is written by both %s (%s) and %s (%s)\n",
+					f.Dest, existing.ref, existing.path, key, f.Path)
+				fmt.Fprintf(o.IO.ErrOut, "    Hint: use 'dest' or 'ignore' in b.yaml to resolve\n")
+			}
+			destMap[f.Dest] = destOwner{ref: key, path: f.Path}
+		}
+	}
 }

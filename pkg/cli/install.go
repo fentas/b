@@ -17,7 +17,10 @@ import (
 	"github.com/fentas/b/pkg/gitcache"
 	"github.com/fentas/b/pkg/lock"
 	"github.com/fentas/b/pkg/path"
+	"github.com/fentas/b/pkg/provider"
 	"github.com/fentas/b/pkg/state"
+
+	"gopkg.in/yaml.v2"
 )
 
 // envInstall holds a parsed SCP-style env install request.
@@ -123,6 +126,12 @@ func (o *InstallOptions) Complete(args []string) error {
 		name, version := parseBinaryArg(arg)
 		b, ok := o.GetBinary(name)
 		if !ok {
+			// If it looks like a provider ref, check for upstream b.yaml
+			if provider.IsProviderRef(name) {
+				if hint := o.discoverUpstreamConfig(name); hint != "" {
+					return fmt.Errorf("no releases found for %s, but the repo has a b.yaml:\n%s\n  Hint: use SCP syntax to sync files, e.g.:\n    b install %s:/<glob> <dest>", name, hint, name)
+				}
+			}
 			return fmt.Errorf("unknown binary: %s\n  Hint: use a provider ref like github.com/org/repo to install any release\n  Hint: use ref:/glob dest for env file sync", name)
 		}
 
@@ -570,6 +579,80 @@ func (o *InstallOptions) addEnvToConfig(ei envInstall) error {
 	}
 
 	return state.SaveConfig(config, configPath)
+}
+
+// discoverUpstreamConfig checks if a ref's upstream repo has a b.yaml file.
+// Returns a formatted hint string with discovered file groups, or "" if none found.
+func (o *InstallOptions) discoverUpstreamConfig(ref string) string {
+	baseRef := gitcache.RefBase(ref)
+	url := gitcache.GitURL(ref)
+
+	// Resolve HEAD to get the latest commit
+	commit, err := gitcache.ResolveRef(url, "")
+	if err != nil {
+		return ""
+	}
+
+	cacheRoot := gitcache.DefaultCacheRoot()
+	if err := gitcache.EnsureClone(cacheRoot, baseRef, url); err != nil {
+		return ""
+	}
+	if err := gitcache.Fetch(cacheRoot, baseRef, commit); err != nil {
+		return ""
+	}
+
+	// Check for b.yaml in the root
+	content, err := gitcache.ShowFile(cacheRoot, baseRef, commit, "b.yaml")
+	if err != nil {
+		// Try .bin/b.yaml
+		content, err = gitcache.ShowFile(cacheRoot, baseRef, commit, ".bin/b.yaml")
+		if err != nil {
+			return ""
+		}
+	}
+
+	// Parse to find env or file groups
+	var upstream state.State
+	if parseErr := yaml.Unmarshal(content, &upstream); parseErr != nil {
+		return ""
+	}
+
+	var lines []string
+	if len(upstream.Envs) > 0 {
+		lines = append(lines, "  Environments:")
+		for _, e := range upstream.Envs {
+			lines = append(lines, fmt.Sprintf("    - %s", e.Key))
+		}
+	}
+	if len(upstream.Binaries) > 0 {
+		lines = append(lines, "  Binaries:")
+		for _, b := range upstream.Binaries {
+			lines = append(lines, fmt.Sprintf("    - %s", b.Name))
+		}
+	}
+
+	// Also list top-level directories as potential file groups
+	tree, err := gitcache.ListTree(cacheRoot, baseRef, commit)
+	if err == nil && len(tree) > 0 {
+		dirs := make(map[string]int)
+		for _, p := range tree {
+			parts := strings.SplitN(p, "/", 2)
+			if len(parts) > 1 {
+				dirs[parts[0]]++
+			}
+		}
+		if len(dirs) > 0 {
+			lines = append(lines, "  Top-level directories:")
+			for dir, count := range dirs {
+				lines = append(lines, fmt.Sprintf("    - %s/ (%d files)", dir, count))
+			}
+		}
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
 }
 
 // shortCommit returns the first 7 characters of a commit hash, or "(new)" if empty.

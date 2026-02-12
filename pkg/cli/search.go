@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/fentas/goodies/templates"
 	"github.com/spf13/cobra"
 
 	"github.com/fentas/b/pkg/binary"
+	"github.com/fentas/b/pkg/provider"
 )
 
 // SearchOptions holds options for the search command
@@ -25,7 +27,14 @@ func NewSearchCmd(shared *SharedOptions) *cobra.Command {
 		Use:     "search [query]",
 		Aliases: []string{"s"},
 		Short:   "Search available binaries",
-		Long:    "Discovers all binaries available for installation. Can be filtered with a query.",
+		Long: `Discovers all binaries available for installation. Can be filtered with a query.
+
+In addition to pre-packaged binaries, you can install any GitHub/GitLab release:
+  b install github.com/org/repo
+  b install gitlab.com/org/repo
+
+Or sync environment files from any git repository:
+  b install github.com/org/repo:/path/** dest`,
 		Example: templates.Examples(`
 			# List all available binaries
 			b search
@@ -74,5 +83,23 @@ func (o *SearchOptions) Run() error {
 		}
 	}
 
-	return o.IO.Print(results)
+	if err := o.IO.Print(results); err != nil {
+		return err
+	}
+
+	// If query looks like a provider ref, show a hint
+	if o.Query != "" && provider.IsProviderRef(o.Query) {
+		fmt.Fprintf(o.IO.Out, "\n  Tip: %q looks like a provider ref. Install it directly:\n", o.Query)
+		fmt.Fprintf(o.IO.Out, "    b install %s\n", o.Query)
+		return nil
+	}
+
+	// Show hint about provider refs when no results found
+	if len(results) == 0 && o.Query != "" {
+		fmt.Fprintf(o.IO.Out, "\n  No pre-packaged binaries match %q.\n", o.Query)
+		fmt.Fprintf(o.IO.Out, "  You can install any GitHub/GitLab release directly:\n")
+		fmt.Fprintf(o.IO.Out, "    b install github.com/org/%s\n", o.Query)
+	}
+
+	return nil
 }
