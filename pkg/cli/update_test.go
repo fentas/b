@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/env"
 	"github.com/fentas/b/pkg/lock"
+	"github.com/fentas/b/pkg/state"
 	"github.com/fentas/goodies/streams"
 )
 
@@ -51,6 +53,251 @@ func TestStrategyConstants(t *testing.T) {
 	}
 	if env.StrategyMerge != "merge" {
 		t.Errorf("StrategyMerge = %q", env.StrategyMerge)
+	}
+}
+
+// TestUpdateAlias_VersionRetained verifies that the update flow (Complete → runSpecified)
+// retains the @version for aliased binaries by storing resolved binaries. Issue #79.
+func TestUpdateAlias_VersionRetained(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.Setenv("PATH_BIN", tmpDir)
+	defer os.Unsetenv("PATH_BIN")
+
+	presets := []*binary.Binary{
+		{Name: "renvsubst", Version: "1.0"},
+	}
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, presets)
+	shared.Config = &state.State{
+		Binaries: state.BinaryList{
+			&binary.LocalBinary{
+				Name:  "envsubst",
+				Alias: "renvsubst",
+			},
+		},
+	}
+
+	o := &UpdateOptions{SharedOptions: shared}
+	err := o.Complete([]string{"envsubst@2.0"})
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+
+	// Complete should store the resolved binary with the version applied
+	if len(o.specifiedBinaries) != 1 {
+		t.Fatalf("specifiedBinaries = %d, want 1", len(o.specifiedBinaries))
+	}
+	if o.specifiedBinaries[0].Version != "2.0" {
+		t.Errorf("stored version = %q, want %q (issue #79)", o.specifiedBinaries[0].Version, "2.0")
+	}
+	if o.specifiedBinaries[0].Alias != "envsubst" {
+		t.Errorf("stored alias = %q, want %q", o.specifiedBinaries[0].Alias, "envsubst")
+	}
+}
+
+// TestUpdateAlias_BinaryPath verifies that BinaryPath for an aliased binary
+// resolved from config uses the alias name, not the preset name.
+func TestUpdateAlias_BinaryPath(t *testing.T) {
+	presets := []*binary.Binary{
+		{Name: "renvsubst", Version: "1.0"},
+	}
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, presets)
+	shared.Config = &state.State{
+		Binaries: state.BinaryList{
+			&binary.LocalBinary{
+				Name:  "envsubst",
+				Alias: "renvsubst",
+			},
+		},
+	}
+
+	b, ok := shared.GetBinary("envsubst")
+	if !ok {
+		t.Fatal("expected to find envsubst via alias")
+	}
+
+	// BinaryPath should use the alias ("envsubst"), not the preset name ("renvsubst")
+	path := b.BinaryPath()
+	base := filepath.Base(path)
+	if base != "envsubst" {
+		t.Errorf("BinaryPath base = %q, want %q (should use alias, not preset name)", base, "envsubst")
+	}
+}
+
+// TestUpdateAlias_GetBinariesFromConfig_Path verifies that all binaries returned
+// by GetBinariesFromConfig use alias paths.
+func TestUpdateAlias_GetBinariesFromConfig_Path(t *testing.T) {
+	presets := []*binary.Binary{
+		{Name: "renvsubst", Version: "1.0"},
+	}
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, presets)
+	shared.Config = &state.State{
+		Binaries: state.BinaryList{
+			&binary.LocalBinary{
+				Name:  "envsubst",
+				Alias: "renvsubst",
+			},
+		},
+	}
+
+	binaries := shared.GetBinariesFromConfig()
+	if len(binaries) != 1 {
+		t.Fatalf("got %d binaries, want 1", len(binaries))
+	}
+
+	b := binaries[0]
+	if b.Name != "renvsubst" {
+		t.Errorf("Name = %q, want %q", b.Name, "renvsubst")
+	}
+	if b.Alias != "envsubst" {
+		t.Errorf("Alias = %q, want %q", b.Alias, "envsubst")
+	}
+
+	path := b.BinaryPath()
+	base := filepath.Base(path)
+	if base != "envsubst" {
+		t.Errorf("BinaryPath base = %q, want %q (issue #79: update should use alias path)", base, "envsubst")
+	}
+}
+
+// TestUpdateAlias_PresetVersionNotMutated verifies that GetBinary for a
+// config-resolved alias does NOT mutate the original preset in the lookup map.
+func TestUpdateAlias_PresetVersionNotMutated(t *testing.T) {
+	presets := []*binary.Binary{
+		{Name: "renvsubst", Version: "1.0"},
+	}
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, presets)
+	shared.Config = &state.State{
+		Binaries: state.BinaryList{
+			&binary.LocalBinary{
+				Name:  "envsubst",
+				Alias: "renvsubst",
+			},
+		},
+	}
+
+	// Resolve alias and change version
+	b, _ := shared.GetBinary("envsubst")
+	b.Version = "9.9"
+
+	// Original preset should be untouched
+	preset, _ := shared.GetBinary("renvsubst")
+	if preset.Version != "1.0" {
+		t.Errorf("preset version mutated: got %q, want %q", preset.Version, "1.0")
+	}
+}
+
+// TestUpdateComplete_AliasVersionFromArg tests that Complete properly preserves
+// the @version for aliased binaries specified on the command line.
+func TestUpdateComplete_AliasVersionFromArg(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.Setenv("PATH_BIN", tmpDir)
+	defer os.Unsetenv("PATH_BIN")
+
+	presets := []*binary.Binary{
+		{Name: "renvsubst", Version: "1.0"},
+	}
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, presets)
+	shared.Config = &state.State{
+		Binaries: state.BinaryList{
+			&binary.LocalBinary{
+				Name:  "envsubst",
+				Alias: "renvsubst",
+			},
+		},
+	}
+
+	o := &UpdateOptions{SharedOptions: shared}
+
+	err := o.Complete([]string{"envsubst@2.0"})
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+
+	// Complete should store resolved binaries with version applied
+	if len(o.specifiedBinaries) != 1 {
+		t.Fatalf("specifiedBinaries = %d, want 1", len(o.specifiedBinaries))
+	}
+
+	b := o.specifiedBinaries[0]
+	if b.Version != "2.0" {
+		t.Errorf("version = %q, want %q (issue #79)", b.Version, "2.0")
+	}
+	if b.Alias != "envsubst" {
+		t.Errorf("alias = %q, want %q", b.Alias, "envsubst")
+	}
+	if b.Name != "renvsubst" {
+		t.Errorf("name = %q, want %q (preset name)", b.Name, "renvsubst")
+	}
+}
+
+// TestUpdateComplete_EnvRefsStored tests that Complete separates env refs from binaries.
+func TestUpdateComplete_EnvRefsStored(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.Setenv("PATH_BIN", tmpDir)
+	defer os.Unsetenv("PATH_BIN")
+
+	presets := []*binary.Binary{
+		{Name: "jq", Version: "1.7"},
+	}
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, presets)
+	shared.Config = &state.State{
+		Binaries: state.BinaryList{
+			&binary.LocalBinary{Name: "jq"},
+		},
+		Envs: state.EnvList{
+			{Key: "github.com/org/infra"},
+		},
+	}
+
+	o := &UpdateOptions{SharedOptions: shared}
+	err := o.Complete([]string{"jq", "github.com/org/infra"})
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+
+	if len(o.specifiedBinaries) != 1 {
+		t.Errorf("specifiedBinaries = %d, want 1", len(o.specifiedBinaries))
+	}
+	if len(o.specifiedEnvRefs) != 1 {
+		t.Errorf("specifiedEnvRefs = %d, want 1", len(o.specifiedEnvRefs))
+	}
+	if o.specifiedBinaries[0].Name != "jq" {
+		t.Errorf("binary name = %q, want %q", o.specifiedBinaries[0].Name, "jq")
+	}
+	if o.specifiedEnvRefs[0] != "github.com/org/infra" {
+		t.Errorf("env ref = %q, want %q", o.specifiedEnvRefs[0], "github.com/org/infra")
+	}
+}
+
+// TestUpdateComplete_PresetVersionFromArg tests that @version works for direct preset binaries too.
+func TestUpdateComplete_PresetVersionFromArg(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.Setenv("PATH_BIN", tmpDir)
+	defer os.Unsetenv("PATH_BIN")
+
+	presets := []*binary.Binary{
+		{Name: "jq", Version: "1.6"},
+	}
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, presets)
+
+	o := &UpdateOptions{SharedOptions: shared}
+	err := o.Complete([]string{"jq@1.7"})
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+
+	if len(o.specifiedBinaries) != 1 {
+		t.Fatalf("specifiedBinaries = %d, want 1", len(o.specifiedBinaries))
+	}
+	if o.specifiedBinaries[0].Version != "1.7" {
+		t.Errorf("version = %q, want %q", o.specifiedBinaries[0].Version, "1.7")
 	}
 }
 

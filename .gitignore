@@ -6,4 +6,6 @@ main
 !/.bin/b.yaml
 
 /.back
-/test/coverage/
+/test/coverage/*
+!/test/coverage/badge.json
+!/test/coverage/coverage.json
