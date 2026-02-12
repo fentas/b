@@ -25,6 +25,7 @@ type SharedOptions struct {
 	Output     string
 
 	// Internal
+	bVersion         string // version of b itself, for lock metadata
 	lookup           map[string]*binary.Binary
 	loadedConfigPath string // path where config was actually loaded from
 }

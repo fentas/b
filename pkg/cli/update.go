@@ -274,7 +274,7 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		})
 	}
 
-	return lock.WriteLock(lockDir, lk, ">=5.0.0")
+	return lock.WriteLock(lockDir, lk, o.bVersion)
 }
 
 // printFileStatus prints a single file's sync status.

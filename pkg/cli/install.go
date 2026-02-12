@@ -334,7 +334,7 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		lk.UpsertBinary(entry)
 	}
 
-	return lock.WriteLock(lockDir, lk, ">=5.0.0")
+	return lock.WriteLock(lockDir, lk, o.bVersion)
 }
 
 // parseBinaryArg parses binary argument in format "name" or "name@version"
@@ -468,7 +468,7 @@ func (o *InstallOptions) runEnvInstalls() error {
 		return nil
 	}
 
-	return lock.WriteLock(lockDir, lk, ">=5.0.0")
+	return lock.WriteLock(lockDir, lk, o.bVersion)
 }
 
 // syncConfigEnvs syncs envs defined in b.yaml. If refs is nil, syncs all.
@@ -538,7 +538,7 @@ func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 		})
 	}
 
-	return lock.WriteLock(lockDir, lk, ">=5.0.0")
+	return lock.WriteLock(lockDir, lk, o.bVersion)
 }
 
 // addEnvToConfig writes an env entry to b.yaml from an SCP-style install.

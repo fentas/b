@@ -15,6 +15,7 @@ import (
 // NewRootCmd creates the new root command with subcommands
 func NewRootCmd(binaries []*binary.Binary, io *streams.IO, version, versionPreRelease string) *cobra.Command {
 	shared := NewSharedOptions(io, binaries)
+	shared.bVersion = version
 
 	cmd := &cobra.Command{
 		Use:   "b",
