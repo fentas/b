@@ -9,33 +9,30 @@ Thank you for your interest in contributing to the documentation! You will be he
 
 :::tip
 
-This guide is specific to contributing to the documentation. If you’re interested in contributing to b’s codebase, check out the [contributing guidelines in the b GitHub repository](https://github.com/fentas/b/blob/main/CONTRIBUTING.md).
+This guide is specific to contributing to the documentation. If you're interested in contributing to b's codebase, check out the [contributing guidelines in the b GitHub repository](https://github.com/fentas/b/blob/main/CONTRIBUTING.md).
 
 :::
 
 ## Documentation Workspace
 
-b's documentation projects are all part of the documentation yarn workspace, which you can find in the [b repository](https://github.com/fentas/b) under the `www` directory.
+b's documentation is built with [Docusaurus](https://docusaurus.io/). The content lives on the `main` branch under the `docs/` directory, while the Docusaurus site configuration lives on the `docs` branch.
 
-The workspace has the following two directories:
+The workspace structure on the `docs` branch:
 
-- `apps`: this directory holds the different documentation websites and projects.
-  - `docs`: includes the codebase for the main documentation website (the one you're viewing this documentation on). It's built with [Docusaurus](https://docusaurus.io/).
-- `packages`: this directory holds the shared packages and components necessary for the development of the projects in the `apps` directory.
-  - `docs-ui` includes the shared React components between the different apps.
-  - `eslint-config-docs` includes the shared ESLint configuration between the different apps and packages.
-  - `tailwind` includes the shared Tailwind CSS configuration between the different apps and packages.
-  - `tsconfig` includes the shared TypeScript configuration between the different apps and packages.
+- `apps/docs`: the Docusaurus site that builds the documentation website.
+- `packages`: shared UI components, Tailwind config, and TypeScript config.
+
+During deployment, the CI copies `docs/` from `main` into `apps/docs/content` and builds the site.
 
 ---
 
 ## Documentation Content
 
-### Main Documentation Website
+### Writing Documentation
 
-The documentation content is written in Markdown format and is located in the [www/apps/docs/content](https://github.com/fentas/b/tree/develop/www/apps/docs/content) directory of the **b** repository. If you’re not familiar with Markdown, check out [this cheat sheet](https://www.markdownguide.org/cheat-sheet/) for a quick start.
+The documentation content is written in Markdown and MDX format and is located in the [`docs/`](https://github.com/fentas/b/tree/main/docs) directory of the **b** repository on the `main` branch.
 
-You’ll also find MDX files. MDX files combine the power of Markdown with React. So, the content of the file can contain JSX components and import statements, among other features. You can learn more about [MDX in docusaurus’s guide.](https://docusaurus.io/docs/markdown-features/react).
+If you're not familiar with Markdown, check out [this cheat sheet](https://www.markdownguide.org/cheat-sheet/) for a quick start. MDX files can contain JSX components and import statements — you can learn more about [MDX in Docusaurus's guide](https://docusaurus.io/docs/markdown-features/react).
 
 ## Style Guide
 
@@ -45,13 +42,11 @@ When you contribute to the documentation content, make sure to follow the [docum
 
 ## How to Contribute
 
-If you’re fixing errors in an existing documentation page, you can scroll down to the end of the page and click on the “Edit this page” link. You’ll be redirected to the GitHub edit form of that page and you can make edits directly and submit a pull request (PR).
+If you're fixing errors in an existing documentation page, you can scroll down to the end of the page and click on the "Edit this page" link. You'll be redirected to the GitHub edit form of that page and you can make edits directly and submit a pull request (PR).
 
-If you’re adding a new page or contributing to the codebase, you need to fork the repository, create a new branch, and make all changes necessary in your repository. Then, once you’re done, create a PR in the **b** repository.
+If you're adding a new page or contributing to the codebase, fork the repository, create a new branch, and make all changes necessary. Then create a PR in the **b** repository.
 
 ### Base Branch
-
-When you make an edit to an existing documentation page or fork the repository to make changes to the documentation, you have to create a new branch.
 
 Documentation contributions always use `main` as the base branch. Make sure to also open your PR against the `main` branch.
 
@@ -61,17 +56,17 @@ When you create a pull request, prefix the title with `docs:`.
 
 <!-- vale off -->
 
-In the body of the PR, explain clearly what the PR does. If the PR solves an issue, use [closing keywords](https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword) with the issue number. For example, “Closes #1333”.
+In the body of the PR, explain clearly what the PR does. If the PR solves an issue, use [closing keywords](https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue#linking-a-pull-request-to-an-issue-using-a-keyword) with the issue number. For example, "Closes #1333".
 
 <!-- vale on -->
 
 ---
 
-## Main Documentation Sidebar
+## Sidebar Configuration
 
-When you add a new page to the documentation, you must add the new page in `www/apps/docs/sidebars.js`. In this file, an object is exported. This object holds more than one sidebar. The properties of the object indicate the internal sidebar name, and the value is an array of sidebar items in that sidebar.
+When you add a new page to the documentation, you must add the new page in `apps/docs/sidebars.js` on the `docs` branch. The properties of the exported object indicate sidebar names, and the values are arrays of sidebar items.
 
-You can learn more about the syntax used [here](https://docusaurus.io/docs/sidebar/items).
+You can learn more about the [sidebar item syntax in the Docusaurus docs](https://docusaurus.io/docs/sidebar/items).
 
 ### Terminology
 
@@ -79,29 +74,33 @@ When the documentation page is a conceptual or an overview documentation, the la
 
 When the documentation page is tutorial documentation, the label in the sidebar should start with a verb. Exceptions to this rule are integration documentation and upgrade guides.
 
-### Sidebar Icon
+### Sidebar Icons
 
-To add an icon to the sidebar item, start by checking if the icon is already exported in the file `www/apps/docs/src/theme/Icon`. If not, you can either export the icon from the [@medusajs/icons](https://docs.medusajs.com/ui/icons/overview), or add the new icon as a React component in the `www/apps/docs/src/theme/Icon/Icon<Name>/index.tsx` file, where `<Name>` is the camel-case name of your icon. The icon must be added to the React component as an SVG element.
+To add an icon to a sidebar item, check if the icon is already exported in `apps/docs/src/theme/Icon`. If not, add the new icon as a React component in `apps/docs/src/theme/Icon/Icon<Name>/index.tsx`, where `<Name>` is the camel-case name of your icon. The icon must use an SVG element with `stroke` or `fill` set to `currentColor`.
 
 For example:
-  
-```tsx title="www/docs/src/theme/Icon/Bolt/index.tsx"
+
+```tsx title="apps/docs/src/theme/Icon/Bolt/index.tsx"
 import React from "react"
-import { IconProps } from "@medusajs/icons/dist/types"
+
+interface IconProps {
+  width?: number
+  height?: number
+}
 
 export default function IconBolt(props: IconProps) {
   return (
-    <svg 
+    <svg
       width={props.width || 20}
       height={props.height || 20}
-      viewBox="0 0 20 20" 
+      viewBox="0 0 20 20"
       fill="none" xmlns="http://www.w3.org/2000/svg"
       {...props}
     >
-      <path 
+      <path
         d="M3.125..."
-        strokeWidth="1.5" 
-        strokeLinecap="round" 
+        strokeWidth="1.5"
+        strokeLinecap="round"
         strokeLinejoin="round"
         stroke="currentColor" />
     </svg>
@@ -109,11 +108,9 @@ export default function IconBolt(props: IconProps) {
 }
 ```
 
-Make sure to set the `stroke` or `fill` of the icon to `currentColor` as shown in the example above. The source code for the Sidebar passes the icon a color. So, this ensures the color is correctly used.
+Then register it in `apps/docs/src/theme/Icon/index.ts`:
 
-If you added a new icon, add it in the exported object in the file `www/apps/docs/src/theme/Icon/index.ts`, where the property is the kebab-case version of the icon's name, and the value being the component you created. Make sure to add it in the correct alphabetical position as well. For example:
-
-```ts title="www/docs/src/theme/Icon/index.ts"
+```ts title="apps/docs/src/theme/Icon/index.ts"
 import IconBolt from "./Bolt"
 import IconBoltSolid from "./BoltSolid"
 // other imports
@@ -126,9 +123,9 @@ export default {
 }
 ```
 
-Finally, you can add the icon to the sidebar item by adding a `sidebar_icon` property to the `customProps` property and setting its value to the kebab-cased version of the icon's name. For example:
+Finally, reference the icon via the `sidebar_icon` custom prop:
 
-```js title="www/docs/sidebars.js"
+```js title="apps/docs/sidebars.js"
 module.exports = {
   // other sidebars
   homepage: [
@@ -147,138 +144,27 @@ module.exports = {
 
 There are different sidebar item types used in the documentation:
 
-- Homepage Items: If a sidebar item is shown under the `homepage` sidebar, you should set the `className` property of the item to `homepage-sidebar-item`. You can use this with other sidebar item types. For example:
-  
-  ```js title="www/docs/sidebars.js"
-  module.exports = {
-    // other sidebars
-    homepage: [
-      {
-        type: "doc",
-        // other properties
-        className: "homepage-sidebar-item",
-      },
-      // other items
-    ],
-  }
-  ```
+- Homepage Items: If a sidebar item is shown under the `homepage` sidebar, set the `className` property to `homepage-sidebar-item`.
 
-- Sidebar Title: This item is used as a title to the sidebar, typically added at the top of the sidebar. You typically would also use an icon with it. To use this item, add a `sidebar_is_title` property to the `customProps` object of the item with its value being `true`. For example:
-  
-  ```js title="www/docs/sidebars.js"
-  module.exports = {
-    // other sidebars
-    modules: [
-      // other items
-      {
-        type: "doc",
-        id: "development/howtos/yq",
-        label: "How to use yq",
-        customProps: {
-          sidebar_is_title: true,
-          sidebar_icon: "puzzle",
-        },
-      },
-      // other items
-    ],
-  }
-  ```
+- Sidebar Title: Add `sidebar_is_title: true` to the `customProps` object. Typically combined with an icon.
 
-- Back Item: This item is used to show a back button, typically at the top of the sidebar. To use this item, add the `sidebar_is_back_link` property to the `customProps` object of the item, with its value set to true. Also, add the `sidebar_icon` property to the `customProps` object with its value set to `back-arrow`. For example:
+- Back Item: Add `sidebar_is_back_link: true` and `sidebar_icon: "back-arrow"` to `customProps`.
 
-  ```js title="www/docs/sidebars.js"
-  module.exports = {
-    // other sidebars
-    core: [
-      // other items
-      {
-        type: "ref",
-        id: "homepage",
-        label: "Back to home",
-        customProps: {
-          sidebar_is_back_link: true,
-          sidebar_icon: "back-arrow",
-        },
-      },
-      // other items
-    ],
-  }
-  ```
+- Group Divider: Use `type: "html"` with `sidebar_is_group_divider: true` in `customProps`.
 
-- Group Divider Item: This item is used if a sidebar item does not link to any document and is only used to separate between sidebar sections. The item must be of type `html`, and its `value` property holds the text that should be shown in the divider. You must also add in the `customProps` object of the item the property `sidebar_is_group_divider` with its value being `true`. For example:
-  
-  ```js title="www/docs/sidebars.js"
-  module.exports = {
-    // other sidebars
-    homepage: [
-      // other items
-      {
-        type: "html",
-        value: "Browse Docs",
-        customProps: {
-          sidebar_is_group_divider: true,
-        },
-        className: "homepage-sidebar-item",
-      },
-      // other items
-    ],
-  }
-  ```
+- Group Headline: Use `type: "category"` with `sidebar_is_group_headline: true` in `customProps`.
 
-- Group Headline Item: This item is used if a sidebar item does not link to any document and is only used to indicate the beginning of a new section or group in the sidebar. To use this item, set the `type` of the item to `category`, and add the `sidebar_is_group_headline` property to the `customProps` object of the item, with its value set to `true`. For example:
-  
-  ```js title="www/docs/sidebars.js"
-  module.exports = {
-    // other sidebars
-    modules: [
-      // other items
-      {
-        type: "category",
-        label: "Regions and Currencies",
-        collapsible: false,
-        customProps: {
-          sidebar_is_group_headline: true,
-        },
-        items: [
-          // items within group or section
-        ],
-      },
-      // other items
-    ],
-  }
-  ```
-
-- Soon Item: This item is used to indicate that a certain guide will be added soon, but it does not actually link to any document. To use this item, set the `type` of the item to `link`, its `href` property to `#`, and add to the `customProps` object the property `sidebar_is_soon` with its value set to `true`. For example:
-  
-  ```js title="www/docs/sidebars.js"
-  module.exports = {
-    // other sidebars
-    modules: [
-      // other items
-      {
-        type: "link",
-        href: "#",
-        label: "Currencies",
-        customProps: {
-          sidebar_is_soon: true,
-        },
-      },
-      // other items
-    ],
-  }
-  ```
+- Soon Item: Use `type: "link"`, `href: "#"`, and `sidebar_is_soon: true` in `customProps` to indicate upcoming content.
 
 ---
 
 ## Notes and Additional Information
 
-When displaying notes and additional information on a documentation page, use [Admonitions](https://docusaurus.io/docs/markdown-features/admonitions). Make sure the type of admonition used matches the note’s importance to the current document.
+When displaying notes and additional information, use [Admonitions](https://docusaurus.io/docs/markdown-features/admonitions). Match the type to the note's importance:
 
-If the note is something developers have to be careful of doing or not doing, use the `danger` admonition based on how critical it is.
-
-If the note displays helpful information and tips that may not be in the scope of the documentation page, use the `tip` admonition.
-
-For all other note types, use the `note` admonition.
+- `danger` for critical warnings
+- `tip` for helpful information outside the page's scope
+- `note` for all other notes
 
 ---
 
@@ -290,17 +176,9 @@ If you are adding images to a documentation page, you can host the image on [Img
 
 ## Code Blocks
 
-:::note
-
-These sections only works in the main documentation website.
-
-:::
-
 ### Use Tabs with Code Blocks
 
-To use Tabs with Code Blocks, you have to use [Docusaurus's `Tabs` and `TabItem` components](https://docusaurus.io/docs/markdown-features/code-blocks#multi-language-support-code-blocks).
-
-You must also pass to the `Tabs` component the prop `isCodeTabs={true}` to ensure correct styling.
+To use Tabs with Code Blocks, use [Docusaurus's `Tabs` and `TabItem` components](https://docusaurus.io/docs/markdown-features/code-blocks#multi-language-support-code-blocks). Pass the `isCodeTabs={true}` prop for correct styling.
 
 For example:
 
@@ -308,12 +186,10 @@ For example:
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-
 <Tabs groupId="request-type" isCodeTabs={true}>
   <TabItem value="install" label="Install Binary" default>
 
     ```bash
-    # Install the latest version of a binary
     b install jq
     ```
 
@@ -321,7 +197,6 @@ import TabItem from '@theme/TabItem';
   <TabItem value="add" label="Add to Config">
 
     ```bash
-    # Install a binary and add it to your b.yaml
     b install --add jq
     ```
 
@@ -331,20 +206,16 @@ import TabItem from '@theme/TabItem';
 
 ### Add Title to Code Block with Tabs
 
-If you want to add a title to a code block with tabs, add the `codeTitle` prop to the `Tabs` component.
-
-For example:
+Add the `codeTitle` prop to the `Tabs` component:
 
 ```md
-<Tabs 
+<Tabs
   groupId="request-type"
   isCodeTabs={true}
   codeTitle="/src/services/hello.ts">
 ```
 
 ### Add Title to Code Block without Tabs
-
-To add a title to a code block without tabs:
 
 ~~~md
 ```js title="src/index.ts"
@@ -354,9 +225,7 @@ console.log("hello")
 
 ### Remove Report Button
 
-Some code block don't need a report button. To remove the report button, use the `noReport` metadata.
-
-For example:
+Use the `noReport` metadata to remove the report button:
 
 ~~~md
 ```bash noReport
@@ -366,9 +235,7 @@ b install jq
 
 ### Remove Copy Button
 
-Some code blocks don't need a copy button. To remove the copy button, use the `noCopy` metadata:
-
-For example:
+Use the `noCopy` metadata to remove the copy button:
 
 ~~~md
 ```bash noCopy
@@ -378,10 +245,9 @@ source ~/.bashrc
 
 ---
 
-
 ## Linting with Vale
 
-b uses [Vale](https://vale.sh/) to lint documentation pages and perform checks on incoming PRs into the repository.
+b uses [Vale](https://vale.sh/) to lint documentation pages and perform checks on incoming PRs.
 
 ### Result of Vale PR Checks
 
@@ -389,23 +255,20 @@ You can check the result of running the "lint" action on your PR by clicking the
 
 ### Run Vale Locally
 
-If you want to check your work locally, you can do that by:
-
-1. [Installing direnv](https://direnv.net/) and running `direnv allow` in the root directory of the b repository.
-2. Linting with `vale`:
+1. [Install direnv](https://direnv.net/) and run `direnv allow` in the root directory.
+2. Lint with `vale`:
 
 ```bash
-# to lint content for the main documentation
-vale www/apps/docs/content
+vale docs/
 ```
 
 ### VS Code Extension
 
-To facilitate writing documentation, you can optionally use the [Vale VS Code extension](https://marketplace.visualstudio.com/items?itemName=chrischinchilla.vale-vscode). This will show you any errors in your documentation while writing it.
+You can optionally use the [Vale VS Code extension](https://marketplace.visualstudio.com/items?itemName=chrischinchilla.vale-vscode) for inline error highlighting while writing.
 
 ### Linter Exceptions
 
-If it's needed to break some style guide rules in a document, you can wrap the parts that the linter shouldn't scan with the following comments in the `md` or `mdx` files:
+If you need to break style guide rules in a document:
 
 ```md
 <!-- vale off -->
@@ -415,7 +278,7 @@ content that shouldn't be scanned for errors here...
 <!-- vale on -->
 ```
 
-You can also disable specific rules. For example:
+You can also disable specific rules:
 
 ```md
 <!-- vale docs.Numbers = NO -->
@@ -431,29 +294,21 @@ If you use this in your PR, you must justify its usage.
 
 ## Linting with ESLint
 
-b uses ESlint to lint code blocks both in the content and the code base of the documentation apps.
+b uses ESLint to lint code blocks in both content and the documentation site codebase.
 
 ### Linting Code/Content with ESLint
 
-Each PR runs through a check that lints the code in the content files using ESLint. The action's name is `code-docs-eslint`.
+Each PR runs through a check that lints code in the content files using ESLint. The action's name is `code-docs-eslint`.
 
-If you want to check code ESLint errors locally and fix them, you can do that by running the following command from the `www` directory:
+To check and fix ESLint errors locally, run from the `docs` branch root:
 
 ```bash
 yarn lint:fix
 ```
 
-This will fix any fixable errors, and show errors that require your action.
-
 ### ESLint Exceptions
 
-:::note
-
-These exceptions only work in the main documentation website.
-
-:::
-
-If some code blocks have errors that can't or shouldn't be fixed, you can add the following command before the code block:
+To skip linting for a specific code block:
 
 ~~~md
 <!-- eslint-skip -->
@@ -467,7 +322,7 @@ console.log("This block is linted")
 ```
 ~~~
 
-You can also disable specific rules. For example:
+To disable specific rules:
 
 ~~~md
 <!-- eslint-disable semi -->

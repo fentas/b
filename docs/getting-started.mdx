@@ -2,6 +2,9 @@
 description: 'Install b and get started with binary management for your development projects'
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # Getting Started with b
 
 Get up and running with **b** in just a few minutes. **b** helps you manage command-line tools and binaries for your development projects with automatic PATH management and version control.
@@ -10,13 +13,22 @@ Get up and running with **b** in just a few minutes. **b** helps you manage comm
 
 ### Quick Install (Recommended)
 
-```bash
-# Install b
-curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+<Tabs groupId="install-method" isCodeTabs={true}>
+  <TabItem value="curl" label="curl" default>
 
-# Or using wget
-wget -qO- https://github.com/fentas/b/releases/latest/download/install.sh | bash
-```
+    ```bash
+    curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+    ```
+
+  </TabItem>
+  <TabItem value="wget" label="wget">
+
+    ```bash
+    wget -qO- https://github.com/fentas/b/releases/latest/download/install.sh | bash
+    ```
+
+  </TabItem>
+</Tabs>
 
 ### Manual Installation
 
@@ -230,6 +242,30 @@ binaries:
 - **Relative paths** (like `../bin/tool` or `./tools/binary`) are resolved relative to the config file's directory
 - **Absolute paths** (like `/usr/local/bin/tool`) are used exactly as specified (mind the permissions)
 - This feature is particularly useful for pointing to pre-existing binaries or organizing tools in custom directory structures
+
+## Uninstalling
+
+### Remove b and all managed binaries
+
+```bash
+# Remove the binary directory (managed tools)
+rm -rf "$(b cache path 2>/dev/null)" ~/.local/share/b
+
+# Remove the b binary itself
+rm -f ~/.local/bin/b
+```
+
+### Remove project configuration
+
+```bash
+# Remove project-level config and lock file
+rm -f .bin/b.yaml .bin/b.lock
+rmdir .bin 2>/dev/null || true
+```
+
+### Clean up PATH
+
+Remove the PATH export line you added during installation from your shell profile (`~/.bashrc`, `~/.zshrc`, or `~/.profile`).
 
 ## Next Steps
 
