@@ -1,10 +1,10 @@
 ---
-description: "Search available binaries"
+description: "Search available binaries and provider refs"
 ---
 
 # b search
 
-Discovers all binaries available for installation. The search can be filtered with a query.
+Discovers all pre-packaged binaries available for installation. The search can be filtered with a query. If the query looks like a provider reference (e.g., `github.com/org/repo`), **b** will suggest using `b install` directly.
 
 ## Alias
 
@@ -40,6 +40,19 @@ Use the `--output` global flag to get the results in JSON format.
 
 ```bash
 b search --output json
+```
+
+### Provider references
+
+Any GitHub release can be installed directly — you don't need a pre-packaged entry:
+
+```bash
+# Search suggests using install directly for provider refs
+b search github.com/derailed/k9s
+
+# Install any GitHub release directly
+b install github.com/derailed/k9s
+b install github.com/sharkdp/bat@v0.24.0
 ```
 
 ## Flags

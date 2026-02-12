@@ -15,6 +15,7 @@ import (
 // NewRootCmd creates the new root command with subcommands
 func NewRootCmd(binaries []*binary.Binary, io *streams.IO, version, versionPreRelease string) *cobra.Command {
 	shared := NewSharedOptions(io, binaries)
+	shared.bVersion = version
 
 	cmd := &cobra.Command{
 		Use:   "b",
@@ -68,6 +69,8 @@ func NewRootCmd(binaries []*binary.Binary, io *streams.IO, version, versionPreRe
 	cmd.AddCommand(NewInitCmd(shared))
 	cmd.AddCommand(NewVersionCmd(shared))
 	cmd.AddCommand(NewRequestCmd(shared))
+	cmd.AddCommand(NewVerifyCmd(shared))
+	cmd.AddCommand(NewCacheCmd(shared))
 
 	// Set custom usage template to show aliases in command list
 	cmd.SetUsageTemplate(getUsageTemplate())

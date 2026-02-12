@@ -93,7 +93,6 @@ Use **b** in your CI/CD pipelines:
 steps:
   - uses: actions/checkout@v4
   - name: Install b
-    # todo: wrong url; create install script
     run: curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
   - name: Install project tools
     run: b install
@@ -119,9 +118,34 @@ b update kubectl
 b search terraform
 ```
 
+### 4. Sync Environment Files
+
+Sync configuration files from upstream git repositories:
+
+```bash
+# Sync files using SCP-style syntax
+b install github.com/org/infra:/manifests/base/** ./base
+
+# Add to b.yaml and sync
+b install --add github.com/org/infra@v2.0:/manifests/hetzner/** /hetzner
+```
+
+### 5. Verify and Update
+
+```bash
+# Verify all artifacts match b.lock checksums
+b verify
+
+# Update all binaries and envs
+b update
+
+# Update with three-way merge for local changes
+b update --strategy=merge
+```
+
 ## Configuration
 
-The `.bin/b.yaml` file defines your project's tool requirements:
+The `.bin/b.yaml` file defines your project's tool and env requirements:
 
 ```yaml
 binaries:
@@ -134,11 +158,27 @@ binaries:
   # alias: install one binary under a different name
   envsubst:
     alias: renvsubst
+  # install any GitHub release by ref
+  github.com/sharkdp/bat:
+    version: "v0.24.0"
   # custom file paths
   custom-kubectl:
     file: ../bin/kubectl  # relative to config file
-  system-tool:
-    file: /usr/local/bin/tool  # absolute path
+
+envs:
+  # Sync files from upstream git repos
+  github.com/org/infra:
+    version: v2.0
+    strategy: merge    # replace (default) | client | merge
+    ignore:
+      - "*.md"
+    files:
+      manifests/base/**:
+        dest: base/
+      manifests/hetzner/**:
+        dest: hetzner/
+  # Minimal entry - sync all files
+  github.com/org/shared-config:
 ```
 
 ### Binary Aliases

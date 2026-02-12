@@ -79,6 +79,8 @@ func (o *InitOptions) Run() error {
 	}
 
 	fmt.Fprintf(o.IO.Out, "Created configuration file: %s\n", configPath)
+	fmt.Fprintf(o.IO.Out, "\n  Add binaries:  b install --add jq kubectl\n")
+	fmt.Fprintf(o.IO.Out, "  Add envs:      b install --add github.com/org/repo:/path/** dest\n")
 
 	// Create additional project files if this is a new/empty directory
 	if err := o.createProjectFiles(); err != nil {
@@ -132,6 +134,7 @@ func (o *InitOptions) createGitignore(dir string) error {
 *
 !.gitignore
 !b.yaml
+!b.lock
 !b
 `
 

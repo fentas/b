@@ -1,0 +1,76 @@
+---
+description: "Manage the local git cache for env file syncing"
+---
+
+# b cache
+
+Manage the local git cache used for env file syncing. The cache stores cloned git repositories to avoid re-cloning on every sync.
+
+## Subcommands
+
+| Command         | Description                          |
+|-----------------|--------------------------------------|
+| `b cache clean` | Remove all cached git repositories   |
+| `b cache path`  | Print the cache directory path       |
+
+## b cache clean
+
+Remove all cached git repositories and report freed disk space.
+
+### Usage
+
+```bash
+b cache clean
+```
+
+### Examples
+
+```bash
+# Remove cached repos
+b cache clean
+# Output: Removed /home/user/.cache/b/repos (42.5 MB freed)
+
+# If cache is already empty
+b cache clean
+# Output: Cache is already clean (nothing to remove)
+```
+
+## b cache path
+
+Print the cache directory path. Useful for scripting or inspecting the cache manually.
+
+### Usage
+
+```bash
+b cache path
+```
+
+### Examples
+
+```bash
+# Print cache path
+b cache path
+# Output: /home/user/.cache/b/repos
+
+# Use in scripts
+du -sh $(b cache path)
+```
+
+## Cache location
+
+The default cache directory is `~/.cache/b/repos/`. Each upstream git repository is stored as a bare clone, keyed by the provider reference.
+
+## Flags
+
+| Flag         | Description              |
+|--------------|--------------------------|
+| `-h`, `--help` | help for cache           |
+
+## Global Flags
+
+| Flag                 | Description                                                              |
+|----------------------|--------------------------------------------------------------------------|
+| `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
+| `--force`            | Force operations, overwriting existing binaries                          |
+| `-q`, `--quiet`      | Quiet mode                                                               |
+| `-v`, `--version`    | Print version information and quit                                       |

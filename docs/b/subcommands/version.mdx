@@ -1,10 +1,10 @@
 ---
-description: "Show version information for b and installed binaries"
+description: "Show version information for b, installed binaries, and envs"
 ---
 
 # b version
 
-List all versions. If arguments are given, it shows the version of the specified binaries.
+List all versions. If arguments are given, it shows the version of the specified binaries. Also displays env file status including remote update checks.
 
 ## Alias
 
@@ -20,10 +20,24 @@ b version [binary...] [flags]
 
 ### Show all versions
 
-Run without arguments to see the version of `b` and all binaries in your `b.yaml`.
+Run without arguments to see the version of `b`, all binaries, and all env entries in your `b.yaml`.
 
 ```bash
 b version
+```
+
+Example output:
+
+```
+b version v0.5.0
+
+Binaries:
+  jq                                       jq-1.7 (latest: jq-1.7.1, update available)
+  kubectl                                  v1.28.0 (up to date)
+
+Envs:
+  github.com/org/infra                     v2.0 @ abc1234 (up to date)
+  github.com/org/shared-config             latest @ def4567 → ghi8901 (update available)
 ```
 
 ### Show specific binary version
@@ -42,7 +56,7 @@ b version jq kubectl helm
 
 ### Show only local versions
 
-The `--local` flag prevents `b` from checking for new remote versions.
+The `--local` flag prevents `b` from checking for new remote versions (both binary and env).
 
 ```bash
 b version --local
@@ -59,6 +73,12 @@ b version --quiet --check
 # Check specific binaries
 b version jq kubectl --check
 ```
+
+## Env remote checks
+
+For each env entry in `b.yaml`, `b version` uses `git ls-remote` to check if the pinned commit in `b.lock` matches the latest commit on the remote. This tells you at a glance whether upstream has changed since your last sync.
+
+Use `--local` to skip remote checks (useful offline or in CI).
 
 ## Flags
 

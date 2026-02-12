@@ -8,9 +8,11 @@ This glossary defines key terms and concepts used throughout the **b** documenta
 
 ## B
 
-**b** - A modern binary manager for developers that simplifies installation, versioning, and management of command-line tools.
+**b** - A modern binary manager and environment file syncer for developers that simplifies installation, versioning, and management of command-line tools and configuration files.
 
-**.bin/b.yaml** - The configuration file that defines binary dependencies for a project, typically located in the `.bin` directory. Contains version specifications and metadata.
+**.bin/b.yaml** - The configuration file that defines binary and env dependencies for a project, typically located in the `.bin` directory. Contains version specifications, env entries, and metadata.
+
+**b.lock** - The lock file that records exact checksums and commit hashes for all managed artifacts. Used by `b verify` to detect drift.
 
 **Binary** - An executable command-line tool managed by **b** (e.g., `jq`, `kubectl`, `terraform`).
 
@@ -32,11 +34,17 @@ This glossary defines key terms and concepts used throughout the **b** documenta
 
 ## E
 
+**Env (Environment File)** - A configuration file synced from an upstream git repository. Managed in the `envs` section of `b.yaml`.
+
+**Env Sync** - The process of fetching files from upstream git repos and writing them to local destinations, with checksum tracking via `b.lock`.
+
 **Environment Isolation** - Keeping project-specific tool versions separate from system-wide installations.
 
 **Executable** - A binary file that can be run as a command.
 
 ## G
+
+**Git Cache** - Local bare clones of upstream repositories stored at `~/.cache/b/repos/`. Managed via `b cache clean` and `b cache path`.
 
 **GitHub Releases** - The source from which **b** downloads most binaries, using GitHub's release API.
 
@@ -48,6 +56,10 @@ This glossary defines key terms and concepts used throughout the **b** documenta
 
 **Isolation** - Keeping different projects' tool versions separate to avoid conflicts.
 
+## M
+
+**Merge Strategy** - Controls how env file updates handle local changes. Options: `replace` (overwrite), `client` (keep local), `merge` (three-way diff).
+
 ## P
 
 **PATH** - The environment variable that tells the shell where to find executable programs.
@@ -56,7 +68,11 @@ This glossary defines key terms and concepts used throughout the **b** documenta
 
 **Project-Based Configuration** - Using `.bin/b.yaml` files to define tool requirements specific to individual projects.
 
+**Provider Reference** - A git-cloneable path used to install binaries or sync env files from GitHub (e.g., `github.com/org/repo`).
+
 ## S
+
+**SCP Syntax** - The `repo@version:/glob dest` format used with `b install` to sync env files from upstream repos. Inspired by the `scp` command's remote path notation.
 
 **Subcommand** - A secondary command that follows the main **b** command (e.g., `install`, `update`, `list`).
 
@@ -67,5 +83,7 @@ This glossary defines key terms and concepts used throughout the **b** documenta
 **Version Constraint** - Specifications in **b.yaml** that define which version of a tool to use (e.g., `"1.6"`, `"latest"`).
 
 **Version Resolution** - The process of determining which specific version to install based on constraints.
+
+**Verify** - The process of checking installed artifacts against `b.lock` checksums to detect drift or corruption (`b verify`).
 
 **Versioning** - Managing different versions of the same tool for different projects or requirements.

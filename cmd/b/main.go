@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/fentas/b/pkg/binaries"
@@ -86,6 +87,7 @@ func main() {
 	}
 
 	if err := cli.Execute(binaries, io, version, versionPreRelease); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
