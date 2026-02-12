@@ -72,6 +72,15 @@ module.exports = {
       className: "homepage-sidebar-item",
     },
     {
+      type: "doc",
+      id: "authentication",
+      label: "Authentication",
+      customProps: {
+        sidebar_icon: "key",
+      },
+      className: "homepage-sidebar-item",
+    },
+    {
       type: "html",
       value: "Additional Resources",
       customProps: {
@@ -186,6 +195,16 @@ module.exports = {
           type: "doc",
           id: "b/subcommands/request",
           label: "request",
+        },
+        {
+          type: "doc",
+          id: "b/subcommands/verify",
+          label: "verify",
+        },
+        {
+          type: "doc",
+          id: "b/subcommands/cache",
+          label: "cache",
         },
       ],
     },

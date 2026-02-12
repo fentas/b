@@ -42,10 +42,28 @@ Force an update even if the binary is already at the latest version. This is use
 b update --force kubectl
 ```
 
+### Update with a merge strategy
+
+Use `--strategy` to control how local changes are handled during updates.
+
+```bash
+# Overwrite local files with upstream (default)
+b update --strategy=replace
+
+# Keep local files when modifications are detected
+b update --strategy=client
+
+# Three-way merge of local changes with upstream
+b update --strategy=merge
+```
+
+On an interactive terminal with `replace` strategy, `b` prompts per file: replace, keep, merge, or show diff.
+
 ## Flags
 
 | Flag         | Description               |
 |--------------|---------------------------|
+| `--strategy` | Conflict strategy: replace (default), client, merge |
 | `-h`, `--help` | help for update           |
 
 ## Global Flags
@@ -54,5 +72,6 @@ b update --force kubectl
 |----------------------|--------------------------------------------------------------------------|
 | `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
 | `--force`            | Force operations, overwriting existing binaries                          |
+| `-o`, `--output stringArray` | output options: json\|yaml\|format                                  |
 | `-q`, `--quiet`      | Quiet mode                                                               |
 | `-v`, `--version`    | Print version information and quit                                       |

@@ -38,6 +38,38 @@ Append `@<version>` to the binary name to install a specific version.
 b install jq@jq-1.7
 ```
 
+### Install from GitLab
+
+Use a full `gitlab.com` path to install from GitLab releases.
+
+```bash
+b install gitlab.com/owner/repo
+```
+
+### Install from Gitea / Codeberg
+
+Use the full host path for Gitea or Forgejo instances like Codeberg.
+
+```bash
+b install codeberg.org/owner/repo
+```
+
+### Install from Go source
+
+Prefix with `go://` to compile and install from Go module source. Requires `go` on your PATH.
+
+```bash
+b install go://github.com/jrhouston/tfk8s
+```
+
+### Install from Docker image
+
+Prefix with `docker://` to extract a binary from a Docker/OCI image. Requires a container runtime (docker, podman, or nerdctl).
+
+```bash
+b install docker://hashicorp/terraform
+```
+
 ### Install and add to config
 
 Use the `--add` flag to install a binary and simultaneously add it to your `b.yaml`.
@@ -93,5 +125,6 @@ b install --alias myenvsubst renvsubst@v0.10.0
 |----------------------|--------------------------------------------------------------------------|
 | `-c`, `--config string`  | Path to configuration file (current: `/home/fentas/github/fentas/b/.bin/b.yaml`) |
 | `--force`            | Force operations, overwriting existing binaries                          |
+| `-o`, `--output stringArray` | output options: json\|yaml\|format                                  |
 | `-q`, `--quiet`      | Quiet mode                                                               |
 | `-v`, `--version`    | Print version information and quit                                       |

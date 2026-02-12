@@ -1,42 +1,40 @@
 ---
-description: "Create new b.yaml config"
+description: "Manage the local cache"
 ---
 
-# b init
+# b cache
 
-Creates a new `.bin/b.yaml` configuration file in the current directory. Environment variables have precedence over the configuration file.
+Manage the local git cache used for env file syncing.
 
 ## Usage
 
 ```bash
-b init [flags]
+b cache [subcommand] [flags]
 ```
 
-## Examples
+## Subcommands
 
-### Create default config
+### b cache path
 
-This command creates a new `b.yaml` in the `.bin` directory of your current location.
+Print the cache directory path (typically `~/.cache/b/repos`).
 
 ```bash
-# Create new b.yaml in current directory
-b init
+b cache path
 ```
 
-### Create with custom path
+### b cache clean
 
-You can specify a custom path for the configuration file using the `--config` global flag.
+Remove all cached git repositories and report freed disk space.
 
 ```bash
-# Create with custom path
-b init --config ./custom/b.yaml
+b cache clean
 ```
 
 ## Flags
 
-| Flag         | Description              |
-|--------------|--------------------------|
-| `-h`, `--help` | help for init            |
+| Flag         | Description               |
+|--------------|---------------------------|
+| `-h`, `--help` | help for cache            |
 
 ## Global Flags
 

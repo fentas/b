@@ -1,42 +1,38 @@
 ---
-description: "Create new b.yaml config"
+description: "Verify integrity of installed binaries"
 ---
 
-# b init
+# b verify
 
-Creates a new `.bin/b.yaml` configuration file in the current directory. Environment variables have precedence over the configuration file.
+Verify all installed binaries and env files against SHA256 checksums stored in `b.lock`. Reports missing files, checksum mismatches, or local changes.
 
 ## Usage
 
 ```bash
-b init [flags]
+b verify [flags]
 ```
 
 ## Examples
 
-### Create default config
-
-This command creates a new `b.yaml` in the `.bin` directory of your current location.
+### Verify all artifacts
 
 ```bash
-# Create new b.yaml in current directory
-b init
+b verify
 ```
 
-### Create with custom path
+On success the output ends with:
 
-You can specify a custom path for the configuration file using the `--config` global flag.
-
-```bash
-# Create with custom path
-b init --config ./custom/b.yaml
 ```
+All artifacts verified ✓
+```
+
+If any checksum mismatches are found, `b verify` exits with a non-zero status code and reports the count.
 
 ## Flags
 
-| Flag         | Description              |
-|--------------|--------------------------|
-| `-h`, `--help` | help for init            |
+| Flag         | Description               |
+|--------------|---------------------------|
+| `-h`, `--help` | help for verify           |
 
 ## Global Flags
 
