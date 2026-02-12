@@ -25,7 +25,8 @@ type SharedOptions struct {
 	Output     string
 
 	// Internal
-	lookup map[string]*binary.Binary
+	lookup         map[string]*binary.Binary
+	loadedConfigPath string // path where config was actually loaded from
 }
 
 // NewSharedOptions creates a new SharedOptions with default values
@@ -57,8 +58,13 @@ func (o *SharedOptions) LoadConfig() error {
 
 	var err error
 	if o.ConfigPath != "" {
+		o.loadedConfigPath = o.ConfigPath
 		o.Config, err = state.LoadConfigFromPath(o.ConfigPath)
 	} else {
+		// Discover and remember the path
+		if p, findErr := path.FindConfigFile(); findErr == nil && p != "" {
+			o.loadedConfigPath = p
+		}
 		o.Config, err = state.LoadConfig()
 	}
 
@@ -201,6 +207,9 @@ func (o *SharedOptions) ValidateBinaryPath() error {
 func (o *SharedOptions) getConfigPath() (string, error) {
 	if o.ConfigPath != "" {
 		return o.ConfigPath, nil
+	}
+	if o.loadedConfigPath != "" {
+		return o.loadedConfigPath, nil
 	}
 	return path.FindConfigFile()
 }

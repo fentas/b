@@ -82,16 +82,25 @@ func (o *VerifyOptions) Run() error {
 		}
 	}
 
-	// Verify env files (Phase 2)
+	// Verify env files
 	for _, env := range lk.Envs {
-		fmt.Fprintf(o.IO.Out, "  %s\n", env.Ref)
+		label := ""
+		if env.Label != "" {
+			label = "#" + env.Label
+		}
+		fmt.Fprintf(o.IO.Out, "  %s%s\n", env.Ref, label)
 		for _, f := range env.Files {
-			if _, err := os.Stat(f.Dest); os.IsNotExist(err) {
+			// Resolve dest relative to project root
+			destPath := f.Dest
+			if !filepath.IsAbs(destPath) {
+				destPath = filepath.Join(dir, destPath)
+			}
+			if _, err := os.Stat(destPath); os.IsNotExist(err) {
 				fmt.Fprintf(o.IO.Out, "    %-38s ✗ missing\n", f.Dest)
 				failures++
 				continue
 			}
-			hash, err := lock.SHA256File(f.Dest)
+			hash, err := lock.SHA256File(destPath)
 			if err != nil {
 				fmt.Fprintf(o.IO.Out, "    %-38s ✗ %v\n", f.Dest, err)
 				failures++

@@ -110,6 +110,27 @@ func (l *Lock) UpsertBinary(entry BinEntry) {
 	l.Binaries = append(l.Binaries, entry)
 }
 
+// FindEnv returns the lock entry for a given env ref (and optional label), or nil.
+func (l *Lock) FindEnv(ref, label string) *EnvEntry {
+	for i := range l.Envs {
+		if l.Envs[i].Ref == ref && l.Envs[i].Label == label {
+			return &l.Envs[i]
+		}
+	}
+	return nil
+}
+
+// UpsertEnv adds or updates an env entry in the lock.
+func (l *Lock) UpsertEnv(entry EnvEntry) {
+	for i := range l.Envs {
+		if l.Envs[i].Ref == entry.Ref && l.Envs[i].Label == entry.Label {
+			l.Envs[i] = entry
+			return
+		}
+	}
+	l.Envs = append(l.Envs, entry)
+}
+
 // SHA256File computes the SHA256 checksum of a file.
 func SHA256File(path string) (string, error) {
 	f, err := os.Open(path)

@@ -91,6 +91,85 @@ func TestFindBinary(t *testing.T) {
 	}
 }
 
+func TestFindEnv(t *testing.T) {
+	lk := &Lock{
+		Envs: []EnvEntry{
+			{Ref: "github.com/org/infra", Label: ""},
+			{Ref: "github.com/org/infra", Label: "monitoring"},
+		},
+	}
+
+	if e := lk.FindEnv("github.com/org/infra", ""); e == nil {
+		t.Error("expected to find org/infra (no label)")
+	}
+	if e := lk.FindEnv("github.com/org/infra", "monitoring"); e == nil {
+		t.Error("expected to find org/infra#monitoring")
+	}
+	if e := lk.FindEnv("github.com/org/other", ""); e != nil {
+		t.Error("expected nil for missing env")
+	}
+}
+
+func TestUpsertEnv(t *testing.T) {
+	lk := &Lock{
+		Envs: []EnvEntry{
+			{Ref: "github.com/org/infra", Commit: "old"},
+		},
+	}
+
+	// Update existing
+	lk.UpsertEnv(EnvEntry{Ref: "github.com/org/infra", Commit: "new"})
+	if len(lk.Envs) != 1 {
+		t.Fatalf("expected 1 env after upsert, got %d", len(lk.Envs))
+	}
+	if lk.Envs[0].Commit != "new" {
+		t.Errorf("commit = %q, want %q", lk.Envs[0].Commit, "new")
+	}
+
+	// Add new
+	lk.UpsertEnv(EnvEntry{Ref: "github.com/org/other", Commit: "abc"})
+	if len(lk.Envs) != 2 {
+		t.Fatalf("expected 2 envs, got %d", len(lk.Envs))
+	}
+}
+
+func TestReadWriteLockWithEnvs(t *testing.T) {
+	dir := t.TempDir()
+
+	lk := &Lock{
+		Envs: []EnvEntry{
+			{
+				Ref:     "github.com/org/infra",
+				Version: "v2.1.0",
+				Commit:  "abc123",
+				Files: []LockFile{
+					{Path: "manifests/deploy.yaml", Dest: "/hetzner/deploy.yaml", SHA256: "sha1", Mode: "644"},
+				},
+			},
+		},
+	}
+	if err := WriteLock(dir, lk, "v5.0.0"); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+
+	lk2, err := ReadLock(dir)
+	if err != nil {
+		t.Fatalf("ReadLock: %v", err)
+	}
+	if len(lk2.Envs) != 1 {
+		t.Fatalf("got %d envs, want 1", len(lk2.Envs))
+	}
+	if lk2.Envs[0].Commit != "abc123" {
+		t.Errorf("commit = %q, want %q", lk2.Envs[0].Commit, "abc123")
+	}
+	if len(lk2.Envs[0].Files) != 1 {
+		t.Fatalf("got %d files, want 1", len(lk2.Envs[0].Files))
+	}
+	if lk2.Envs[0].Files[0].Dest != "/hetzner/deploy.yaml" {
+		t.Errorf("dest = %q, want %q", lk2.Envs[0].Files[0].Dest, "/hetzner/deploy.yaml")
+	}
+}
+
 func TestSHA256File(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test")

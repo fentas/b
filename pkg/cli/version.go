@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fentas/b/pkg/binary"
+	"github.com/fentas/b/pkg/gitcache"
+	"github.com/fentas/b/pkg/lock"
 )
 
 // VersionOptions holds options for the version command
@@ -137,7 +139,40 @@ func (o *VersionOptions) Run() error {
 		return nil
 	}
 
-	return o.IO.Print(locals)
+	if err := o.IO.Print(locals); err != nil {
+		return err
+	}
+
+	// Show env versions (when no specific args or args match envs)
+	if o.Config != nil && len(o.Config.Envs) > 0 && len(o.args) == 0 {
+		o.showEnvVersions()
+	}
+
+	return nil
+}
+
+// showEnvVersions displays version information for configured envs.
+func (o *VersionOptions) showEnvVersions() {
+	lk, _ := lock.ReadLock(o.LockDir())
+
+	fmt.Fprintln(o.IO.Out, "\nEnvironments:")
+	for _, entry := range o.Config.Envs {
+		label := gitcache.RefLabel(entry.Key)
+		ref := gitcache.RefBase(entry.Key)
+
+		lockEntry := lk.FindEnv(ref, label)
+
+		version := entry.Version
+		if version == "" {
+			version = "(HEAD)"
+		}
+
+		if lockEntry != nil {
+			fmt.Fprintf(o.IO.Out, "  %-40s %s (pinned: %s)\n", entry.Key, version, shortCommit(lockEntry.Commit))
+		} else {
+			fmt.Fprintf(o.IO.Out, "  %-40s %s (not synced)\n", entry.Key, version)
+		}
+	}
 }
 
 // getVersionInfo gets version information for the specified binaries
