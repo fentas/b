@@ -38,6 +38,11 @@ type Binary struct {
 	Writer        *pwrap.Writer   `json:"-"`
 	// for execution
 	Envs map[string]string `json:"-"`
+
+	// Provider-based auto-detection (Phase 1)
+	AutoDetect   bool   `json:"-"` // use provider system instead of preset
+	ProviderRef  string `json:"-"` // e.g. "github.com/derailed/k9s"
+	ProviderType string `json:"-"` // e.g. "github", "gitlab", "go", "docker"
 }
 
 type LocalBinary struct {
@@ -49,4 +54,6 @@ type LocalBinary struct {
 	// alias is the name of the binary that this binary is a reference to
 	// yaml config sets this as reference
 	Alias string `json:"alias,omitempty"`
+	// IsProviderRef is true when Name is a provider ref (e.g. github.com/derailed/k9s)
+	IsProviderRef bool `json:"-" yaml:"-"`
 }

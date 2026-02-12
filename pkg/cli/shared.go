@@ -3,9 +3,11 @@ package cli
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/path"
+	"github.com/fentas/b/pkg/provider"
 	"github.com/fentas/b/pkg/state"
 	"github.com/fentas/goodies/streams"
 )
@@ -97,9 +99,9 @@ func (o *SharedOptions) resolveBinary(lb *binary.LocalBinary) (*binary.Binary, b
 	return b, ok
 }
 
-// GetBinary returns a binary by name
+// GetBinary returns a binary by name or provider ref.
 func (o *SharedOptions) GetBinary(name string) (*binary.Binary, bool) {
-	// First try direct lookup
+	// First try direct lookup (preset)
 	if b, ok := o.lookup[name]; ok {
 		return b, ok
 	}
@@ -113,6 +115,26 @@ func (o *SharedOptions) GetBinary(name string) (*binary.Binary, bool) {
 		}
 	}
 
+	// Check if this is a provider ref (e.g. github.com/derailed/k9s)
+	if provider.IsProviderRef(name) {
+		ref, version := provider.ParseRef(name)
+		p, err := provider.Detect(ref)
+		if err != nil {
+			return nil, false
+		}
+		b := &binary.Binary{
+			Name:         provider.BinaryName(ref),
+			Version:      version,
+			AutoDetect:   true,
+			ProviderRef:  ref,
+			ProviderType: p.Name(),
+			VersionF: func(b *binary.Binary) (string, error) {
+				return p.LatestVersion(ref)
+			},
+		}
+		return b, true
+	}
+
 	return nil, false
 }
 
@@ -124,7 +146,28 @@ func (o *SharedOptions) GetBinariesFromConfig() []*binary.Binary {
 
 	var result []*binary.Binary
 	for _, lb := range o.Config.Binaries {
-		if b, ok := o.resolveBinary(lb); ok {
+		if lb.IsProviderRef {
+			// Provider ref from config — create auto-detect Binary
+			b, ok := o.GetBinary(lb.Name)
+			if !ok {
+				fmt.Fprintf(o.IO.ErrOut, "Warning: no provider matched '%s', skipping.\n", lb.Name)
+				continue
+			}
+			// Apply config overrides
+			if lb.Version != "" {
+				b.Version = lb.Version
+			}
+			if lb.Enforced != "" {
+				b.Version = lb.Enforced
+			}
+			if lb.File != "" {
+				b.File = lb.File
+			}
+			if lb.Alias != "" {
+				b.Alias = lb.Alias
+			}
+			result = append(result, b)
+		} else if b, ok := o.resolveBinary(lb); ok {
 			result = append(result, b)
 		} else {
 			fmt.Fprintf(o.IO.ErrOut, "Warning: referenced binary '%s' could not be resolved and will be skipped.\n", lb.Name)
@@ -132,6 +175,17 @@ func (o *SharedOptions) GetBinariesFromConfig() []*binary.Binary {
 	}
 
 	return result
+}
+
+// LockDir returns the directory where b.lock lives — next to b.yaml.
+func (o *SharedOptions) LockDir() string {
+	if o.ConfigPath != "" {
+		return filepath.Dir(o.ConfigPath)
+	}
+	if p, _ := path.FindConfigFile(); p != "" {
+		return filepath.Dir(p)
+	}
+	return filepath.Dir(path.GetDefaultConfigPath())
 }
 
 // ValidateBinaryPath ensures we have a valid binary installation path

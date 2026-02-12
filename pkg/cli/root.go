@@ -68,6 +68,7 @@ func NewRootCmd(binaries []*binary.Binary, io *streams.IO, version, versionPreRe
 	cmd.AddCommand(NewInitCmd(shared))
 	cmd.AddCommand(NewVersionCmd(shared))
 	cmd.AddCommand(NewRequestCmd(shared))
+	cmd.AddCommand(NewVerifyCmd(shared))
 
 	// Set custom usage template to show aliases in command list
 	cmd.SetUsageTemplate(getUsageTemplate())

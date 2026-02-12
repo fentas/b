@@ -2,6 +2,8 @@
 package state
 
 import (
+	"strings"
+
 	"github.com/fentas/b/pkg/binary"
 )
 
@@ -47,6 +49,10 @@ func (list *BinaryList) UnmarshalYAML(unmarshal func(interface{}) error) error {
 			b = &binary.LocalBinary{}
 		}
 		b.Name = name
+		// Detect provider refs: contains "/" or "://"
+		if strings.Contains(name, "/") || strings.Contains(name, "://") {
+			b.IsProviderRef = true
+		}
 		data = append(data, b)
 	}
 	*list = data

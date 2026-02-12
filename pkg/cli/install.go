@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fentas/b/pkg/binary"
+	"github.com/fentas/b/pkg/lock"
 	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/b/pkg/state"
 )
@@ -91,14 +92,12 @@ func (o *InstallOptions) Complete(args []string) error {
 		name, version := parseBinaryArg(arg)
 		b, ok := o.GetBinary(name)
 		if !ok {
-			return fmt.Errorf("unknown binary: %s", name)
+			return fmt.Errorf("unknown binary: %s\n  Hint: use a provider ref like github.com/org/repo to install any release", name)
 		}
 
-		// Set version if specified
+		// Set version if specified (CLI version overrides config/detected)
 		if version != "" {
 			b.Version = version
-			// TODO: Add version validation here
-			// For now, we'll validate during installation
 		}
 
 		b.Alias = o.Alias
@@ -133,6 +132,11 @@ func (o *InstallOptions) Run() error {
 	// Install binaries
 	if err := o.installBinaries(binariesToInstall); err != nil {
 		return err
+	}
+
+	// Update b.lock
+	if err := o.updateLock(binariesToInstall); err != nil {
+		fmt.Fprintf(o.IO.ErrOut, "Warning: failed to update b.lock: %v\n", err)
 	}
 
 	// Add to config if requested
@@ -201,10 +205,16 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 
 	// Add binaries to config
 	for _, b := range binaries {
+		// Use provider ref as the config key if auto-detected
+		configName := b.Name
+		if b.AutoDetect && b.ProviderRef != "" {
+			configName = b.ProviderRef
+		}
+
 		// Check if already exists
 		found := false
 		for i, existing := range config.Binaries {
-			if existing.Name == b.Name {
+			if existing.Name == configName {
 				// Update version only if we have a specific version
 				if b.Version != "" && b.Version != "latest" {
 					config.Binaries[i].Version = b.Version
@@ -219,7 +229,7 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 
 		if !found {
 			entry := &binary.LocalBinary{
-				Name: b.Name,
+				Name: configName,
 			}
 			// Only set version if it's not "latest" or empty
 			if b.Version != "" && b.Version != "latest" {
@@ -230,13 +240,49 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 			}
 			if b.Alias != "" {
 				entry.Name = b.Alias
-				entry.Alias = b.Name
+				entry.Alias = configName
 			}
 			config.Binaries = append(config.Binaries, entry)
 		}
 	}
 
 	return state.SaveConfig(config, configPath)
+}
+
+// updateLock updates b.lock with installed binary checksums
+func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
+	lockDir := o.LockDir()
+	lk, err := lock.ReadLock(lockDir)
+	if err != nil {
+		return err
+	}
+
+	for _, b := range binaries {
+		if b.File == "" {
+			continue
+		}
+		hash, err := lock.SHA256File(b.File)
+		if err != nil {
+			continue
+		}
+		entry := lock.BinEntry{
+			Name:    b.Name,
+			Version: b.Version,
+			SHA256:  hash,
+		}
+		if b.AutoDetect {
+			entry.Source = b.ProviderRef
+			entry.Provider = b.ProviderType
+		} else {
+			entry.Preset = true
+			if b.GitHubRepo != "" {
+				entry.Source = "github.com/" + b.GitHubRepo
+			}
+		}
+		lk.UpsertBinary(entry)
+	}
+
+	return lock.WriteLock(lockDir, lk, ">=5.0.0")
 }
 
 // parseBinaryArg parses binary argument in format "name" or "name@version"
