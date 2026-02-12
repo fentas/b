@@ -1,0 +1,19 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+  settings:
+    staticcheck:
+      checks:
+        - "all"
+        - "-ST1000" # package comments — not enforced for internal packages
+        - "-ST1005" # capitalized error strings — pre-existing in download.go
+        - "-ST1023" # redundant type in var declaration — stylistic, not a bug
+        - "-SA9003" # empty branch — used in tests to assert non-empty conditions
+        - "-QF1011" # could omit type from declaration — stylistic, not a bug

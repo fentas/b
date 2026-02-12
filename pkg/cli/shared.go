@@ -113,10 +113,15 @@ func (o *SharedOptions) GetBinary(name string) (*binary.Binary, bool) {
 	}
 
 	// If not found and we have config, check if this is a reference alias
+	var configEntry *binary.LocalBinary
 	if o.Config != nil {
 		for _, lb := range o.Config.Binaries {
 			if lb.Name == name {
-				return o.resolveBinary(lb)
+				if b, ok := o.resolveBinary(lb); ok {
+					return b, true
+				}
+				configEntry = lb
+				break
 			}
 		}
 	}
@@ -137,6 +142,18 @@ func (o *SharedOptions) GetBinary(name string) (*binary.Binary, bool) {
 			VersionF: func(b *binary.Binary) (string, error) {
 				return p.LatestVersion(ref)
 			},
+		}
+		// Apply config overrides if this ref came from config
+		if configEntry != nil {
+			if configEntry.Version != "" && version == "" {
+				b.Version = configEntry.Version
+			}
+			if configEntry.Enforced != "" {
+				b.Version = configEntry.Enforced
+			}
+			if configEntry.File != "" {
+				b.File = configEntry.File
+			}
 		}
 		return b, true
 	}

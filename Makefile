@@ -1,6 +1,6 @@
 .PHONY: build test coverage lint ci clean
 
-BINARY     := b
+BINARY     := .bin/b
 MODULE     := github.com/fentas/b
 MAIN       := ./cmd/b
 COVER_DIR  := test/coverage
@@ -38,7 +38,7 @@ $(COVER_DIR):
 	mkdir -p $(COVER_DIR)
 
 lint:
-	golangci-lint run ./...
+	PATH="$(CURDIR)/.bin:$(PATH)" golangci-lint run ./...
 
 ci: lint test coverage
 	@echo "CI checks passed"

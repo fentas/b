@@ -870,11 +870,8 @@ func TestCreateConfigWithSelfReference(t *testing.T) {
 // --- GetBinariesFromConfig with provider ref entries ---
 
 func TestGetBinariesFromConfig_WithProviderRef(t *testing.T) {
-	// Note: GetBinary for provider refs short-circuits when name is also found in Config,
-	// calling resolveBinary which fails because the name isn't in the preset lookup.
-	// This is a known limitation — provider refs from config go through GetBinary which
-	// finds the same entry in config before reaching the provider ref detection path.
-	// The warning path is exercised here.
+	// Provider refs in config should fall through resolveBinary (which fails
+	// for non-preset names) to the provider ref detection path.
 	var errBuf bytes.Buffer
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &errBuf}
 	shared := NewSharedOptions(io, nil)
@@ -888,13 +885,68 @@ func TestGetBinariesFromConfig_WithProviderRef(t *testing.T) {
 	}
 
 	result := shared.GetBinariesFromConfig()
-	// Currently returns 0 because GetBinary finds the config entry
-	// before reaching the provider ref detection logic
-	if len(result) != 0 {
-		t.Fatalf("got %d binaries, want 0 (known limitation)", len(result))
+	if len(result) != 1 {
+		t.Fatalf("got %d binaries, want 1", len(result))
 	}
-	if !bytes.Contains(errBuf.Bytes(), []byte("Warning")) {
-		t.Errorf("expected warning, got: %s", errBuf.String())
+	if result[0].Name != "k9s" {
+		t.Errorf("binary name = %q, want %q", result[0].Name, "k9s")
+	}
+	if result[0].ProviderType != "github" {
+		t.Errorf("provider = %q, want %q", result[0].ProviderType, "github")
+	}
+}
+
+func TestGetBinariesFromConfig_ProviderRefWithVersion(t *testing.T) {
+	// Config entries with provider refs should inherit version from config
+	var errBuf bytes.Buffer
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &errBuf}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{
+		Binaries: state.BinaryList{
+			&binary.LocalBinary{
+				Name:          "github.com/derailed/k9s",
+				Version:       "v0.32.0",
+				IsProviderRef: true,
+			},
+		},
+	}
+
+	result := shared.GetBinariesFromConfig()
+	if len(result) != 1 {
+		t.Fatalf("got %d binaries, want 1", len(result))
+	}
+	if result[0].Version != "v0.32.0" {
+		t.Errorf("version = %q, want %q", result[0].Version, "v0.32.0")
+	}
+}
+
+func TestGetBinariesFromConfig_GoProviderRef(t *testing.T) {
+	// go:// provider refs should resolve through GetBinary
+	var errBuf bytes.Buffer
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &errBuf}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{
+		Binaries: state.BinaryList{
+			&binary.LocalBinary{
+				Name:          "go://github.com/golangci/golangci-lint/v2/cmd/golangci-lint",
+				Version:       "v2.9.0",
+				IsProviderRef: true,
+			},
+		},
+	}
+
+	result := shared.GetBinariesFromConfig()
+	if len(result) != 1 {
+		t.Fatalf("got %d binaries, want 1", len(result))
+	}
+	if result[0].Name != "golangci-lint" {
+		t.Errorf("name = %q, want %q", result[0].Name, "golangci-lint")
+	}
+	if result[0].ProviderType != "go" {
+		t.Errorf("provider = %q, want %q", result[0].ProviderType, "go")
+	}
+	if result[0].Version != "v2.9.0" {
+		t.Errorf("version = %q, want %q", result[0].Version, "v2.9.0")
 	}
 }
 
