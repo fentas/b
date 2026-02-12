@@ -15,9 +15,15 @@
 
 <p align="left">
 	
-`b` is a binary or a Go package that provides a set of utilities for managing and executing binary files. It is particularly useful for binaries hosted on GitHub.
+`b` is a binary manager and environment file syncer for development projects. It manages binary installations from GitHub/GitLab releases and syncs configuration files from upstream git repositories.
 
-The package includes a `Binary` struct that represents a binary file, including its name, file path, version, and other related properties. You can create a `Binary` struct by providing the binary name and version, and then use the `EnsureBinary` method to ensure that the binary is available on the system.
+Features:
+
+- **30+ pre-packaged binaries** (kubectl, k9s, jq, helm, etc.) with auto-detection
+- **Install any GitHub/GitLab release** via `b install github.com/org/repo`
+- **Sync env files** from git repos with glob matching and three-way merge
+- **Lockfile** (`b.lock`) for reproducible installations with SHA256 verification
+- **direnv integration** for per-project binary management
 
 </p>
 
@@ -27,37 +33,46 @@ The package includes a `Binary` struct that represents a binary file, including 
 
 ```bash
 # Initialise a new project with b.yaml config and direnv
-# (tip) init is optional; you use b without it
 b init
 
-# List all configured binaries
+# List all configured binaries and envs
 b list
-b ls
 
-# Install specific binaries
-b install jq
-b i kubectl helm
+# Install pre-packaged binaries
+b install jq kubectl helm
 
-# Install and add binary to config
+# Install any GitHub/GitLab release (auto-detected)
+b install github.com/derailed/k9s
+b install github.com/sharkdp/bat@v0.24.0
+
+# Install and add to b.yaml
 b install --add jq@1.7
 
-# Install with alias
-b i --alias envsubst renvsubst
+# Sync env files from a git repository (SCP-style)
+b install github.com/org/infra:/manifests/hetzner/** /hetzner
+b install github.com/org/infra@v2.0:/manifests/base/** .
 
-# Update all binaries
+# Update all binaries and envs
 b update
-b u tilt
 
-# Update specific binaries
-b update jq kubectl
+# Update with merge strategy (three-way merge on local changes)
+b update --strategy=merge
+
+# Update keeping local changes
+b update --strategy=client
 
 # Search for available binaries
 b search terraform
-b s kube
 
-# Show version
+# Show versions (with remote update check for envs)
 b version
-b v kind
+b version --local  # skip remote checks
+
+# Verify installed artifacts against b.lock checksums
+b verify
+
+# Manage git cache
+b cache clean  # remove all cached repos
 
 # Request a new binary
 b request
@@ -75,31 +90,45 @@ b request
 
 If none of these are set, `b` will fail.
 
-To properly use the `--all` flag, you should create a `b.yaml` file in the binary directory. This file should contain a list of binaries you want to manage. Here is an example:
+Create a `b.yaml` file in the binary directory to declare what to install. Here is an example:
 
 ```yaml
 binaries:
   jq:
-    # pin version
-    version: jq-1.8.1
+    version: jq-1.8.1    # pin version
   kind:
   tilt:
-  # alias to renvsubst
   envsubst:
-    alias: renvsubst
-  # custom binary with specific file path
+    alias: renvsubst      # alias to renvsubst
   kubectl:
-    file: ../kc  # absolute or relative to config file
+    file: ../kc           # custom path (relative to config)
+  # Install any GitHub release by ref
+  github.com/sharkdp/bat:
+    version: v0.24.0
+
+envs:
+  # Sync files from upstream git repos
+  github.com/org/infra:
+    version: v2.0          # pin to tag/branch (default: HEAD)
+    strategy: merge         # replace (default) | client | merge
+    ignore:
+      - "*.md"
+    files:
+      manifests/base/**:   # glob pattern
+        dest: base/         # local destination
+      manifests/hetzner/**:
+        dest: hetzner/
+  # Minimal env entry (sync all files, default settings)
+  github.com/org/shared-config:
 ```
 
-This will ensure that `jq`, `kind`, `renvsubst` and `tilt` are installed and at the correct version. If you don't specify a version, `b` will install the latest version.
-Note that `renvsubst` is installed as `envsubst`.
+**Binaries:** If you don't specify a version, `b` will install the latest. Custom file paths can be relative (resolved from config location) or absolute.
 
-You can also specify custom file paths using the `file` field:
+**Envs:** Sync configuration files from upstream git repositories. Strategy controls how local changes are handled during updates:
 
-- **Relative paths** (like `../kc` or `./bin/tool`) are resolved relative to the config file location
-- **Absolute paths** (like `/usr/local/bin/tool`) are used as-is (be aware of permissions)
-- This allows you to point to existing binaries or specify custom installation locations
+- **replace** (default): Overwrite with upstream. Interactive prompt on TTY when local changes detected.
+- **client**: Keep local files when modified, skip upstream.
+- **merge**: Three-way merge via `git merge-file`. Conflict markers inserted on failure.
 
 &nbsp;
 
@@ -228,10 +257,9 @@ This is all you need; alternatively, you can refer to [here](./.envrc).
 
 ### 🎯 Short term goals
 
-- [ ] Recognise the operating system and architecture and offer the correct binary (Windows support)
-- [ ] Update docs
-- [ ] Extends tests
-- [ ] Advanced configurations, e.g. Proxy
+- [ ] Windows support (OS/arch detection improvements)
+- [ ] Advanced configurations (proxy, custom registries)
+- [ ] Upstream `b.yaml` discovery (auto-detect file groups from repos)
 
 &nbsp;
 
