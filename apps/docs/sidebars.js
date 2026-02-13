@@ -41,7 +41,7 @@ module.exports = {
       id: "docker",
       label: "Docker Usage",
       customProps: {
-        sidebar_icon: "cube",
+        sidebar_icon: "cube-solid",
       },
       className: "homepage-sidebar-item",
     },
