@@ -3,9 +3,11 @@ name: Deploy Documentation
 on:
   push:
     branches: [ main ]
-    
+
   pull_request:
     branches: [ main ]
+
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -58,6 +60,10 @@ jobs:
       - name: Build Docusaurus site
         run: |
           yarn run build
+
+      - name: Add install script
+        run: |
+          curl -sL https://github.com/fentas/b/releases/latest/download/install.sh > apps/docs/build/get.sh
 
       - name: Setup Pages
         if: github.ref == 'refs/heads/docs'
