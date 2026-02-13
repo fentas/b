@@ -17,14 +17,14 @@ Get up and running with **b** in just a few minutes. **b** helps you manage comm
   <TabItem value="curl" label="curl" default>
 
     ```bash
-    curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+    curl -sSL https://get.binary.help | bash
     ```
 
   </TabItem>
   <TabItem value="wget" label="wget">
 
     ```bash
-    wget -qO- https://github.com/fentas/b/releases/latest/download/install.sh | bash
+    wget -qO- https://get.binary.help | bash
     ```
 
   </TabItem>
@@ -105,7 +105,7 @@ Use **b** in your CI/CD pipelines:
 steps:
   - uses: actions/checkout@v4
   - name: Install b
-    run: curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+    run: curl -sSL https://get.binary.help | bash
   - name: Install project tools
     run: b install
   - name: Run tests

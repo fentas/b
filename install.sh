@@ -1,6 +1,6 @@
 #!/bin/sh
 # b installer — https://github.com/fentas/b
-# Usage: curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+# Usage: curl -sSL https://get.binary.help | bash
 set -e
 
 REPO="fentas/b"

@@ -16,10 +16,12 @@ This guide covers common issues you might encounter when using **b** and their s
 **Solution**:
 ```bash
 # Make sure you have write permissions to the installation directory
-sudo curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+# https://github.com/fentas/b/releases/latest/download/install.sh
+sudo curl -sSL https://get.binary.help | bash
 
 # Or install to a user directory
-curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash -s -- --prefix=$HOME/.local
+# https://github.com/fentas/b/releases/latest/download/install.sh
+curl -sSL https://get.binary.help | bash -s -- --prefix=$HOME/.local
 ```
 
 ### Command Not Found
@@ -269,7 +271,7 @@ b update --strategy=client
 steps:
   - name: Install b
     run: |
-      curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+      curl -sSL https://get.binary.help | bash
       echo "$HOME/.local/bin" >> $GITHUB_PATH
   
   - name: Verify b installation
@@ -286,13 +288,13 @@ steps:
 **Solution**:
 ```dockerfile
 # Install b in Dockerfile
-RUN curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+RUN curl -sSL https://get.binary.help | bash
 ENV PATH="/root/.local/bin:$PATH"
 
 # Or use multi-stage build
 FROM alpine AS b-installer
 RUN apk add --no-cache curl
-RUN curl -sSL https://github.com/fentas/b/releases/latest/download/install.sh | bash
+RUN curl -sSL https://get.binary.help | bash
 
 FROM alpine
 COPY --from=b-installer /root/.local/bin/b /usr/local/bin/b
