@@ -1,0 +1,72 @@
+---
+description: "Configure authentication tokens for private repositories and higher rate limits"
+---
+
+# Authentication
+
+`b` supports authentication tokens for accessing private repositories and increasing API rate limits. Tokens are read from environment variables.
+
+## Provider Tokens
+
+| Provider | Environment Variable | Header Format |
+| -------- | -------------------- | ------------- |
+| GitHub   | `GITHUB_TOKEN`       | `Authorization: Bearer <token>` |
+| GitLab   | `GITLAB_TOKEN`       | `PRIVATE-TOKEN: <token>` |
+| Gitea / Codeberg | `GITEA_TOKEN` | `Authorization: token <token>` |
+
+## Usage
+
+Export the appropriate variable before running `b`:
+
+```bash
+export GITHUB_TOKEN="ghp_..."
+b install owner/private-repo
+```
+
+### GitHub
+
+A GitHub token increases the API rate limit from 60 to 5,000 requests per hour and allows access to private repositories.
+
+```bash
+export GITHUB_TOKEN="ghp_..."
+```
+
+Without a token, `b` will show a warning when rate-limited:
+
+> GitHub API rate limited (set GITHUB_TOKEN for higher limits)
+
+### GitLab
+
+A GitLab token is required for private repositories on `gitlab.com` or self-hosted instances.
+
+```bash
+export GITLAB_TOKEN="glpat-..."
+```
+
+### Gitea / Codeberg
+
+A Gitea token is required for private repositories on Gitea or Forgejo instances like Codeberg.
+
+```bash
+export GITEA_TOKEN="..."
+```
+
+## CI/CD
+
+In CI/CD pipelines, use secrets or environment variables provided by your CI system:
+
+```yaml
+# GitHub Actions
+steps:
+  - name: Install tools
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    run: b install
+
+# GitLab CI
+install_tools:
+  script:
+    - b install
+  variables:
+    GITLAB_TOKEN: $GITLAB_API_TOKEN
+```
