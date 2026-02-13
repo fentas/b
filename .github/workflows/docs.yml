@@ -2,7 +2,7 @@ name: Deploy Documentation
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, docs ]
 
   pull_request:
     branches: [ main ]
@@ -66,17 +66,17 @@ jobs:
           curl -sL https://github.com/fentas/b/releases/latest/download/install.sh > apps/docs/build/get.sh
 
       - name: Setup Pages
-        if: github.ref == 'refs/heads/docs'
+        if: github.event_name != 'pull_request'
         uses: actions/configure-pages@v4
 
       - name: Upload artifact
-        if: github.ref == 'refs/heads/docs'
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
           path: apps/docs/build
 
   deploy:
-    if: github.ref == 'refs/heads/docs'
+    if: github.event_name != 'pull_request'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
