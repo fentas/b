@@ -46,15 +46,6 @@ module.exports = {
       className: "homepage-sidebar-item",
     },
     {
-      type: "doc",
-      id: "troubleshooting",
-      label: "Troubleshooting",
-      customProps: {
-        sidebar_icon: "exclamation-circle-solid",
-      },
-      className: "homepage-sidebar-item",
-    },
-    {
       type: "html",
       value: "Browse Docs",
       customProps: {
