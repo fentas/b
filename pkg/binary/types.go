@@ -45,9 +45,9 @@ type Binary struct {
 	Envs map[string]string `json:"-"`
 
 	// Provider-based auto-detection (Phase 1)
-	AutoDetect   bool   `json:"-"` // use provider system instead of preset
-	ProviderRef  string `json:"-"` // e.g. "github.com/derailed/k9s"
-	ProviderType string `json:"-"` // e.g. "github", "gitlab", "go", "docker"
+	AutoDetect   bool            `json:"-"` // use provider system instead of preset
+	ProviderRef  string          `json:"-"` // e.g. "github.com/derailed/k9s"
+	ProviderType string          `json:"-"` // e.g. "github", "gitlab", "go", "docker"
 	AssetFilter  string          `json:"-"` // glob pattern to filter release assets (e.g. "argsh-so-*")
 	SelectAsset  SelectAssetFunc `json:"-"` // interactive asset selector for ambiguous matches
 }

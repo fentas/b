@@ -257,7 +257,6 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	return nil
 }
 
-
 // addToConfig adds binaries to the configuration file
 func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 	configPath, err := o.getConfigPath()
