@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.7.0](https://github.com/fentas/b/compare/v4.6.1...v4.7.0) (2026-02-14)
+
+
+### Features
+
+* add --asset flag for release asset filtering ([#106](https://github.com/fentas/b/issues/106)) ([6e800bc](https://github.com/fentas/b/commit/6e800bc3dc51a2dd00c80115ddd104853146396e))
+
 ## [4.6.1](https://github.com/fentas/b/compare/v4.6.0...v4.6.1) (2026-02-12)
 
 
