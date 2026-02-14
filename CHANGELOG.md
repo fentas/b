@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.7.1](https://github.com/fentas/b/compare/v4.7.0...v4.7.1) (2026-02-14)
+
+
+### Bug Fixes
+
+* fallback to CWD/.bin when no git repo or envs ([#108](https://github.com/fentas/b/issues/108)) ([6b2b30f](https://github.com/fentas/b/commit/6b2b30fcf8345413c6a4dd62dbd8b752466f9e09))
+
 ## [4.7.0](https://github.com/fentas/b/compare/v4.6.1...v4.7.0) (2026-02-14)
 
 
