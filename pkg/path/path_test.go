@@ -17,15 +17,20 @@ func realDir(t *testing.T, dir string) string {
 	return real
 }
 
+// clearPathEnvs uses t.Setenv to clear PATH_BIN and PATH_BASE,
+// automatically restoring (or unsetting) them when the test finishes.
+func clearPathEnvs(t *testing.T) {
+	t.Helper()
+	t.Setenv("PATH_BIN", "")
+	t.Setenv("PATH_BASE", "")
+	os.Unsetenv("PATH_BIN")
+	os.Unsetenv("PATH_BASE")
+}
+
 // TestGetBinaryPath_FallbackCWD verifies that GetBinaryPath falls back to
 // CWD/.bin when no env vars are set and no git root is found (issue #86).
 func TestGetBinaryPath_FallbackCWD(t *testing.T) {
-	// Clear env vars that would take priority
-	for _, key := range []string{"PATH_BIN", "PATH_BASE"} {
-		old := os.Getenv(key)
-		os.Unsetenv(key)
-		defer os.Setenv(key, old)
-	}
+	clearPathEnvs(t)
 
 	// Work in a temp dir that has no .git
 	tmp := realDir(t, t.TempDir())
@@ -48,10 +53,7 @@ func TestGetBinaryPath_FallbackCWD(t *testing.T) {
 
 // TestGetBinaryPath_EnvOverride verifies that PATH_BIN takes priority.
 func TestGetBinaryPath_EnvOverride(t *testing.T) {
-	old := os.Getenv("PATH_BIN")
-	defer os.Setenv("PATH_BIN", old)
-
-	os.Setenv("PATH_BIN", "/custom/bin")
+	t.Setenv("PATH_BIN", "/custom/bin")
 	got := GetBinaryPath()
 	if got != "/custom/bin" {
 		t.Errorf("GetBinaryPath() = %q, want %q", got, "/custom/bin")
@@ -60,11 +62,7 @@ func TestGetBinaryPath_EnvOverride(t *testing.T) {
 
 // TestGetBinaryPath_GitRoot verifies that git root is used when available.
 func TestGetBinaryPath_GitRoot(t *testing.T) {
-	for _, key := range []string{"PATH_BIN", "PATH_BASE"} {
-		old := os.Getenv(key)
-		os.Unsetenv(key)
-		defer os.Setenv(key, old)
-	}
+	clearPathEnvs(t)
 
 	// Create a temp dir with a .git directory
 	tmp := realDir(t, t.TempDir())
@@ -91,13 +89,9 @@ func TestGetBinaryPath_GitRoot(t *testing.T) {
 
 // TestGetBinaryPath_PathBaseFallback verifies PATH_BASE is used when PATH_BIN is unset.
 func TestGetBinaryPath_PathBaseFallback(t *testing.T) {
-	for _, key := range []string{"PATH_BIN", "PATH_BASE"} {
-		old := os.Getenv(key)
-		os.Unsetenv(key)
-		defer os.Setenv(key, old)
-	}
+	clearPathEnvs(t)
+	t.Setenv("PATH_BASE", "/project/base")
 
-	os.Setenv("PATH_BASE", "/project/base")
 	got := GetBinaryPath()
 	if got != "/project/base" {
 		t.Errorf("GetBinaryPath() = %q, want %q (PATH_BASE)", got, "/project/base")
@@ -106,14 +100,9 @@ func TestGetBinaryPath_PathBaseFallback(t *testing.T) {
 
 // TestGetBinaryPath_PathBinOverridesAll verifies PATH_BIN wins over PATH_BASE and git root.
 func TestGetBinaryPath_PathBinOverridesAll(t *testing.T) {
-	for _, key := range []string{"PATH_BIN", "PATH_BASE"} {
-		old := os.Getenv(key)
-		defer os.Setenv(key, old)
-	}
-
 	// Set both — PATH_BIN should win
-	os.Setenv("PATH_BIN", "/priority/bin")
-	os.Setenv("PATH_BASE", "/base/bin")
+	t.Setenv("PATH_BIN", "/priority/bin")
+	t.Setenv("PATH_BASE", "/base/bin")
 
 	// Even inside a git repo
 	tmp := realDir(t, t.TempDir())
@@ -138,11 +127,7 @@ func TestGetBinaryPath_PathBinOverridesAll(t *testing.T) {
 
 // TestGetDefaultConfigPath_FallbackCWD verifies config path uses CWD fallback.
 func TestGetDefaultConfigPath_FallbackCWD(t *testing.T) {
-	for _, key := range []string{"PATH_BIN", "PATH_BASE"} {
-		old := os.Getenv(key)
-		os.Unsetenv(key)
-		defer os.Setenv(key, old)
-	}
+	clearPathEnvs(t)
 
 	tmp := realDir(t, t.TempDir())
 	origDir, err := os.Getwd()
