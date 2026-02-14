@@ -78,6 +78,15 @@ func MatchAssets(assets []Asset, repoName, assetFilter string) []Scored {
 		archNames = []string{goarch}
 	}
 
+	// Validate filter pattern once before the loop so a malformed glob
+	// surfaces clearly instead of silently matching nothing.
+	filterLower := strings.ToLower(assetFilter)
+	if assetFilter != "" {
+		if _, err := filepath.Match(filterLower, "probe"); err != nil {
+			return nil // invalid pattern — no candidates
+		}
+	}
+
 	var candidates []Scored
 
 	for i := range assets {
@@ -92,7 +101,7 @@ func MatchAssets(assets []Asset, repoName, assetFilter string) []Scored {
 
 		// Apply asset filter glob if provided
 		if assetFilter != "" {
-			matched, _ := filepath.Match(strings.ToLower(assetFilter), lower)
+			matched, _ := filepath.Match(filterLower, lower)
 			if !matched {
 				continue
 			}

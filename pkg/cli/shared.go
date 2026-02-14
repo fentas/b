@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/fatih/color"
 	"github.com/fentas/b/pkg/binary"
@@ -288,5 +289,16 @@ func defaultAssetSelector(bin *binary.Binary, quiet bool, io *streams.IO) binary
 			return choices[0].Asset, nil
 		}
 		return choices[idx-1].Asset, nil
+	}
+}
+
+// guardedAssetSelector wraps defaultAssetSelector with a mutex so that
+// concurrent goroutines never interleave interactive stdin prompts.
+func guardedAssetSelector(mu *sync.Mutex, bin *binary.Binary, quiet bool, io *streams.IO) binary.SelectAssetFunc {
+	inner := defaultAssetSelector(bin, quiet, io)
+	return func(candidates []provider.Scored) (*provider.Asset, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return inner(candidates)
 	}
 }

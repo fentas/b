@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/fentas/b/pkg/binary"
@@ -1593,6 +1594,84 @@ func TestLoadConfig_WithExplicitPath(t *testing.T) {
 	if shared.loadedConfigPath != configPath {
 		t.Errorf("loadedConfigPath = %q, want %q", shared.loadedConfigPath, configPath)
 	}
+}
+
+// --- guardedAssetSelector tests ---
+
+func TestGuardedAssetSelector_SerializesAccess(t *testing.T) {
+	origIsTTY := isTTYFunc
+	defer func() { isTTYFunc = origIsTTY }()
+	isTTYFunc = func() bool { return false } // non-interactive
+
+	var mu sync.Mutex
+	var errBuf bytes.Buffer
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &errBuf}
+	bin := &binary.Binary{Name: "tool"}
+
+	selector := guardedAssetSelector(&mu, bin, true, io)
+	candidates := []provider.Scored{
+		{Asset: &provider.Asset{Name: "tool-a", Size: 1000}, Score: 10},
+		{Asset: &provider.Asset{Name: "tool-b", Size: 2000}, Score: 10},
+	}
+
+	// Run multiple selectors concurrently to verify no race
+	var wg sync.WaitGroup
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			asset, err := selector(candidates)
+			if err != nil {
+				t.Errorf("selector error: %v", err)
+			}
+			if asset.Name != "tool-a" {
+				t.Errorf("picked %q, want first candidate", asset.Name)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestGuardedAssetSelector_SharedMutex(t *testing.T) {
+	origIsTTY := isTTYFunc
+	defer func() { isTTYFunc = origIsTTY }()
+	isTTYFunc = func() bool { return false }
+
+	var mu sync.Mutex
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+
+	binA := &binary.Binary{Name: "toolA"}
+	binB := &binary.Binary{Name: "toolB"}
+	selectorA := guardedAssetSelector(&mu, binA, true, io)
+	selectorB := guardedAssetSelector(&mu, binB, true, io)
+
+	candidatesA := []provider.Scored{
+		{Asset: &provider.Asset{Name: "toolA-1", Size: 1000}, Score: 10},
+		{Asset: &provider.Asset{Name: "toolA-2", Size: 2000}, Score: 10},
+	}
+	candidatesB := []provider.Scored{
+		{Asset: &provider.Asset{Name: "toolB-1", Size: 1000}, Score: 10},
+		{Asset: &provider.Asset{Name: "toolB-2", Size: 2000}, Score: 10},
+	}
+
+	// Run both selectors concurrently with shared mutex
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		a, _ := selectorA(candidatesA)
+		if a.Name != "toolA-1" {
+			t.Errorf("selectorA picked %q", a.Name)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		b, _ := selectorB(candidatesB)
+		if b.Name != "toolB-1" {
+			t.Errorf("selectorB picked %q", b.Name)
+		}
+	}()
+	wg.Wait()
 }
 
 func TestLoadConfig_MissingPath(t *testing.T) {

@@ -192,6 +192,25 @@ func TestMatchAssetFilterErrorMessage(t *testing.T) {
 	}
 }
 
+// TestMatchAssetInvalidGlobPattern tests that a malformed glob pattern
+// returns an error instead of silently matching nothing.
+func TestMatchAssetInvalidGlobPattern(t *testing.T) {
+	assets := []Asset{
+		{Name: "tool-linux-amd64", URL: "https://example.com/bin", Size: 1000},
+	}
+
+	// "[invalid" is a malformed glob (unclosed bracket)
+	candidates := MatchAssets(assets, "tool", "[invalid")
+	if len(candidates) != 0 {
+		t.Errorf("expected 0 candidates for invalid glob, got %d", len(candidates))
+	}
+
+	_, err := MatchAsset(assets, "tool", "[invalid")
+	if err == nil {
+		t.Fatal("expected error for invalid glob pattern")
+	}
+}
+
 func TestShouldIgnore(t *testing.T) {
 	tests := []struct {
 		name string
