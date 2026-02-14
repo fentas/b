@@ -24,7 +24,7 @@ func GetBinaryPath() string {
 		return p
 	}
 	if gitRoot, err := GetGitRootDirectory(); err == nil {
-		return gitRoot + "/.bin"
+		return filepath.Join(gitRoot, ".bin")
 	}
 	// Fallback: use CWD/.bin so `b install` works outside a git repo.
 	if cwd, err := os.Getwd(); err == nil {

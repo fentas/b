@@ -83,7 +83,7 @@ func TestGetBinaryPath_GitRoot(t *testing.T) {
 	}
 
 	got := GetBinaryPath()
-	want := tmp + "/.bin"
+	want := filepath.Join(tmp, ".bin")
 	if got != want {
 		t.Errorf("GetBinaryPath() = %q, want %q (git root)", got, want)
 	}
