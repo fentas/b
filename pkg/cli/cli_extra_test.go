@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -1614,22 +1615,30 @@ func TestGuardedAssetSelector_SerializesAccess(t *testing.T) {
 		{Asset: &provider.Asset{Name: "tool-b", Size: 2000}, Score: 10},
 	}
 
-	// Run multiple selectors concurrently to verify no race
+	// Run multiple selectors concurrently to verify no race.
+	// Collect errors via channel to avoid t.Errorf inside goroutines.
+	const n = 5
+	errs := make(chan string, n)
 	var wg sync.WaitGroup
-	for i := 0; i < 5; i++ {
+	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			asset, err := selector(candidates)
 			if err != nil {
-				t.Errorf("selector error: %v", err)
+				errs <- fmt.Sprintf("selector error: %v", err)
+				return
 			}
 			if asset.Name != "tool-a" {
-				t.Errorf("picked %q, want first candidate", asset.Name)
+				errs <- fmt.Sprintf("picked %q, want first candidate", asset.Name)
 			}
 		}()
 	}
 	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Error(e)
+	}
 }
 
 func TestGuardedAssetSelector_SharedMutex(t *testing.T) {
@@ -1654,24 +1663,30 @@ func TestGuardedAssetSelector_SharedMutex(t *testing.T) {
 		{Asset: &provider.Asset{Name: "toolB-2", Size: 2000}, Score: 10},
 	}
 
-	// Run both selectors concurrently with shared mutex
+	// Run both selectors concurrently with shared mutex.
+	// Collect errors via channel to avoid t.Errorf inside goroutines.
+	errs := make(chan string, 2)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		a, _ := selectorA(candidatesA)
 		if a.Name != "toolA-1" {
-			t.Errorf("selectorA picked %q", a.Name)
+			errs <- fmt.Sprintf("selectorA picked %q", a.Name)
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		b, _ := selectorB(candidatesB)
 		if b.Name != "toolB-1" {
-			t.Errorf("selectorB picked %q", b.Name)
+			errs <- fmt.Sprintf("selectorB picked %q", b.Name)
 		}
 	}()
 	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Error(e)
+	}
 }
 
 func TestLoadConfig_MissingPath(t *testing.T) {
