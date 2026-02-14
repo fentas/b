@@ -2,13 +2,16 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/envmatch"
 	"github.com/fentas/b/pkg/lock"
+	"github.com/fentas/b/pkg/provider"
 	"github.com/fentas/b/pkg/state"
 	"github.com/fentas/goodies/streams"
 )
@@ -46,6 +49,61 @@ func TestApplyQuietMode(t *testing.T) {
 	_, _ = shared.IO.Out.Write([]byte("should be discarded"))
 	if buf.Len() > 0 {
 		t.Error("quiet mode should discard output")
+	}
+}
+
+func TestDefaultAssetSelector_QuietMode(t *testing.T) {
+	origIsTTY := isTTYFunc
+	defer func() { isTTYFunc = origIsTTY }()
+	isTTYFunc = func() bool { return true } // would be interactive...
+
+	var errBuf bytes.Buffer
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &errBuf}
+	bin := &binary.Binary{Name: "argsh"}
+
+	// But quiet=true should suppress interactive prompt
+	selector := defaultAssetSelector(bin, true, io)
+	candidates := []provider.Scored{
+		{Asset: &provider.Asset{Name: "argsh-linux-amd64.so", Size: 481000}, Score: 13},
+		{Asset: &provider.Asset{Name: "argsh-so-linux-amd64", Size: 667000}, Score: 13},
+	}
+	asset, err := selector(candidates)
+	if err != nil {
+		t.Fatalf("selector error: %v", err)
+	}
+	// Should pick first without prompting
+	if asset.Name != "argsh-linux-amd64.so" {
+		t.Errorf("picked %q, want first candidate", asset.Name)
+	}
+	// Should emit warning
+	if !bytes.Contains(errBuf.Bytes(), []byte("Warning")) {
+		t.Errorf("expected warning, got: %s", errBuf.String())
+	}
+	if !bytes.Contains(errBuf.Bytes(), []byte("--asset")) {
+		t.Errorf("expected --asset hint, got: %s", errBuf.String())
+	}
+}
+
+func TestDefaultAssetSelector_NonTTY(t *testing.T) {
+	origIsTTY := isTTYFunc
+	defer func() { isTTYFunc = origIsTTY }()
+	isTTYFunc = func() bool { return false }
+
+	var errBuf bytes.Buffer
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &errBuf}
+	bin := &binary.Binary{Name: "tool"}
+
+	selector := defaultAssetSelector(bin, false, io)
+	candidates := []provider.Scored{
+		{Asset: &provider.Asset{Name: "tool-a", Size: 1000}, Score: 10},
+		{Asset: &provider.Asset{Name: "tool-b", Size: 2000}, Score: 10},
+	}
+	asset, err := selector(candidates)
+	if err != nil {
+		t.Fatalf("selector error: %v", err)
+	}
+	if asset.Name != "tool-a" {
+		t.Errorf("picked %q, want first", asset.Name)
 	}
 }
 
@@ -972,6 +1030,54 @@ func TestGetBinariesFromConfig_UnknownProviderRef(t *testing.T) {
 	}
 }
 
+func TestGetBinariesFromConfig_ProviderRefWithAssetFilter(t *testing.T) {
+	var errBuf bytes.Buffer
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &errBuf}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{
+		Binaries: state.BinaryList{
+			&binary.LocalBinary{
+				Name:          "github.com/arg-sh/argsh",
+				Asset:         "argsh-so-*",
+				IsProviderRef: true,
+			},
+		},
+	}
+
+	result := shared.GetBinariesFromConfig()
+	if len(result) != 1 {
+		t.Fatalf("got %d binaries, want 1", len(result))
+	}
+	if result[0].AssetFilter != "argsh-so-*" {
+		t.Errorf("AssetFilter = %q, want %q", result[0].AssetFilter, "argsh-so-*")
+	}
+	if result[0].Name != "argsh" {
+		t.Errorf("Name = %q, want %q", result[0].Name, "argsh")
+	}
+}
+
+func TestGetBinary_ProviderRefWithAssetFromConfig(t *testing.T) {
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{
+		Binaries: state.BinaryList{
+			&binary.LocalBinary{
+				Name:          "github.com/arg-sh/argsh",
+				Asset:         "argsh-so-*",
+				IsProviderRef: true,
+			},
+		},
+	}
+
+	b, ok := shared.GetBinary("github.com/arg-sh/argsh")
+	if !ok || b == nil {
+		t.Fatal("expected provider ref to match")
+	}
+	if b.AssetFilter != "argsh-so-*" {
+		t.Errorf("AssetFilter = %q, want %q", b.AssetFilter, "argsh-so-*")
+	}
+}
+
 func TestGetBinariesFromConfig_WithConfigOverrides(t *testing.T) {
 	binaries := []*binary.Binary{
 		{Name: "jq", Version: "1.6"},
@@ -1488,6 +1594,98 @@ func TestLoadConfig_WithExplicitPath(t *testing.T) {
 	}
 	if shared.loadedConfigPath != configPath {
 		t.Errorf("loadedConfigPath = %q, want %q", shared.loadedConfigPath, configPath)
+	}
+}
+
+// --- guardedAssetSelector tests ---
+
+func TestGuardedAssetSelector_SerializesAccess(t *testing.T) {
+	origIsTTY := isTTYFunc
+	defer func() { isTTYFunc = origIsTTY }()
+	isTTYFunc = func() bool { return false } // non-interactive
+
+	var mu sync.Mutex
+	var errBuf bytes.Buffer
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &errBuf}
+	bin := &binary.Binary{Name: "tool"}
+
+	selector := guardedAssetSelector(&mu, bin, true, io)
+	candidates := []provider.Scored{
+		{Asset: &provider.Asset{Name: "tool-a", Size: 1000}, Score: 10},
+		{Asset: &provider.Asset{Name: "tool-b", Size: 2000}, Score: 10},
+	}
+
+	// Run multiple selectors concurrently to verify no race.
+	// Collect errors via channel to avoid t.Errorf inside goroutines.
+	const n = 5
+	errs := make(chan string, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			asset, err := selector(candidates)
+			if err != nil {
+				errs <- fmt.Sprintf("selector error: %v", err)
+				return
+			}
+			if asset.Name != "tool-a" {
+				errs <- fmt.Sprintf("picked %q, want first candidate", asset.Name)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Error(e)
+	}
+}
+
+func TestGuardedAssetSelector_SharedMutex(t *testing.T) {
+	origIsTTY := isTTYFunc
+	defer func() { isTTYFunc = origIsTTY }()
+	isTTYFunc = func() bool { return false }
+
+	var mu sync.Mutex
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+
+	binA := &binary.Binary{Name: "toolA"}
+	binB := &binary.Binary{Name: "toolB"}
+	selectorA := guardedAssetSelector(&mu, binA, true, io)
+	selectorB := guardedAssetSelector(&mu, binB, true, io)
+
+	candidatesA := []provider.Scored{
+		{Asset: &provider.Asset{Name: "toolA-1", Size: 1000}, Score: 10},
+		{Asset: &provider.Asset{Name: "toolA-2", Size: 2000}, Score: 10},
+	}
+	candidatesB := []provider.Scored{
+		{Asset: &provider.Asset{Name: "toolB-1", Size: 1000}, Score: 10},
+		{Asset: &provider.Asset{Name: "toolB-2", Size: 2000}, Score: 10},
+	}
+
+	// Run both selectors concurrently with shared mutex.
+	// Collect errors via channel to avoid t.Errorf inside goroutines.
+	errs := make(chan string, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		a, _ := selectorA(candidatesA)
+		if a.Name != "toolA-1" {
+			errs <- fmt.Sprintf("selectorA picked %q", a.Name)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		b, _ := selectorB(candidatesB)
+		if b.Name != "toolB-1" {
+			errs <- fmt.Sprintf("selectorB picked %q", b.Name)
+		}
+	}()
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Error(e)
 	}
 }
 

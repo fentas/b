@@ -217,6 +217,11 @@ func (list *BinaryList) MarshalYAML() (interface{}, error) {
 				config["file"] = b.File
 			}
 
+			// Add asset filter if specified
+			if b.Asset != "" {
+				config["asset"] = b.Asset
+			}
+
 			// If we have any configuration, use it; otherwise use empty struct
 			if len(config) > 0 {
 				result[b.Name] = config
