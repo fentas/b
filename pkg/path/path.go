@@ -14,19 +14,23 @@ func GetDefaultConfigPath() string {
 	return filepath.Join(path, "b.yaml")
 }
 
-// GetBinaryPath returns the binary path without importing pkg/binary to avoid import cycle
+// GetBinaryPath returns the binary path without importing pkg/binary to avoid import cycle.
+// Priority: PATH_BIN > PATH_BASE > <git-root>/.bin > <cwd>/.bin
 func GetBinaryPath() string {
-	var path string
-
-	if os.Getenv("PATH_BIN") != "" {
-		path = os.Getenv("PATH_BIN")
-	} else if os.Getenv("PATH_BASE") != "" {
-		path = os.Getenv("PATH_BASE")
-	} else if gitRoot, err := GetGitRootDirectory(); err == nil {
-		path = gitRoot + "/.bin"
+	if p := os.Getenv("PATH_BIN"); p != "" {
+		return p
 	}
-
-	return path
+	if p := os.Getenv("PATH_BASE"); p != "" {
+		return p
+	}
+	if gitRoot, err := GetGitRootDirectory(); err == nil {
+		return filepath.Join(gitRoot, ".bin")
+	}
+	// Fallback: use CWD/.bin so `b install` works outside a git repo.
+	if cwd, err := os.Getwd(); err == nil {
+		return filepath.Join(cwd, ".bin")
+	}
+	return ""
 }
 
 // FindConfigFile searches for b.yaml file in current directory and parent directories
