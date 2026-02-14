@@ -4,7 +4,7 @@ import "errors"
 
 var (
 	// ErrNoBinaryPath indicates that no suitable binary installation path was found
-	ErrNoBinaryPath = errors.New("could not find a suitable path to install binaries")
+	ErrNoBinaryPath = errors.New("could not find a suitable path to install binaries\n  Hint: set PATH_BIN or run inside a git repo")
 
 	// ErrUnknownBinary indicates that the specified binary is not available
 	ErrUnknownBinary = errors.New("unknown binary")
