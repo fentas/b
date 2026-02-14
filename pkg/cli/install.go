@@ -38,6 +38,7 @@ type InstallOptions struct {
 	Add               bool             // Add to b.yaml during install
 	Fix               bool             // Pin version in b.yaml
 	Alias             string           // Alias for the binary
+	Asset             string           // Asset filter glob pattern
 	specifiedBinaries []*binary.Binary // Binaries specified on command line
 	envInstalls       []envInstall     // SCP-style env installs
 	configEnvRefs     []string         // env refs to sync from config
@@ -64,6 +65,9 @@ func NewInstallCmd(shared *SharedOptions) *cobra.Command {
 			# Install from GitHub release
 			b install github.com/derailed/k9s
 
+			# Install a specific release asset by glob pattern
+			b install --asset "argsh-so-*" arg-sh/argsh
+
 			# Install env files (SCP-style)
 			b install github.com/org/infra:/manifests/hetzner/** /hetzner
 
@@ -87,6 +91,7 @@ func NewInstallCmd(shared *SharedOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&o.Add, "add", false, "Add binary to b.yaml during install")
 	cmd.Flags().BoolVar(&o.Fix, "fix", false, "Pin the specified version in b.yaml")
 	cmd.Flags().StringVar(&o.Alias, "alias", "", "Alias for the binary")
+	cmd.Flags().StringVar(&o.Asset, "asset", "", "Glob pattern to filter release assets (e.g. \"argsh-so-*\")")
 	return cmd
 }
 
@@ -140,6 +145,9 @@ func (o *InstallOptions) Complete(args []string) error {
 		}
 
 		b.Alias = o.Alias
+		if o.Asset != "" {
+			b.AssetFilter = o.Asset
+		}
 		o.specifiedBinaries = append(o.specifiedBinaries, b)
 	}
 
@@ -201,6 +209,13 @@ func (o *InstallOptions) Run() error {
 
 // installBinaries installs the specified binaries with progress tracking
 func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
+	// Wire interactive asset selector for auto-detected binaries
+	for _, b := range binaries {
+		if b.AutoDetect && b.SelectAsset == nil {
+			b.SelectAsset = defaultAssetSelector(b, o.Quiet, o.IO)
+		}
+	}
+
 	wg := sync.WaitGroup{}
 	pw := progress.NewWriter(progress.StyleDownload, o.IO.Out)
 	pw.Style().Visibility.Percentage = true
@@ -241,6 +256,7 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	time.Sleep(200 * time.Millisecond)
 	return nil
 }
+
 
 // addToConfig adds binaries to the configuration file
 func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
@@ -293,6 +309,9 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 			if b.Alias != "" {
 				entry.Name = b.Alias
 				entry.Alias = configName
+			}
+			if b.AssetFilter != "" {
+				entry.Asset = b.AssetFilter
 			}
 			config.Binaries = append(config.Binaries, entry)
 		}

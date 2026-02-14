@@ -2,6 +2,7 @@ package state
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v2"
@@ -323,6 +324,47 @@ github.com/derailed/k9s:
 		if b.Name == "jq" && b.IsProviderRef {
 			t.Error("expected IsProviderRef=false for jq")
 		}
+	}
+}
+
+func TestBinaryListUnmarshalYAML_WithAsset(t *testing.T) {
+	input := `
+github.com/arg-sh/argsh:
+  asset: "argsh-so-*"
+  version: "v1.0.0"
+`
+	var list BinaryList
+	if err := yaml.Unmarshal([]byte(input), &list); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("got %d binaries, want 1", len(list))
+	}
+	if list[0].Asset != "argsh-so-*" {
+		t.Errorf("asset = %q, want %q", list[0].Asset, "argsh-so-*")
+	}
+	if list[0].Version != "v1.0.0" {
+		t.Errorf("version = %q, want %q", list[0].Version, "v1.0.0")
+	}
+	if !list[0].IsProviderRef {
+		t.Error("expected IsProviderRef=true")
+	}
+}
+
+func TestBinaryListMarshalYAML_WithAsset(t *testing.T) {
+	list := BinaryList{
+		{Name: "github.com/arg-sh/argsh", Asset: "argsh-so-*", Enforced: "v1.0.0"},
+	}
+	data, err := yaml.Marshal(&list)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "asset: argsh-so-*") {
+		t.Errorf("marshal output missing asset field:\n%s", s)
+	}
+	if !strings.Contains(s, "version: v1.0.0") {
+		t.Errorf("marshal output missing version field:\n%s", s)
 	}
 }
 

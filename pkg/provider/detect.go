@@ -2,7 +2,9 @@ package provider
 
 import (
 	"fmt"
+	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -36,9 +38,33 @@ var (
 	}
 )
 
+// Scored is a scored asset candidate, exported for interactive selection.
+type Scored struct {
+	Asset *Asset
+	Score int
+}
+
 // MatchAsset scores and selects the best release asset for the current
-// OS/arch. Returns an error if no suitable asset is found.
-func MatchAsset(assets []Asset, repoName string) (*Asset, error) {
+// OS/arch. An optional assetFilter glob pattern (e.g. "argsh-so-*") narrows
+// the candidates before scoring. Returns an error if no suitable asset is found.
+func MatchAsset(assets []Asset, repoName, assetFilter string) (*Asset, error) {
+	candidates := MatchAssets(assets, repoName, assetFilter)
+
+	if len(candidates) == 0 {
+		goos := runtime.GOOS
+		goarch := runtime.GOARCH
+		if assetFilter != "" {
+			return nil, fmt.Errorf("no matching asset for %s/%s with filter %q among %d assets", goos, goarch, assetFilter, len(assets))
+		}
+		return nil, fmt.Errorf("no matching asset for %s/%s among %d assets", goos, goarch, len(assets))
+	}
+
+	return candidates[0].Asset, nil
+}
+
+// MatchAssets returns all matching assets scored and sorted (best first).
+// An optional assetFilter glob pattern narrows the candidates before scoring.
+func MatchAssets(assets []Asset, repoName, assetFilter string) []Scored {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
@@ -52,12 +78,7 @@ func MatchAsset(assets []Asset, repoName string) (*Asset, error) {
 		archNames = []string{goarch}
 	}
 
-	type scored struct {
-		asset *Asset
-		score int
-	}
-
-	var candidates []scored
+	var candidates []Scored
 
 	for i := range assets {
 		a := &assets[i]
@@ -67,6 +88,14 @@ func MatchAsset(assets []Asset, repoName string) (*Asset, error) {
 		// Skip known non-binary extensions
 		if shouldIgnore(lower) {
 			continue
+		}
+
+		// Apply asset filter glob if provided
+		if assetFilter != "" {
+			matched, _ := filepath.Match(strings.ToLower(assetFilter), lower)
+			if !matched {
+				continue
+			}
 		}
 
 		// Must match OS
@@ -111,22 +140,15 @@ func MatchAsset(assets []Asset, repoName string) (*Asset, error) {
 			score += 1
 		}
 
-		candidates = append(candidates, scored{asset: a, score: score})
+		candidates = append(candidates, Scored{Asset: a, Score: score})
 	}
 
-	if len(candidates) == 0 {
-		return nil, fmt.Errorf("no matching asset for %s/%s among %d assets", goos, goarch, len(assets))
-	}
+	// Sort by score descending
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].Score > candidates[j].Score
+	})
 
-	// Pick highest score
-	best := candidates[0]
-	for _, c := range candidates[1:] {
-		if c.score > best.score {
-			best = c
-		}
-	}
-
-	return best.asset, nil
+	return candidates
 }
 
 // DetectArchiveType returns the archive type based on filename.

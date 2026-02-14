@@ -403,6 +403,13 @@ func isTTY() bool {
 
 // updateBinaries updates the specified binaries with progress tracking
 func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
+	// Wire interactive asset selector for auto-detected binaries
+	for _, b := range binaries {
+		if b.AutoDetect && b.SelectAsset == nil {
+			b.SelectAsset = defaultAssetSelector(b, o.Quiet, o.IO)
+		}
+	}
+
 	wg := sync.WaitGroup{}
 	pw := progress.NewWriter(progress.StyleDownload, o.IO.Out)
 	pw.Style().Visibility.Percentage = true

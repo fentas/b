@@ -3,6 +3,7 @@ package binary
 import (
 	"context"
 
+	"github.com/fentas/b/pkg/provider"
 	pwrap "github.com/fentas/goodies/progress"
 	pretty "github.com/jedib0t/go-pretty/v6/progress"
 )
@@ -13,6 +14,10 @@ type IsBinary interface {
 }
 
 type Callback func(*Binary) (string, error)
+
+// SelectAssetFunc is called when multiple assets tie during auto-detection.
+// It receives the scored candidates and should return the chosen asset.
+type SelectAssetFunc func([]provider.Scored) (*provider.Asset, error)
 
 type Binary struct {
 	Context context.Context `json:"-"`
@@ -43,6 +48,8 @@ type Binary struct {
 	AutoDetect   bool   `json:"-"` // use provider system instead of preset
 	ProviderRef  string `json:"-"` // e.g. "github.com/derailed/k9s"
 	ProviderType string `json:"-"` // e.g. "github", "gitlab", "go", "docker"
+	AssetFilter  string          `json:"-"` // glob pattern to filter release assets (e.g. "argsh-so-*")
+	SelectAsset  SelectAssetFunc `json:"-"` // interactive asset selector for ambiguous matches
 }
 
 type LocalBinary struct {
@@ -54,6 +61,8 @@ type LocalBinary struct {
 	// alias is the name of the binary that this binary is a reference to
 	// yaml config sets this as reference
 	Alias string `json:"alias,omitempty"`
+	// Asset is a glob pattern to filter release assets (e.g. "argsh-so-*")
+	Asset string `json:"asset,omitempty"`
 	// IsProviderRef is true when Name is a provider ref (e.g. github.com/derailed/k9s)
 	IsProviderRef bool `json:"-" yaml:"-"`
 }

@@ -348,7 +348,7 @@ func TestMatchAsset_PrefersTarGz(t *testing.T) {
 		{Name: testAssetName("tool", ".zip"), URL: "https://example.com/zip", Size: 1000},
 		{Name: testAssetName("tool", ".tar.gz"), URL: "https://example.com/tgz", Size: 1000},
 	}
-	a, err := MatchAsset(assets, "tool")
+	a, err := MatchAsset(assets, "tool", "")
 	if err != nil {
 		t.Fatalf("MatchAsset() error: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestMatchAsset_PrefersArchive(t *testing.T) {
 		{Name: testAssetName("tool", ""), URL: "https://example.com/bin", Size: 1000},
 		{Name: testAssetName("tool", ".tar.gz"), URL: "https://example.com/tgz", Size: 1000},
 	}
-	a, err := MatchAsset(assets, "tool")
+	a, err := MatchAsset(assets, "tool", "")
 	if err != nil {
 		t.Fatalf("MatchAsset() error: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestMatchAsset_PrefersArchive(t *testing.T) {
 }
 
 func TestMatchAsset_EmptyAssets(t *testing.T) {
-	_, err := MatchAsset(nil, "tool")
+	_, err := MatchAsset(nil, "tool", "")
 	if err == nil {
 		t.Error("expected error for empty assets")
 	}

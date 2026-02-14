@@ -188,12 +188,26 @@ func (b *Binary) downloadViaProvider() error {
 	}
 
 	repoName := provider.BinaryName(b.ProviderRef)
-	asset, err := provider.MatchAsset(release.Assets, repoName)
-	if err != nil {
-		return fmt.Errorf("%s@%s: %w", b.ProviderRef, b.Version, err)
+	candidates := provider.MatchAssets(release.Assets, repoName, b.AssetFilter)
+
+	if len(candidates) == 0 {
+		if b.AssetFilter != "" {
+			return fmt.Errorf("%s@%s: no matching asset for filter %q among %d assets", b.ProviderRef, b.Version, b.AssetFilter, len(release.Assets))
+		}
+		return fmt.Errorf("%s@%s: no matching asset among %d assets", b.ProviderRef, b.Version, len(release.Assets))
 	}
 
-	return b.downloadAsset(asset)
+	// If there are multiple candidates with the same top score and no filter,
+	// let the caller handle interactive selection via SelectAsset callback.
+	if len(candidates) > 1 && candidates[0].Score == candidates[1].Score && b.SelectAsset != nil {
+		asset, err := b.SelectAsset(candidates)
+		if err != nil {
+			return err
+		}
+		return b.downloadAsset(asset)
+	}
+
+	return b.downloadAsset(candidates[0].Asset)
 }
 
 // downloadAsset downloads a release asset and extracts the binary if archived.

@@ -3,8 +3,11 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/fatih/color"
 	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/b/pkg/provider"
@@ -155,6 +158,9 @@ func (o *SharedOptions) GetBinary(name string) (*binary.Binary, bool) {
 			if configEntry.File != "" {
 				b.File = configEntry.File
 			}
+			if configEntry.Asset != "" {
+				b.AssetFilter = configEntry.Asset
+			}
 		}
 		return b, true
 	}
@@ -189,6 +195,9 @@ func (o *SharedOptions) GetBinariesFromConfig() []*binary.Binary {
 			}
 			if lb.Alias != "" {
 				b.Alias = lb.Alias
+			}
+			if lb.Asset != "" {
+				b.AssetFilter = lb.Asset
 			}
 			result = append(result, b)
 		} else if b, ok := o.resolveBinary(lb); ok {
@@ -233,4 +242,51 @@ func (o *SharedOptions) getConfigPath() (string, error) {
 		return o.loadedConfigPath, nil
 	}
 	return path.FindConfigFile()
+}
+
+// defaultAssetSelector returns a SelectAssetFunc that either prompts interactively
+// (TTY, non-quiet) or warns and picks the best match (quiet/non-TTY).
+func defaultAssetSelector(bin *binary.Binary, quiet bool, io *streams.IO) binary.SelectAssetFunc {
+	return func(candidates []provider.Scored) (*provider.Asset, error) {
+		if quiet || !isTTYFunc() {
+			// Non-interactive: warn and pick first (highest score)
+			names := make([]string, 0, len(candidates))
+			for _, c := range candidates {
+				if c.Score == candidates[0].Score {
+					names = append(names, c.Asset.Name)
+				}
+			}
+			fmt.Fprintf(io.ErrOut, "Warning: %s: %d assets match with same score: %s\n",
+				bin.Name, len(names), strings.Join(names, ", "))
+			fmt.Fprintf(io.ErrOut, "  Hint: use --asset <glob> to select a specific asset\n")
+			return candidates[0].Asset, nil
+		}
+
+		// Interactive: prompt the user to pick
+		fmt.Fprintf(io.ErrOut, "\nMultiple assets match for %s. Select one:\n", color.New(color.Bold).Sprint(bin.Name))
+		topScore := candidates[0].Score
+		var choices []provider.Scored
+		for _, c := range candidates {
+			if c.Score == topScore {
+				choices = append(choices, c)
+			}
+		}
+		for i, c := range choices {
+			size := formatSize(c.Asset.Size)
+			fmt.Fprintf(io.ErrOut, "  [%d] %s  (%s)\n", i+1, c.Asset.Name, size)
+		}
+		fmt.Fprintf(io.ErrOut, "Choice [1-%d]: ", len(choices))
+
+		var input string
+		if _, err := fmt.Fscanln(os.Stdin, &input); err != nil {
+			return candidates[0].Asset, nil // default to first on EOF
+		}
+		input = strings.TrimSpace(input)
+		var idx int
+		if _, err := fmt.Sscanf(input, "%d", &idx); err != nil || idx < 1 || idx > len(choices) {
+			fmt.Fprintf(io.ErrOut, "Invalid choice, using %s\n", choices[0].Asset.Name)
+			return choices[0].Asset, nil
+		}
+		return choices[idx-1].Asset, nil
+	}
 }
