@@ -120,9 +120,15 @@ func TestGetBinaryPath_PathBinOverridesAll(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(tmp, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	origDir, _ := os.Getwd()
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer os.Chdir(origDir)
-	os.Chdir(tmp)
+
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
 
 	got := GetBinaryPath()
 	if got != "/priority/bin" {
@@ -139,9 +145,15 @@ func TestGetDefaultConfigPath_FallbackCWD(t *testing.T) {
 	}
 
 	tmp := realDir(t, t.TempDir())
-	origDir, _ := os.Getwd()
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer os.Chdir(origDir)
-	os.Chdir(tmp)
+
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatal(err)
+	}
 
 	got := GetDefaultConfigPath()
 	want := filepath.Join(tmp, ".bin", "b.yaml")
