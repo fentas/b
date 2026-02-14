@@ -110,12 +110,40 @@ b install --alias envsubst --add renvsubst
 b install --alias myenvsubst renvsubst@v0.10.0
 ```
 
+### Select a specific release asset
+
+When a GitHub release contains multiple binaries (e.g., `argsh`, `argsh-so`, `minifier`, `shdoc`), `b` auto-detects the best match for your OS and architecture. If multiple assets match with the same score, `b` will prompt you interactively to choose one.
+
+Use the `--asset` flag with a glob pattern to select a specific asset:
+
+```bash
+# Install the standalone argsh-so binary instead of the default
+b install --asset "argsh-so-*" arg-sh/argsh
+
+# Install the .so shared object
+b install --asset "argsh-linux-*.so" arg-sh/argsh
+
+# Install shdoc from the same release
+b install --asset "shdoc-*" arg-sh/argsh
+```
+
+You can persist the asset filter in `b.yaml`:
+
+```yaml
+binaries:
+  arg-sh/argsh:
+    asset: "argsh-so-*"
+```
+
+In quiet mode (`-q`) or non-interactive environments (CI), `b` will automatically pick the first match and emit a warning with a hint to use `--asset`.
+
 ## Flags
 
 | Flag         | Description                               |
 |--------------|-------------------------------------------|
 | `--add`      | Add binary to b.yaml during install       |
 | `--alias`    | Install binary under a different name     |
+| `--asset`    | Glob pattern to filter release assets (e.g. `"argsh-so-*"`) |
 | `--fix`      | Pin the specified version in b.yaml       |
 | `-h`, `--help` | help for install                          |
 
