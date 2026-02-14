@@ -197,8 +197,8 @@ func (b *Binary) downloadViaProvider() error {
 		return fmt.Errorf("%s@%s: no matching asset among %d assets", b.ProviderRef, b.Version, len(release.Assets))
 	}
 
-	// If there are multiple candidates with the same top score and no filter,
-	// let the caller handle interactive selection via SelectAsset callback.
+	// If there are multiple candidates with the same top score, let the caller
+	// handle interactive selection via SelectAsset callback.
 	if len(candidates) > 1 && candidates[0].Score == candidates[1].Score && b.SelectAsset != nil {
 		asset, err := b.SelectAsset(candidates)
 		if err != nil {
