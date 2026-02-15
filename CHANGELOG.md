@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.8.0](https://github.com/fentas/b/compare/v4.7.1...v4.8.0) (2026-02-15)
+
+
+### Features
+
+* add git:// provider for sourcing binaries from git repos ([#110](https://github.com/fentas/b/issues/110)) ([3d20c37](https://github.com/fentas/b/commit/3d20c37c5c0dcbca52f0d40084198abc91dfd88a))
+
 ## [4.7.1](https://github.com/fentas/b/compare/v4.7.0...v4.7.1) (2026-02-14)
 
 
