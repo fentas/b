@@ -22,7 +22,7 @@
 Features:
 
 - **30+ pre-packaged binaries** (kubectl, k9s, jq, helm, etc.) with auto-detection
-- **Install from GitHub, GitLab, Gitea/Forgejo, Go modules, and Docker images** ([docs](https://binary.help/b/subcommands/install))
+- **Install from GitHub, GitLab, Gitea/Forgejo, Go modules, Docker images, and git repos** ([docs](https://binary.help/b/subcommands/install))
 - **Sync env files** from git repos with glob matching and three-way merge
 - **Lockfile** (`b.lock`) for reproducible installations with SHA256 verification
 - **direnv integration** for per-project binary management
@@ -49,6 +49,8 @@ b install gitlab.com/org/tool
 b install codeberg.org/user/app@v1.0
 b install go://golang.org/x/tools/cmd/goimports
 b install docker://alpine/helm
+b install "git:///home/user/myrepo:.scripts/tool"
+b install "git://github.com/org/repo:bin/app@v1.0"
 
 # Install and add to b.yaml
 b install --add jq@1.7
@@ -114,9 +116,13 @@ binaries:
     alias: renvsubst      # alias to renvsubst
   kubectl:
     file: ../kc           # custom path (relative to config)
-  # Install from any provider by ref (GitHub, GitLab, Gitea, go://, docker://)
+  # Install from any provider by ref (GitHub, GitLab, Gitea, go://, docker://, git://)
   github.com/sharkdp/bat:
     version: v0.24.0
+  # Install from a git repo (local or remote)
+  git:///home/user/myproject:.scripts/tool:
+  git://github.com/org/repo:bin/app:
+    version: v1.0
 
 envs:
   # Sync files from upstream git repos
