@@ -78,6 +78,21 @@ func IsProviderRef(s string) bool {
 //	"go://github.com/jrhouston/tfk8s" → "tfk8s",
 //	"docker://hashicorp/terraform" → "terraform"
 func BinaryName(ref string) string {
+	// git:// refs use the filepath part (after :) as the binary name
+	if strings.HasPrefix(ref, "git://") {
+		r := strings.TrimPrefix(ref, "git://")
+		// Strip version
+		if i := strings.LastIndex(r, "@"); i > 0 {
+			r = r[:i]
+		}
+		// The part after : is the filepath in the repo
+		if i := strings.Index(r, ":"); i >= 0 {
+			filePart := r[i+1:]
+			parts := strings.Split(filePart, "/")
+			return parts[len(parts)-1]
+		}
+	}
+
 	// Strip protocol prefix
 	r := ref
 	if i := strings.Index(r, "://"); i >= 0 {

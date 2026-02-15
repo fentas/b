@@ -172,6 +172,13 @@ func (b *Binary) downloadViaProvider() error {
 		}
 		b.File = path
 		return nil
+	case *provider.Git:
+		path, err := pt.Install(b.ProviderRef, b.Version, destDir)
+		if err != nil {
+			return err
+		}
+		b.File = path
+		return nil
 	}
 
 	// Release-based providers (GitHub, GitLab, Gitea)
