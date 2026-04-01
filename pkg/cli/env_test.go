@@ -211,6 +211,49 @@ func TestEnvStatus_LocalDrift(t *testing.T) {
 	}
 }
 
+func TestEnvStatus_PathTraversalInLock(t *testing.T) {
+	saveHooks(t)
+	resolveRefFunc = func(url, version string) (string, error) {
+		return "samecommit", nil
+	}
+
+	tmpDir := t.TempDir()
+
+	// Lock entry with a path that escapes project root
+	lk := &lock.Lock{
+		Envs: []lock.EnvEntry{
+			{
+				Ref:    "github.com/org/evil",
+				Commit: "samecommit",
+				Files: []lock.LockFile{
+					{Path: "escape.yaml", Dest: "../../../etc/passwd", SHA256: "fakehash"},
+				},
+			},
+		},
+	}
+	lock.WriteLock(tmpDir, lk, "v1.0")
+
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{
+		Envs: state.EnvList{
+			{Key: "github.com/org/evil"},
+		},
+	}
+	shared.loadedConfigPath = filepath.Join(tmpDir, "b.yaml")
+
+	o := &EnvStatusOptions{SharedOptions: shared}
+	if err := o.Run(); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+
+	// Should count the escaping path as drift, not try to read /etc/passwd
+	if !strings.Contains(out.String(), "modified locally") {
+		t.Errorf("expected drift for path traversal entry, got: %q", out.String())
+	}
+}
+
 // --- Feature 4: env remove ---
 
 func TestEnvRemove_RemovesFromLock(t *testing.T) {

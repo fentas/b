@@ -79,6 +79,26 @@ func TestFileModeToString(t *testing.T) {
 	}
 }
 
+func TestWriteFile_NewFileRespectsUmask(t *testing.T) {
+	tmpDir := t.TempDir()
+	destPath := filepath.Join(tmpDir, "newfile.txt")
+
+	// New file: writeFile should not force chmod, letting umask apply
+	if err := writeFile(destPath, []byte("content"), 0644); err != nil {
+		t.Fatalf("writeFile() error = %v", err)
+	}
+
+	// File should exist and be readable
+	info, err := os.Stat(destPath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	// Should not have execute bit (we asked for 0644)
+	if info.Mode().Perm()&0111 != 0 {
+		t.Errorf("new file should not be executable, got %o", info.Mode().Perm())
+	}
+}
+
 func TestWriteFile_ChmodExistingFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	destPath := filepath.Join(tmpDir, "script.sh")
