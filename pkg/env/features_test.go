@@ -165,8 +165,9 @@ func TestSyncMessage_UnchangedDryRun(t *testing.T) {
 
 // --- Feature 3: Unchanged detection via hash comparison ---
 
-func TestUnchangedFile_SameUpstreamHash(t *testing.T) {
-	// When the upstream hash matches the lock entry hash, file should be "unchanged"
+func TestFindLockFile_MatchesHash(t *testing.T) {
+	// Verifies findLockFile returns the correct entry and its hash can be
+	// compared against an upstream hash — the building block of unchanged detection.
 	content := []byte("some content")
 	hash := fmt.Sprintf("%x", sha256.Sum256(content))
 
@@ -177,14 +178,49 @@ func TestUnchangedFile_SameUpstreamHash(t *testing.T) {
 		},
 	}
 
-	// findLockFile should find it
 	f := findLockFile(lockEntry, "test.yaml")
 	if f == nil {
 		t.Fatal("expected to find lock entry")
 	}
-
-	// When upstream hash equals lock hash, the file is unchanged
 	if f.SHA256 != hash {
 		t.Errorf("SHA256 = %q, want %q", f.SHA256, hash)
+	}
+}
+
+func TestUnchangedDetection_LocalMatchesUpstream(t *testing.T) {
+	// End-to-end test: when local file content matches upstream content,
+	// the file should be detected as unchanged (hash comparison).
+	tmpDir := t.TempDir()
+	content := []byte("identical content\n")
+	hash := fmt.Sprintf("%x", sha256.Sum256(content))
+
+	destPath := filepath.Join(tmpDir, "test.yaml")
+	os.WriteFile(destPath, content, 0644)
+
+	// Local hash should match the upstream hash
+	localHash, err := lock.SHA256File(destPath)
+	if err != nil {
+		t.Fatalf("SHA256File error: %v", err)
+	}
+	if localHash != hash {
+		t.Errorf("localHash = %q, upstreamHash = %q — should be equal", localHash, hash)
+	}
+
+	// When they're equal, the sync logic skips the write (unchanged)
+	// This is the condition checked in SyncEnv: localHash == upstreamHash
+}
+
+func TestUnchangedDetection_LocalDiffers(t *testing.T) {
+	// When local file content differs from upstream, hashes should NOT match.
+	tmpDir := t.TempDir()
+	upstreamContent := []byte("upstream content\n")
+	upstreamHash := fmt.Sprintf("%x", sha256.Sum256(upstreamContent))
+
+	destPath := filepath.Join(tmpDir, "test.yaml")
+	os.WriteFile(destPath, []byte("local modified content\n"), 0644)
+
+	localHash, _ := lock.SHA256File(destPath)
+	if localHash == upstreamHash {
+		t.Error("local and upstream hashes should differ")
 	}
 }

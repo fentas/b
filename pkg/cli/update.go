@@ -265,6 +265,8 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			DryRun:     o.DryRun,
 			OnPreSync:  entry.OnPreSync,
 			OnPostSync: entry.OnPostSync,
+			Stdout:     o.IO.Out,
+			Stderr:     o.IO.ErrOut,
 		}
 
 		// Set up interactive conflict resolver for replace strategy on TTY
