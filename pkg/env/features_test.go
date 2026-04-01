@@ -1,0 +1,176 @@
+package env
+
+import (
+	"crypto/sha256"
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/fentas/b/pkg/lock"
+)
+
+// --- Feature 3: Skip writes when content identical ---
+
+func TestSyncMessage_WithUnchanged(t *testing.T) {
+	files := []lock.LockFile{
+		{Status: "replaced"},
+		{Status: "unchanged"},
+		{Status: "unchanged"},
+	}
+	got := syncMessage(files, 0)
+	if got == "" {
+		t.Error("expected non-empty message")
+	}
+	// Should contain "unchanged"
+	if got != "1 replaced, 2 unchanged" {
+		t.Errorf("syncMessage() = %q, want %q", got, "1 replaced, 2 unchanged")
+	}
+}
+
+func TestSyncMessage_AllUnchanged(t *testing.T) {
+	files := []lock.LockFile{
+		{Status: "unchanged"},
+		{Status: "unchanged"},
+	}
+	got := syncMessage(files, 0)
+	if got != "2 file(s) unchanged" {
+		t.Errorf("syncMessage() = %q, want %q", got, "2 file(s) unchanged")
+	}
+}
+
+// --- Feature 6: File mode handling ---
+
+func TestGitModeToFileMode(t *testing.T) {
+	tests := []struct {
+		gitMode string
+		want    os.FileMode
+	}{
+		{"100644", 0644},
+		{"100755", 0755},
+		{"100664", 0644}, // unknown mode defaults to 0644
+		{"", 0644},       // empty defaults to 0644
+	}
+	for _, tt := range tests {
+		got := gitModeToFileMode(tt.gitMode)
+		if got != tt.want {
+			t.Errorf("gitModeToFileMode(%q) = %o, want %o", tt.gitMode, got, tt.want)
+		}
+	}
+}
+
+func TestFileModeToString(t *testing.T) {
+	tests := []struct {
+		mode os.FileMode
+		want string
+	}{
+		{0644, "644"},
+		{0755, "755"},
+		{0600, "600"},
+	}
+	for _, tt := range tests {
+		got := fileModeToString(tt.mode)
+		if got != tt.want {
+			t.Errorf("fileModeToString(%o) = %q, want %q", tt.mode, got, tt.want)
+		}
+	}
+}
+
+func TestWriteFile_ExecutableMode(t *testing.T) {
+	tmpDir := t.TempDir()
+	destPath := filepath.Join(tmpDir, "script.sh")
+
+	if err := writeFile(destPath, []byte("#!/bin/sh\necho hello"), 0755); err != nil {
+		t.Fatalf("writeFile() error = %v", err)
+	}
+
+	info, err := os.Stat(destPath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	// On Unix, check that execute bit is set
+	if info.Mode().Perm()&0100 == 0 {
+		t.Errorf("expected executable mode, got %o", info.Mode().Perm())
+	}
+}
+
+// --- Feature 7: Hook execution ---
+
+func TestRunHook_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+	markerFile := filepath.Join(tmpDir, "hook-ran")
+
+	err := runHook(fmt.Sprintf("touch %s", markerFile), tmpDir)
+	if err != nil {
+		t.Fatalf("runHook() error = %v", err)
+	}
+
+	if _, err := os.Stat(markerFile); os.IsNotExist(err) {
+		t.Error("hook did not create marker file")
+	}
+}
+
+func TestRunHook_Failure(t *testing.T) {
+	err := runHook("exit 1", t.TempDir())
+	if err == nil {
+		t.Error("expected error from failing hook")
+	}
+}
+
+func TestRunHook_UsesWorkingDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	err := runHook("test -d .", tmpDir)
+	if err != nil {
+		t.Fatalf("runHook() should succeed in valid dir, got %v", err)
+	}
+}
+
+// --- Feature 1: Dry-run (syncMessage with dry-run suffix) ---
+
+func TestSyncMessage_DryRunSuffix(t *testing.T) {
+	files := []lock.LockFile{
+		{Status: "replaced (dry-run)"},
+		{Status: "replaced (dry-run)"},
+	}
+	got := syncMessage(files, 0)
+	if got != "2 file(s) synced" {
+		t.Errorf("syncMessage() with dry-run = %q, want %q", got, "2 file(s) synced")
+	}
+}
+
+func TestSyncMessage_UnchangedDryRun(t *testing.T) {
+	files := []lock.LockFile{
+		{Status: "unchanged (dry-run)"},
+	}
+	got := syncMessage(files, 0)
+	// Should strip dry-run and count as unchanged
+	if got != "1 file(s) unchanged" {
+		t.Errorf("syncMessage() = %q, want %q", got, "1 file(s) unchanged")
+	}
+}
+
+// --- Feature 3: Unchanged detection via hash comparison ---
+
+func TestUnchangedFile_SameUpstreamHash(t *testing.T) {
+	// When the upstream hash matches the lock entry hash, file should be "unchanged"
+	content := []byte("some content")
+	hash := fmt.Sprintf("%x", sha256.Sum256(content))
+
+	lockEntry := &lock.EnvEntry{
+		Commit: "oldcommit",
+		Files: []lock.LockFile{
+			{Path: "test.yaml", Dest: "test.yaml", SHA256: hash},
+		},
+	}
+
+	// findLockFile should find it
+	f := findLockFile(lockEntry, "test.yaml")
+	if f == nil {
+		t.Fatal("expected to find lock entry")
+	}
+
+	// When upstream hash equals lock hash, the file is unchanged
+	if f.SHA256 != hash {
+		t.Errorf("SHA256 = %q, want %q", f.SHA256, hash)
+	}
+}

@@ -95,7 +95,7 @@ func TestWriteFile(t *testing.T) {
 	destPath := filepath.Join(tmpDir, "sub", "dir", "file.txt")
 	content := []byte("hello world")
 
-	if err := writeFile(destPath, content); err != nil {
+	if err := writeFile(destPath, content, 0644); err != nil {
 		t.Fatalf("writeFile() error = %v", err)
 	}
 
@@ -140,7 +140,7 @@ func TestStrategyReplace(t *testing.T) {
 	}
 
 	// Simulate replace strategy: write upstream
-	if err := writeFile(destPath, upstreamContent); err != nil {
+	if err := writeFile(destPath, upstreamContent, 0644); err != nil {
 		t.Fatal(err)
 	}
 

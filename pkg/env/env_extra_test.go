@@ -12,7 +12,7 @@ func TestWriteFile_CreatesDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
 	destPath := filepath.Join(tmpDir, "a", "b", "c", "file.txt")
 
-	if err := writeFile(destPath, []byte("content")); err != nil {
+	if err := writeFile(destPath, []byte("content"), 0644); err != nil {
 		t.Fatalf("writeFile() error = %v", err)
 	}
 
@@ -31,7 +31,7 @@ func TestWriteFile_OverwritesExisting(t *testing.T) {
 
 	os.WriteFile(destPath, []byte("old"), 0644)
 
-	if err := writeFile(destPath, []byte("new")); err != nil {
+	if err := writeFile(destPath, []byte("new"), 0644); err != nil {
 		t.Fatalf("writeFile() error = %v", err)
 	}
 

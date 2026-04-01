@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,9 @@ type UpdateOptions struct {
 	specifiedBinaries []*binary.Binary             // resolved binaries from CLI args
 	specifiedEnvRefs  []string                     // resolved env refs from CLI args
 	Strategy          string                       // strategy flag override: replace, client, merge
+	DryRun            bool                         // show what would change without writing
+	Rollback          bool                         // rollback to previous commit from lock
+	Group             string                       // only update envs in this group
 	stdinReader       io.Reader                    // overridden by tests; nil means os.Stdin
 	updateBinariesF   func([]*binary.Binary) error // overridden by tests; nil means o.updateBinaries
 }
@@ -85,6 +89,9 @@ func NewUpdateCmd(shared *SharedOptions) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&o.Strategy, "strategy", "", "Conflict strategy: replace (default), client, merge")
+	cmd.Flags().BoolVar(&o.DryRun, "dry-run", false, "Show what would change without writing files")
+	cmd.Flags().BoolVar(&o.Rollback, "rollback", false, "Rollback envs to previous commit from lock")
+	cmd.Flags().StringVar(&o.Group, "group", "", "Only update envs in this group")
 
 	return cmd
 }
@@ -234,6 +241,11 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			}
 		}
 
+		// Filter by group if specified
+		if o.Group != "" && entry.Group != o.Group {
+			continue
+		}
+
 		label := gitcache.RefLabel(entry.Key)
 		ref := gitcache.RefBase(entry.Key)
 
@@ -244,20 +256,32 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		}
 
 		cfg := env.EnvConfig{
-			Ref:      ref,
-			Label:    label,
-			Version:  entry.Version,
-			Ignore:   entry.Ignore,
-			Strategy: strategy,
-			Files:    entry.Files,
+			Ref:        ref,
+			Label:      label,
+			Version:    entry.Version,
+			Ignore:     entry.Ignore,
+			Strategy:   strategy,
+			Files:      entry.Files,
+			DryRun:     o.DryRun,
+			OnPreSync:  entry.OnPreSync,
+			OnPostSync: entry.OnPostSync,
 		}
 
 		// Set up interactive conflict resolver for replace strategy on TTY
-		if (strategy == "" || strategy == env.StrategyReplace) && isTTYFunc() {
+		if (strategy == "" || strategy == env.StrategyReplace) && isTTYFunc() && !o.DryRun {
 			cfg.ResolveConflict = o.interactiveConflictResolver(ref, lk)
 		}
 
 		lockEntry := lk.FindEnv(ref, label)
+
+		// Handle rollback: use previous commit from lock
+		if o.Rollback {
+			if lockEntry == nil || lockEntry.PreviousCommit == "" {
+				fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ no previous commit to rollback to\n", entry.Key)
+				continue
+			}
+			cfg.ForceCommit = lockEntry.PreviousCommit
+		}
 
 		result, err := syncEnvFunc(cfg, projectRoot, "", lockEntry)
 		if err != nil {
@@ -270,23 +294,47 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			continue // don't overwrite lock entry when up-to-date
 		}
 
-		fmt.Fprintf(o.IO.Out, "  %-40s %s → %s (%s)\n", entry.Key, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)
+		prefix := ""
+		if o.DryRun {
+			prefix = "(dry-run) "
+		}
+		if o.Rollback {
+			prefix = "(rollback) "
+		}
+
+		fmt.Fprintf(o.IO.Out, "  %s%-40s %s → %s (%s)\n", prefix, entry.Key, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)
 		for _, f := range result.Files {
 			o.printFileStatus(f)
 		}
 
 		if result.Conflicts > 0 {
-			fmt.Fprintf(o.IO.ErrOut, "    ⚠ %d file(s) have merge conflicts — resolve manually\n", result.Conflicts)
+			fmt.Fprintf(o.IO.ErrOut, "    ⚠ %d file(s) have merge conflicts — resolve manually:\n", result.Conflicts)
+			for _, f := range result.Files {
+				if f.Status == "conflict" || f.Status == "conflict (dry-run)" {
+					destPath := f.Dest
+					if !filepath.IsAbs(destPath) {
+						destPath = filepath.Join(projectRoot, destPath)
+					}
+					fmt.Fprintf(o.IO.ErrOut, "      %s\n", destPath)
+				}
+			}
 		}
 
-		lk.UpsertEnv(lock.EnvEntry{
-			Ref:            result.Ref,
-			Label:          result.Label,
-			Version:        result.Version,
-			Commit:         result.Commit,
-			PreviousCommit: result.PreviousCommit,
-			Files:          result.Files,
-		})
+		// Don't update lock in dry-run mode
+		if !o.DryRun {
+			lk.UpsertEnv(lock.EnvEntry{
+				Ref:            result.Ref,
+				Label:          result.Label,
+				Version:        result.Version,
+				Commit:         result.Commit,
+				PreviousCommit: result.PreviousCommit,
+				Files:          result.Files,
+			})
+		}
+	}
+
+	if o.DryRun {
+		return nil // don't write lock in dry-run mode
 	}
 
 	return lock.WriteLock(lockDir, lk, o.bVersion)
@@ -294,17 +342,27 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 
 // printFileStatus prints a single file's sync status.
 func (o *UpdateOptions) printFileStatus(f lock.LockFile) {
+	// Strip dry-run suffix for display matching
+	status := strings.TrimSuffix(f.Status, " (dry-run)")
+	dryRun := strings.HasSuffix(f.Status, " (dry-run)")
+	suffix := ""
+	if dryRun {
+		suffix = " (dry-run)"
+	}
+
 	switch {
-	case f.Status == "kept":
-		fmt.Fprintf(o.IO.Out, "    → %-36s ⊘ kept (local changes preserved)\n", f.Dest)
-	case f.Status == "merged":
-		fmt.Fprintf(o.IO.Out, "    → %-36s ✓ merged\n", f.Dest)
-	case f.Status == "conflict":
-		fmt.Fprintf(o.IO.ErrOut, "    → %-36s ✗ conflict (markers inserted)\n", f.Dest)
-	case strings.Contains(f.Status, "local changes overwritten"):
-		fmt.Fprintf(o.IO.ErrOut, "    → %-36s ⚠ replaced (local changes overwritten)\n", f.Dest)
+	case status == "unchanged":
+		fmt.Fprintf(o.IO.Out, "    → %-36s ⊘ unchanged%s\n", f.Dest, suffix)
+	case status == "kept":
+		fmt.Fprintf(o.IO.Out, "    → %-36s ⊘ kept (local changes preserved)%s\n", f.Dest, suffix)
+	case status == "merged":
+		fmt.Fprintf(o.IO.Out, "    → %-36s ✓ merged%s\n", f.Dest, suffix)
+	case status == "conflict":
+		fmt.Fprintf(o.IO.ErrOut, "    → %-36s ✗ conflict (markers inserted)%s\n", f.Dest, suffix)
+	case strings.Contains(status, "local changes overwritten"):
+		fmt.Fprintf(o.IO.ErrOut, "    → %-36s ⚠ replaced (local changes overwritten)%s\n", f.Dest, suffix)
 	default:
-		fmt.Fprintf(o.IO.Out, "    → %-36s ✓ replaced\n", f.Dest)
+		fmt.Fprintf(o.IO.Out, "    → %-36s ✓ replaced%s\n", f.Dest, suffix)
 	}
 }
 

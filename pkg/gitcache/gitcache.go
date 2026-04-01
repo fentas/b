@@ -77,17 +77,52 @@ func ResolveRef(url, version string) (string, error) {
 	return "", fmt.Errorf("could not resolve %q for %s", version, url)
 }
 
+// TreeEntry represents a single entry from git ls-tree with its file mode.
+type TreeEntry struct {
+	Path string
+	Mode string // git mode, e.g. "100644", "100755"
+}
+
 // ListTree returns all file paths in the repo at the given commit.
 func ListTree(root, ref, commit string) ([]string, error) {
+	entries, err := ListTreeWithModes(root, ref, commit)
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, len(entries))
+	for i, e := range entries {
+		paths[i] = e.Path
+	}
+	return paths, nil
+}
+
+// ListTreeWithModes returns all file entries with their git modes.
+func ListTreeWithModes(root, ref, commit string) ([]TreeEntry, error) {
 	dir := CacheDir(root, ref)
-	out, err := output("git", "-C", dir, "ls-tree", "-r", "--name-only", commit)
+	out, err := output("git", "-C", dir, "ls-tree", "-r", commit)
 	if err != nil {
 		return nil, err
 	}
 	if out == "" {
 		return nil, nil
 	}
-	return strings.Split(strings.TrimSpace(out), "\n"), nil
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	entries := make([]TreeEntry, 0, len(lines))
+	for _, line := range lines {
+		// Format: <mode> <type> <hash>\t<path>
+		tabIdx := strings.IndexByte(line, '\t')
+		if tabIdx == -1 {
+			continue
+		}
+		path := line[tabIdx+1:]
+		fields := strings.Fields(line[:tabIdx])
+		mode := "100644"
+		if len(fields) >= 1 {
+			mode = fields[0]
+		}
+		entries = append(entries, TreeEntry{Path: path, Mode: mode})
+	}
+	return entries, nil
 }
 
 // ShowFile returns the contents of a single file at the given commit.

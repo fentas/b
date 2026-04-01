@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/fentas/b/pkg/envmatch"
@@ -34,6 +36,10 @@ type EnvConfig struct {
 	Strategy        string                         // replace (default) | client | merge
 	Files           map[string]envmatch.GlobConfig // glob → config
 	ResolveConflict ConflictFunc                   // optional: called per-file when local changes detected
+	DryRun          bool                           // if true, compute changes without writing files
+	ForceCommit     string                         // if set, use this commit instead of resolving version
+	OnPreSync       string                         // shell command to run before syncing
+	OnPostSync      string                         // shell command to run after syncing
 }
 
 // SyncResult is the result of syncing a single env.
@@ -69,14 +75,20 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 	baseRef := gitcache.RefBase(cfg.Ref)
 	url := gitcache.GitURL(cfg.Ref)
 
-	// Resolve version to commit
-	commit, err := gitcache.ResolveRef(url, cfg.Version)
-	if err != nil {
-		return nil, fmt.Errorf("resolving %s@%s: %w", cfg.Ref, cfg.Version, err)
+	// Resolve version to commit (or use forced commit)
+	var commit string
+	var err error
+	if cfg.ForceCommit != "" {
+		commit = cfg.ForceCommit
+	} else {
+		commit, err = gitcache.ResolveRef(url, cfg.Version)
+		if err != nil {
+			return nil, fmt.Errorf("resolving %s@%s: %w", cfg.Ref, cfg.Version, err)
+		}
 	}
 
-	// Check if up-to-date
-	if lockEntry != nil && lockEntry.Commit == commit {
+	// Check if up-to-date (skip when forcing a specific commit)
+	if cfg.ForceCommit == "" && lockEntry != nil && lockEntry.Commit == commit {
 		return &SyncResult{
 			Ref:     baseRef,
 			Label:   cfg.Label,
@@ -87,6 +99,13 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		}, nil
 	}
 
+	// Run pre-sync hook (skip in dry-run mode)
+	if cfg.OnPreSync != "" && !cfg.DryRun {
+		if err := runHook(cfg.OnPreSync, projectRoot); err != nil {
+			return nil, fmt.Errorf("pre-sync hook failed: %w", err)
+		}
+	}
+
 	// Clone and fetch
 	if err := gitcache.EnsureClone(cacheRoot, baseRef, url); err != nil {
 		return nil, fmt.Errorf("cloning %s: %w", url, err)
@@ -95,13 +114,21 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		return nil, fmt.Errorf("fetching %s: %w", commit, err)
 	}
 
-	// List tree and match globs
-	tree, err := gitcache.ListTree(cacheRoot, baseRef, commit)
+	// List tree with modes and match globs
+	treeEntries, err := gitcache.ListTreeWithModes(cacheRoot, baseRef, commit)
 	if err != nil {
 		return nil, fmt.Errorf("listing tree for %s@%s: %w", cfg.Ref, commit[:12], err)
 	}
 
-	matched := envmatch.MatchGlobs(tree, cfg.Files, cfg.Ignore)
+	// Build paths list and mode map
+	treePaths := make([]string, len(treeEntries))
+	modeMap := make(map[string]string, len(treeEntries))
+	for i, e := range treeEntries {
+		treePaths[i] = e.Path
+		modeMap[e.Path] = e.Mode
+	}
+
+	matched := envmatch.MatchGlobs(treePaths, cfg.Files, cfg.Ignore)
 	if len(matched) == 0 {
 		return nil, fmt.Errorf("no files matched for %s — check your glob patterns", cfg.Ref)
 	}
@@ -144,10 +171,25 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 
 		upstreamHash := fmt.Sprintf("%x", sha256.Sum256(content))
 
+		// Determine file mode from upstream
+		fileMode := gitModeToFileMode(modeMap[m.SourcePath])
+		fileModeStr := fileModeToString(fileMode)
+
 		// Detect local changes
 		localChanged := false
 		if lockEntry != nil {
 			if oldFile := findLockFile(lockEntry, m.SourcePath); oldFile != nil {
+				// Check if upstream content is identical to what's on disk
+				if oldFile.SHA256 == upstreamHash {
+					lockFiles = append(lockFiles, lock.LockFile{
+						Path:   m.SourcePath,
+						Dest:   m.DestPath,
+						SHA256: upstreamHash,
+						Mode:   fileModeStr,
+						Status: "unchanged",
+					})
+					continue
+				}
 				localHash, hashErr := lock.SHA256File(destPath)
 				if hashErr == nil && localHash != oldFile.SHA256 {
 					localChanged = true
@@ -167,8 +209,10 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 
 		if !localChanged {
 			// No local changes — always safe to replace
-			if err := writeFile(destPath, content); err != nil {
-				return nil, err
+			if !cfg.DryRun {
+				if err := writeFile(destPath, content, fileMode); err != nil {
+					return nil, err
+				}
 			}
 		} else {
 			switch fileStrategy {
@@ -185,39 +229,58 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 				if mergeErr != nil {
 					// Merge failed, fall back to replace with warning
 					status = "replaced (merge failed: " + mergeErr.Error() + ")"
-					if err := writeFile(destPath, content); err != nil {
-						return nil, err
+					if !cfg.DryRun {
+						if err := writeFile(destPath, content, fileMode); err != nil {
+							return nil, err
+						}
 					}
 				} else if hasConflict {
 					status = "conflict"
 					conflicts++
-					if err := writeFile(destPath, merged); err != nil {
-						return nil, err
+					if !cfg.DryRun {
+						if err := writeFile(destPath, merged, fileMode); err != nil {
+							return nil, err
+						}
 					}
 					finalHash = fmt.Sprintf("%x", sha256.Sum256(merged))
 				} else {
 					status = "merged"
-					if err := writeFile(destPath, merged); err != nil {
-						return nil, err
+					if !cfg.DryRun {
+						if err := writeFile(destPath, merged, fileMode); err != nil {
+							return nil, err
+						}
 					}
 					finalHash = fmt.Sprintf("%x", sha256.Sum256(merged))
 				}
 
 			default: // StrategyReplace
 				status = "replaced (local changes overwritten)"
-				if err := writeFile(destPath, content); err != nil {
-					return nil, err
+				if !cfg.DryRun {
+					if err := writeFile(destPath, content, fileMode); err != nil {
+						return nil, err
+					}
 				}
 			}
+		}
+
+		if cfg.DryRun {
+			status += " (dry-run)"
 		}
 
 		lockFiles = append(lockFiles, lock.LockFile{
 			Path:   m.SourcePath,
 			Dest:   m.DestPath,
 			SHA256: finalHash,
-			Mode:   "644",
+			Mode:   fileModeStr,
 			Status: status,
 		})
+	}
+
+	// Run post-sync hook (skip in dry-run mode)
+	if cfg.OnPostSync != "" && !cfg.DryRun {
+		if err := runHook(cfg.OnPostSync, projectRoot); err != nil {
+			return nil, fmt.Errorf("post-sync hook failed: %w", err)
+		}
 	}
 
 	return &SyncResult{
@@ -257,12 +320,12 @@ func doMerge(cacheRoot, baseRef, previousCommit, sourcePath, destPath string, up
 	return gitcache.Merge3Way(local, base, upstream)
 }
 
-// writeFile ensures the dest directory exists and writes content.
-func writeFile(destPath string, content []byte) error {
+// writeFile ensures the dest directory exists and writes content with the given mode.
+func writeFile(destPath string, content []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return fmt.Errorf("creating directory for %s: %w", destPath, err)
 	}
-	if err := os.WriteFile(destPath, content, 0644); err != nil {
+	if err := os.WriteFile(destPath, content, mode); err != nil {
 		return fmt.Errorf("writing %s: %w", destPath, err)
 	}
 	return nil
@@ -281,18 +344,45 @@ func findLockFile(entry *lock.EnvEntry, sourcePath string) *lock.LockFile {
 	return nil
 }
 
+// runHook executes a shell command in the given directory.
+func runHook(command, dir string) error {
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Dir = dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// gitModeToFileMode converts a git tree mode to an os.FileMode.
+// Returns 0755 for executable files (100755), 0644 otherwise.
+func gitModeToFileMode(gitMode string) os.FileMode {
+	if gitMode == "100755" {
+		return 0755
+	}
+	return 0644
+}
+
+// fileModeToString converts an os.FileMode to a short string like "644" or "755".
+func fileModeToString(mode os.FileMode) string {
+	return strconv.FormatUint(uint64(mode.Perm()), 8)
+}
+
 // syncMessage builds a human-readable sync message from file results.
 func syncMessage(files []lock.LockFile, conflicts int) string {
-	replaced, kept, merged := 0, 0, 0
+	replaced, kept, merged, unchanged := 0, 0, 0, 0
 	for _, f := range files {
+		// Strip dry-run suffix for counting
+		status := strings.TrimSuffix(f.Status, " (dry-run)")
 		switch {
-		case strings.HasPrefix(f.Status, "replaced"):
+		case status == "unchanged":
+			unchanged++
+		case strings.HasPrefix(status, "replaced"):
 			replaced++
-		case f.Status == "kept":
+		case status == "kept":
 			kept++
-		case f.Status == "merged":
+		case status == "merged":
 			merged++
-		case f.Status == "conflict":
+		case status == "conflict":
 			merged++ // conflicts are a type of merge
 		}
 	}
@@ -301,6 +391,9 @@ func syncMessage(files []lock.LockFile, conflicts int) string {
 	total := len(files)
 	if replaced == total {
 		return fmt.Sprintf("%d file(s) synced", total)
+	}
+	if unchanged == total {
+		return fmt.Sprintf("%d file(s) unchanged", total)
 	}
 	if replaced > 0 {
 		parts = append(parts, fmt.Sprintf("%d replaced", replaced))
@@ -313,6 +406,9 @@ func syncMessage(files []lock.LockFile, conflicts int) string {
 	}
 	if conflicts > 0 {
 		parts = append(parts, fmt.Sprintf("%d conflict(s)", conflicts))
+	}
+	if unchanged > 0 {
+		parts = append(parts, fmt.Sprintf("%d unchanged", unchanged))
 	}
 	return strings.Join(parts, ", ")
 }

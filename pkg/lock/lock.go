@@ -121,6 +121,17 @@ func (l *Lock) FindEnv(ref, label string) *EnvEntry {
 	return nil
 }
 
+// RemoveEnv removes an env entry from the lock. Returns true if found.
+func (l *Lock) RemoveEnv(ref, label string) bool {
+	for i := range l.Envs {
+		if l.Envs[i].Ref == ref && l.Envs[i].Label == label {
+			l.Envs = append(l.Envs[:i], l.Envs[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
 // UpsertEnv adds or updates an env entry in the lock.
 func (l *Lock) UpsertEnv(entry EnvEntry) {
 	for i := range l.Envs {
