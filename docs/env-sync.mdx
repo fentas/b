@@ -1,0 +1,291 @@
+---
+description: "Sync configuration files from upstream git repositories with glob matching, version pinning, and three-way merge"
+---
+
+# Env Sync
+
+**b** can sync configuration files from upstream git repositories into your project. This is useful for sharing manifests, configuration templates, or any files across repositories while tracking changes and handling conflicts.
+
+Env sync is built into the [`b install`](/b/subcommands/install) and [`b update`](/b/subcommands/update) commands — there is no separate sync command.
+
+## Quick start
+
+```bash
+# Sync files from a repo using SCP-style syntax
+b install github.com/org/infra:/manifests/base/** ./base
+
+# Pin a version
+b install github.com/org/infra@v2.0:/manifests/hetzner/** ./hetzner
+
+# Add to b.yaml and sync
+b install --add github.com/org/infra@v2.0:/manifests/** ./config
+
+# Update all envs from b.yaml
+b update
+```
+
+## Configuration
+
+Env entries are defined in the `envs` section of `b.yaml`:
+
+```yaml
+envs:
+  github.com/org/infra:
+    version: v2.0
+    strategy: merge
+    ignore:
+      - "*.md"
+      - "LICENSE"
+    files:
+      manifests/base/**:
+        dest: base/
+      manifests/hetzner/**:
+        dest: hetzner/
+        ignore:
+          - "*.test.yaml"
+
+  # Minimal entry — syncs all files, latest commit, replace strategy
+  github.com/org/shared-config:
+```
+
+### Configuration fields
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `version` | Git tag, branch, or commit SHA to pin | `HEAD` (latest default branch) |
+| `strategy` | How to handle local changes: `replace`, `client`, or `merge` | `replace` |
+| `ignore` | Global ignore patterns (applied to all globs) | none |
+| `files` | Map of glob patterns to destination config | all files |
+
+### Files map
+
+Each key in `files` is a glob pattern matched against the upstream repository tree. Values can be:
+
+```yaml
+files:
+  # Bare key — no dest, preserve original path structure
+  manifests/base/**:
+
+  # String shorthand — set destination directory
+  manifests/hetzner/**: hetzner/
+
+  # Full config — dest and per-glob ignore
+  manifests/monitoring/**:
+    dest: monitoring/
+    ignore:
+      - "*.test.yaml"
+      - "debug-*"
+```
+
+### Glob patterns
+
+Patterns are matched against the full file paths in the upstream repository (as listed by `git ls-tree`).
+
+| Pattern | Matches |
+|---------|---------|
+| `manifests/base/**` | All files recursively under `manifests/base/` |
+| `**/*.yaml` | All `.yaml` files anywhere in the repo |
+| `configs/ingress.yaml` | A single literal file |
+| `charts/*/values.yaml` | `values.yaml` one directory deep under `charts/` |
+
+### Ignore patterns
+
+Ignore patterns exclude files from syncing. They match against both the full path and the filename:
+
+```yaml
+envs:
+  github.com/org/infra:
+    # Global ignore — applies to all globs
+    ignore:
+      - "*.md"
+      - "LICENSE"
+      - "**/test/**"
+    files:
+      manifests/**:
+        dest: manifests/
+        # Per-glob ignore — additive to global
+        ignore:
+          - "*.test.yaml"
+```
+
+### Destination paths
+
+When a file matches a glob, its destination path is computed by stripping the glob prefix and prepending the `dest` value:
+
+| Source file | Glob | Dest | Result |
+|------------|------|------|--------|
+| `manifests/hetzner/deploy.yaml` | `manifests/hetzner/**` | `hetzner/` | `hetzner/deploy.yaml` |
+| `configs/ingress.yaml` | `configs/ingress.yaml` | `config/` | `config/ingress.yaml` |
+| `README.md` | `**/*.md` | _(none)_ | `README.md` |
+
+If no `dest` is specified, the original path from the upstream repo is preserved.
+
+### Labels
+
+You can use the same upstream repository multiple times with different configurations by appending a `#label` fragment to the ref:
+
+```yaml
+envs:
+  github.com/org/infra#base:
+    version: v2.0
+    files:
+      manifests/base/**:
+        dest: base/
+
+  github.com/org/infra#monitoring:
+    version: v2.0
+    strategy: merge
+    files:
+      manifests/monitoring/**:
+        dest: monitoring/
+```
+
+Labels create separate lock entries so each group of files is tracked independently.
+
+## SCP syntax
+
+For one-off syncs or adding new env entries, use SCP-style syntax on the command line:
+
+```
+<repo>[@<version>]:/<glob> [<dest>]
+```
+
+**Examples:**
+
+```bash
+# Sync all manifests to ./base
+b install github.com/org/infra:/manifests/base/** ./base
+
+# Pin a version
+b install github.com/org/infra@v2.0:/manifests/hetzner/** ./hetzner
+
+# Sync and add to b.yaml
+b install --add github.com/org/infra@v2.0:/manifests/** ./config
+```
+
+## Merge strategies
+
+When upstream files change and you've also modified the local copy, the **strategy** controls what happens:
+
+### `replace` (default)
+
+Overwrites local files with upstream content.
+
+In an interactive terminal, **b** prompts per-file when local changes are detected:
+
+```
+  system/config.yaml has local changes.
+    [r]eplace  [k]eep  [m]erge  [d]iff > _
+```
+
+| Choice | Effect |
+|--------|--------|
+| `r` | Overwrite local file with upstream |
+| `k` | Keep your local file unchanged |
+| `m` | Attempt a three-way merge |
+| `d` | Show a unified diff, then re-prompt |
+
+In non-interactive mode (CI/CD), local files are overwritten without prompting.
+
+### `client`
+
+Keeps local files unchanged when they've been modified. Only new files from upstream are written. This is useful when you want to accept the initial sync but maintain local overrides.
+
+### `merge`
+
+Performs a three-way merge using:
+
+1. **Base** — the file at the previously synced commit (from `b.lock`)
+2. **Local** — your current file on disk
+3. **Upstream** — the file at the new commit
+
+If both upstream and local changed the same region, standard conflict markers are inserted:
+
+```
+<<<<<<< local
+your-value: true
+||||||| base
+original-value: true
+=======
+upstream-value: true
+>>>>>>> upstream
+```
+
+If the base version is unavailable (e.g., first sync, or the old commit was garbage-collected), merge falls back to replace.
+
+## How it works
+
+When you run `b install` or `b update`, env sync follows this flow:
+
+1. **Resolve version** — Runs `git ls-remote` to convert the version (tag/branch/HEAD) into a commit SHA.
+
+2. **Check lock** — If `b.lock` already records the same commit for this env, the sync is skipped (up to date).
+
+3. **Clone/fetch** — Ensures a bare clone of the repo exists in the git cache (`~/.cache/b/repos/`), then fetches the target commit.
+
+4. **Match files** — Lists the repo tree (`git ls-tree`) and matches files against the configured glob patterns, filtering out ignored paths.
+
+5. **Detect local changes** — For each matched file, compares the on-disk SHA256 against the checksum stored in `b.lock`. A mismatch means the file was locally modified.
+
+6. **Apply strategy** — Writes files according to the configured strategy (replace, client, or merge).
+
+7. **Update lock** — Records the new commit SHA, file checksums, and destination paths in `b.lock`.
+
+## The lock file
+
+`b.lock` tracks the exact state of every synced env:
+
+```json
+{
+  "envs": [
+    {
+      "ref": "github.com/org/infra",
+      "label": "",
+      "version": "v2.0",
+      "commit": "abc123def456...",
+      "previousCommit": "old789...",
+      "files": [
+        {
+          "path": "manifests/base/deploy.yaml",
+          "dest": "base/deploy.yaml",
+          "sha256": "e3b0c44298fc...",
+          "mode": "644"
+        }
+      ]
+    }
+  ]
+}
+```
+
+| Field | Purpose |
+|-------|---------|
+| `commit` | The exact commit SHA that was synced |
+| `previousCommit` | The commit before the last sync — used as the merge base for three-way merges |
+| `files[].sha256` | Checksum at time of writing — compared to the on-disk file to detect local modifications |
+
+Commit `b.lock` to version control so your team stays in sync and `b verify` can detect drift.
+
+## Git cache
+
+Upstream repositories are cached as bare clones in `~/.cache/b/repos/`. Each repo gets a directory named by the SHA256 of its ref.
+
+```bash
+# Show cache location
+b cache path
+
+# Check cache size
+du -sh $(b cache path)
+
+# Clean all cached repos
+b cache clean
+```
+
+The cache uses shallow clones (`--depth 1`) to minimize disk usage. Only the specific commits needed for syncing are fetched.
+
+## Tips
+
+- **CI/CD**: In non-interactive environments, `replace` applies silently. Use `client` or `merge` if your pipeline modifies synced files before committing.
+- **Verify**: Run `b verify` to check whether local files match their `b.lock` checksums — useful for detecting unintended drift.
+- **Conflict warnings**: If two env entries write to the same destination path, **b** warns before syncing. Use distinct `dest` values or `ignore` patterns to resolve.
+- **Authentication**: Private repos require a `GITHUB_TOKEN`, `GITLAB_TOKEN`, or `GITEA_TOKEN` environment variable. See [Authentication](/authentication).
+- **Force sync**: Use `b update --force` to re-sync even when the lock says you're up to date.
