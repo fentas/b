@@ -256,6 +256,42 @@ func TestEnvStatus_PathTraversalInLock(t *testing.T) {
 
 // --- Feature 4: env remove ---
 
+func TestEnvRemove_NormalizesKeyWithVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+	lk := &lock.Lock{
+		Envs: []lock.EnvEntry{
+			{Ref: "github.com/org/infra", Commit: "abc"},
+		},
+	}
+	lock.WriteLock(tmpDir, lk, "v1.0")
+
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{
+		Envs: state.EnvList{
+			{Key: "github.com/org/infra"},
+		},
+	}
+	shared.loadedConfigPath = filepath.Join(tmpDir, "b.yaml")
+	shared.bVersion = "v1.0"
+	state.SaveConfig(shared.Config, filepath.Join(tmpDir, "b.yaml"))
+
+	// Pass key with @version — should still remove from both lock and config
+	o := &EnvRemoveOptions{SharedOptions: shared}
+	if err := o.Run("github.com/org/infra@v2.0"); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+
+	lk2, _ := lock.ReadLock(tmpDir)
+	if lk2.FindEnv("github.com/org/infra", "") != nil {
+		t.Error("infra should be removed from lock")
+	}
+	if shared.Config.Envs.Get("github.com/org/infra") != nil {
+		t.Error("infra should be removed from config")
+	}
+}
+
 func TestEnvRemove_RemovesFromLock(t *testing.T) {
 	tmpDir := t.TempDir()
 	lk := &lock.Lock{

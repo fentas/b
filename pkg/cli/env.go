@@ -205,6 +205,12 @@ func (o *EnvRemoveOptions) Run(key string) error {
 	ref := gitcache.RefBase(key)
 	lockDir := o.LockDir()
 
+	// Normalize key to canonical form (ref + optional #label) for config lookup
+	configKey := ref
+	if label != "" {
+		configKey = ref + "#" + label
+	}
+
 	// Delete synced files if requested
 	if o.DeleteFiles {
 		lk, err := lock.ReadLock(lockDir)
@@ -247,9 +253,9 @@ func (o *EnvRemoveOptions) Run(key string) error {
 		fmt.Fprintf(o.IO.Out, "  Removed %s from b.lock\n", key)
 	}
 
-	// Remove from config
+	// Remove from config using normalized key
 	if o.Config != nil {
-		if o.Config.Envs.Remove(key) {
+		if o.Config.Envs.Remove(configKey) {
 			configPath, err := o.getConfigPath()
 			if err != nil || configPath == "" {
 				configPath = path.GetDefaultConfigPath()
@@ -257,7 +263,7 @@ func (o *EnvRemoveOptions) Run(key string) error {
 			if err := state.SaveConfig(o.Config, configPath); err != nil {
 				return err
 			}
-			fmt.Fprintf(o.IO.Out, "  Removed %s from b.yaml\n", key)
+			fmt.Fprintf(o.IO.Out, "  Removed %s from b.yaml\n", configKey)
 		}
 	}
 
