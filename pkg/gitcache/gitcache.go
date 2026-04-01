@@ -84,16 +84,17 @@ type TreeEntry struct {
 }
 
 // ListTree returns all file paths in the repo at the given commit.
+// Uses --name-only for efficiency when modes are not needed.
 func ListTree(root, ref, commit string) ([]string, error) {
-	entries, err := ListTreeWithModes(root, ref, commit)
+	dir := CacheDir(root, ref)
+	out, err := output("git", "-C", dir, "ls-tree", "-r", "--name-only", commit)
 	if err != nil {
 		return nil, err
 	}
-	paths := make([]string, len(entries))
-	for i, e := range entries {
-		paths[i] = e.Path
+	if out == "" {
+		return nil, nil
 	}
-	return paths, nil
+	return strings.Split(strings.TrimSpace(out), "\n"), nil
 }
 
 // ListTreeWithModes returns all file entries with their git modes.

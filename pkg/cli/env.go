@@ -242,7 +242,7 @@ func NewEnvMatchCmd(shared *SharedOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "match <ref> <glob> [dest]",
 		Short: "Preview which files a glob pattern matches in a remote repo",
-		Long:  "Clone/fetch the repo and show which files match the glob pattern. Does not write anything.",
+		Long:  "Clone/fetch the repo into the local cache and show which files match the glob pattern. Does not modify project files or b.lock, but may populate the git cache.",
 		Example: templates.Examples(`
 			# Preview matched files
 			b env match github.com/org/infra "manifests/base/**"
