@@ -341,16 +341,26 @@ func doMerge(cacheRoot, baseRef, previousCommit, sourcePath, destPath string, up
 }
 
 // writeFile ensures the dest directory exists and writes content with the given mode.
+// For existing files, chmod is applied to correct permissions. For new files, umask is respected.
 func writeFile(destPath string, content []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
 		return fmt.Errorf("creating directory for %s: %w", destPath, err)
 	}
+
+	// Check if file already exists so we can respect umask on new files
+	existed := false
+	if _, err := os.Stat(destPath); err == nil {
+		existed = true
+	}
+
 	if err := os.WriteFile(destPath, content, mode); err != nil {
 		return fmt.Errorf("writing %s: %w", destPath, err)
 	}
-	// os.WriteFile only applies mode on create; explicitly chmod for existing files
-	if err := os.Chmod(destPath, mode); err != nil {
-		return fmt.Errorf("setting permissions on %s: %w", destPath, err)
+	// Only chmod existing files; new files get mode from os.WriteFile (respecting umask)
+	if existed {
+		if err := os.Chmod(destPath, mode); err != nil {
+			return fmt.Errorf("setting permissions on %s: %w", destPath, err)
+		}
 	}
 	return nil
 }

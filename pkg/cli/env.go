@@ -104,6 +104,15 @@ func (o *EnvStatusOptions) Run() error {
 			if !filepath.IsAbs(destPath) {
 				destPath = filepath.Join(lockDir, destPath)
 			}
+			destPath = filepath.Clean(destPath)
+
+			// Skip paths that escape the project root
+			rel, relErr := filepath.Rel(lockDir, destPath)
+			if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+				localDrift++
+				continue
+			}
+
 			info, statErr := os.Stat(destPath)
 			if statErr != nil {
 				if os.IsNotExist(statErr) {
