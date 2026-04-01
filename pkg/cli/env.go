@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/fentas/goodies/templates"
 	"github.com/spf13/cobra"
@@ -132,10 +133,12 @@ func (o *EnvStatusOptions) Run() error {
 			}
 			// Also check file mode drift when lock records a mode
 			if f.Mode != "" {
-				var expectedPerm os.FileMode = 0644
-				if f.Mode == "755" {
-					expectedPerm = 0755
+				parsed, parseErr := strconv.ParseUint(f.Mode, 8, 32)
+				if parseErr != nil {
+					localDrift++
+					continue
 				}
+				expectedPerm := os.FileMode(parsed)
 				if info.Mode().Perm() != expectedPerm {
 					localDrift++
 				}

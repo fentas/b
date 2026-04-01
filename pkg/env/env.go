@@ -354,6 +354,8 @@ func writeFile(destPath string, content []byte, mode os.FileMode) error {
 	existed := false
 	if _, err := os.Stat(destPath); err == nil {
 		existed = true
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking existing file %s: %w", destPath, err)
 	}
 
 	if err := os.WriteFile(destPath, content, mode); err != nil {
@@ -420,6 +422,18 @@ func ValidatePathUnderRoot(root, destPath string) error {
 	relResolved, err := filepath.Rel(resolvedRoot, resolvedAncestor)
 	if err != nil || relResolved == ".." || strings.HasPrefix(relResolved, ".."+string(os.PathSeparator)) {
 		return fmt.Errorf("resolves outside project root via symlink")
+	}
+
+	// Also check if destPath itself is an existing symlink that escapes root
+	if info, statErr := os.Lstat(destPath); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		resolved, err := filepath.EvalSymlinks(destPath)
+		if err != nil {
+			return fmt.Errorf("resolving symlink %q: %w", destPath, err)
+		}
+		relTarget, err := filepath.Rel(resolvedRoot, resolved)
+		if err != nil || relTarget == ".." || strings.HasPrefix(relTarget, ".."+string(os.PathSeparator)) {
+			return fmt.Errorf("symlink %s points outside project root", destPath)
+		}
 	}
 
 	return nil

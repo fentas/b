@@ -316,3 +316,35 @@ func TestValidatePathUnderRoot_NestedValid(t *testing.T) {
 		t.Errorf("expected valid nested path, got: %v", err)
 	}
 }
+
+func TestValidatePathUnderRoot_DestIsSymlinkEscape(t *testing.T) {
+	tmpDir := t.TempDir()
+	outsideDir := t.TempDir()
+	outsideFile := filepath.Join(outsideDir, "secret.txt")
+	os.WriteFile(outsideFile, []byte("secret"), 0644)
+
+	// Create a symlink inside tmpDir that points to a file outside
+	symlinkPath := filepath.Join(tmpDir, "escape.txt")
+	if err := os.Symlink(outsideFile, symlinkPath); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	if err := ValidatePathUnderRoot(tmpDir, symlinkPath); err == nil {
+		t.Error("expected error for symlink dest pointing outside root")
+	}
+}
+
+func TestValidatePathUnderRoot_ValidSymlinkInsideRoot(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Create a real file and symlink to it within root
+	realFile := filepath.Join(tmpDir, "real.txt")
+	os.WriteFile(realFile, []byte("content"), 0644)
+	symlinkPath := filepath.Join(tmpDir, "link.txt")
+	if err := os.Symlink(realFile, symlinkPath); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	if err := ValidatePathUnderRoot(tmpDir, symlinkPath); err != nil {
+		t.Errorf("expected valid symlink within root, got: %v", err)
+	}
+}
