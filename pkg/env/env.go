@@ -400,8 +400,14 @@ func ValidatePathUnderRoot(root, destPath string) error {
 
 	ancestor := filepath.Dir(destPath)
 	for {
-		if info, statErr := os.Stat(ancestor); statErr == nil && info.IsDir() {
-			break
+		info, statErr := os.Stat(ancestor)
+		if statErr == nil {
+			if info.IsDir() {
+				break
+			}
+		} else if !os.IsNotExist(statErr) {
+			// Fail closed: unreadable ancestor could bypass symlink checks
+			return fmt.Errorf("stat ancestor %q: %w", ancestor, statErr)
 		}
 		parent := filepath.Dir(ancestor)
 		if parent == ancestor {
