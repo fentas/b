@@ -96,7 +96,7 @@ func (o *EnvStatusOptions) Run() error {
 			upstreamStatus = fmt.Sprintf("upstream changed (%s → %s)", shortCommit(lockEntry.Commit), shortCommit(upstreamCommit))
 		}
 
-		// Check local files for drift
+		// Check local files for drift (content and mode)
 		localDrift := 0
 		missingFiles := 0
 		for _, f := range lockEntry.Files {
@@ -104,8 +104,13 @@ func (o *EnvStatusOptions) Run() error {
 			if !filepath.IsAbs(destPath) {
 				destPath = filepath.Join(lockDir, destPath)
 			}
-			if _, err := os.Stat(destPath); os.IsNotExist(err) {
-				missingFiles++
+			info, statErr := os.Stat(destPath)
+			if statErr != nil {
+				if os.IsNotExist(statErr) {
+					missingFiles++
+				} else {
+					localDrift++
+				}
 				continue
 			}
 			hash, err := lock.SHA256File(destPath)
@@ -115,6 +120,17 @@ func (o *EnvStatusOptions) Run() error {
 			}
 			if hash != f.SHA256 {
 				localDrift++
+				continue
+			}
+			// Also check file mode drift when lock records a mode
+			if f.Mode != "" {
+				var expectedPerm os.FileMode = 0644
+				if f.Mode == "755" {
+					expectedPerm = 0755
+				}
+				if info.Mode().Perm() != expectedPerm {
+					localDrift++
+				}
 			}
 		}
 

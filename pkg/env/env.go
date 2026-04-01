@@ -120,7 +120,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 	// List tree with modes and match globs
 	treeEntries, err := gitcache.ListTreeWithModes(cacheRoot, baseRef, commit)
 	if err != nil {
-		return nil, fmt.Errorf("listing tree for %s@%s: %w", cfg.Ref, commit[:12], err)
+		return nil, fmt.Errorf("listing tree for %s@%s: %w", cfg.Ref, safeShort(commit), err)
 	}
 
 	// Build paths list and mode map
@@ -169,7 +169,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		// Read upstream content
 		content, err := gitcache.ShowFile(cacheRoot, baseRef, commit, m.SourcePath)
 		if err != nil {
-			return nil, fmt.Errorf("reading %s from %s@%s: %w", m.SourcePath, cfg.Ref, commit[:12], err)
+			return nil, fmt.Errorf("reading %s from %s@%s: %w", m.SourcePath, cfg.Ref, safeShort(commit), err)
 		}
 
 		upstreamHash := fmt.Sprintf("%x", sha256.Sum256(content))
@@ -362,6 +362,14 @@ func findLockFile(entry *lock.EnvEntry, sourcePath string) *lock.LockFile {
 		}
 	}
 	return nil
+}
+
+// safeShort returns the first 12 chars of s, or s itself if shorter.
+func safeShort(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
 }
 
 // hookStdout returns the configured stdout writer, defaulting to os.Stdout.
