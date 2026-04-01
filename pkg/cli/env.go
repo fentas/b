@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/fentas/goodies/templates"
 	"github.com/spf13/cobra"
@@ -190,6 +191,15 @@ func (o *EnvRemoveOptions) Run(key string) error {
 				if !filepath.IsAbs(destPath) {
 					destPath = filepath.Join(lockDir, destPath)
 				}
+				destPath = filepath.Clean(destPath)
+
+				// Path traversal check: refuse to delete outside project root
+				rel, relErr := filepath.Rel(lockDir, destPath)
+				if relErr != nil || strings.HasPrefix(rel, "..") {
+					fmt.Fprintf(o.IO.ErrOut, "  Warning: skipping %s (resolves outside project root)\n", f.Dest)
+					continue
+				}
+
 				if err := os.Remove(destPath); err != nil && !os.IsNotExist(err) {
 					fmt.Fprintf(o.IO.ErrOut, "  Warning: could not delete %s: %v\n", destPath, err)
 				} else if err == nil {
