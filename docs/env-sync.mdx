@@ -52,10 +52,14 @@ envs:
 
 | Field | Description | Default |
 |-------|-------------|---------|
+| `description` | Human-readable description of what this env provides | none |
 | `version` | Git tag, branch, or commit SHA to pin | `HEAD` (latest default branch) |
 | `strategy` | How to handle local changes: `replace`, `client`, or `merge` | `replace` |
+| `group` | Group name for selective syncing with `--group` | none |
 | `ignore` | Global ignore patterns (applied to all globs) | none |
 | `files` | Map of glob patterns to destination config | all files |
+| `onPreSync` | Shell command to run before syncing this env | none |
+| `onPostSync` | Shell command to run after syncing this env | none |
 
 ### Files map
 
@@ -282,6 +286,99 @@ b cache clean
 
 The cache uses shallow clones (`--depth 1`) to minimize disk usage. Only the specific commits needed for syncing are fetched.
 
+## Managing envs
+
+### Check status
+
+See which envs have upstream changes or local drift without syncing:
+
+```bash
+b env status
+```
+
+Output shows per-env: up-to-date, upstream changes available, locally modified files, or missing files.
+
+### Preview matched files
+
+Test what a glob pattern matches before adding it to config:
+
+```bash
+b env match github.com/org/infra "manifests/base/**" ./base
+```
+
+### Remove an env
+
+Remove an env from `b.yaml` and `b.lock`, optionally deleting synced files:
+
+```bash
+# Remove from config and lock
+b env remove github.com/org/infra
+
+# Also delete synced files from disk
+b env remove --delete-files github.com/org/infra
+```
+
+### Dry-run
+
+Preview what `b update` would change without writing:
+
+```bash
+b update --dry-run
+```
+
+### Rollback
+
+Revert envs to their previous commit (stored in `b.lock`):
+
+```bash
+b update --rollback
+b update --rollback github.com/org/infra
+```
+
+## Groups
+
+Tag envs with a `group` field to sync selectively:
+
+```yaml
+envs:
+  github.com/org/infra#base:
+    group: dev
+    files:
+      manifests/base/**:
+        dest: base/
+
+  github.com/org/infra#monitoring:
+    group: prod
+    files:
+      manifests/monitoring/**:
+        dest: monitoring/
+```
+
+```bash
+# Only sync dev envs
+b update --group=dev
+```
+
+## Hooks
+
+Run shell commands before or after syncing an env:
+
+```yaml
+envs:
+  github.com/org/infra:
+    onPreSync: "echo 'Starting sync...'"
+    onPostSync: "kubectl apply -k manifests/"
+    files:
+      manifests/**:
+        dest: manifests/
+```
+
+Hooks run in the project root directory. They are skipped in `--dry-run` mode.
+
+## File modes
+
+**b** preserves executable file modes from upstream. Files with git mode `100755` are written with `0755` permissions; all others use `0644`. This ensures shell scripts synced from upstream remain executable.
+
 ## Tips
 
 - **CI/CD**: In non-interactive environments, `replace` applies silently. Use `client` or `merge` if your pipeline modifies synced files before committing.
@@ -289,3 +386,4 @@ The cache uses shallow clones (`--depth 1`) to minimize disk usage. Only the spe
 - **Conflict warnings**: If two env entries write to the same destination path, **b** warns before syncing. Use distinct `dest` values or `ignore` patterns to resolve.
 - **Authentication**: Private repos require a `GITHUB_TOKEN`, `GITLAB_TOKEN`, or `GITEA_TOKEN` environment variable. See [Authentication](/authentication).
 - **Force sync**: Use `b update --force` to re-sync even when the lock says you're up to date.
+- **Unchanged files**: Files that haven't changed between commits are automatically skipped to avoid unnecessary writes.

@@ -161,7 +161,9 @@ func TestEnvStatus_UpstreamChanged(t *testing.T) {
 	shared.loadedConfigPath = filepath.Join(tmpDir, "b.yaml")
 
 	o := &EnvStatusOptions{SharedOptions: shared}
-	o.Run()
+	if err := o.Run(); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
 	if !strings.Contains(out.String(), "upstream changed") {
 		t.Errorf("output = %q, want 'upstream changed'", out.String())
 	}
@@ -201,7 +203,9 @@ func TestEnvStatus_LocalDrift(t *testing.T) {
 	shared.loadedConfigPath = filepath.Join(tmpDir, "b.yaml")
 
 	o := &EnvStatusOptions{SharedOptions: shared}
-	o.Run()
+	if err := o.Run(); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
 	if !strings.Contains(out.String(), "modified locally") {
 		t.Errorf("output = %q, want 'modified locally'", out.String())
 	}

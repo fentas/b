@@ -294,12 +294,16 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			continue // don't overwrite lock entry when up-to-date
 		}
 
-		prefix := ""
+		modes := []string{}
 		if o.DryRun {
-			prefix = "(dry-run) "
+			modes = append(modes, "dry-run")
 		}
 		if o.Rollback {
-			prefix = "(rollback) "
+			modes = append(modes, "rollback")
+		}
+		prefix := ""
+		if len(modes) > 0 {
+			prefix = fmt.Sprintf("(%s) ", strings.Join(modes, ", "))
 		}
 
 		fmt.Fprintf(o.IO.Out, "  %s%-40s %s → %s (%s)\n", prefix, entry.Key, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)

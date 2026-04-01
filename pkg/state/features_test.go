@@ -187,9 +187,14 @@ github.com/org/infra:
 	}
 
 	// Marshal and re-parse
-	data, _ := yaml.Marshal(&list)
+	data, err := yaml.Marshal(&list)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
 	var list2 EnvList
-	yaml.Unmarshal(data, &list2)
+	if err := yaml.Unmarshal(data, &list2); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
 
 	e2 := list2[0]
 	if e2.Group != "staging" {

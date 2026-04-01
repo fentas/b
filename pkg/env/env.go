@@ -4,6 +4,7 @@ package env
 import (
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,6 +41,8 @@ type EnvConfig struct {
 	ForceCommit     string                         // if set, use this commit instead of resolving version
 	OnPreSync       string                         // shell command to run before syncing
 	OnPostSync      string                         // shell command to run after syncing
+	Stdout          io.Writer                      // output for hooks (defaults to os.Stdout)
+	Stderr          io.Writer                      // error output for hooks (defaults to os.Stderr)
 }
 
 // SyncResult is the result of syncing a single env.
@@ -101,7 +104,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 
 	// Run pre-sync hook (skip in dry-run mode)
 	if cfg.OnPreSync != "" && !cfg.DryRun {
-		if err := runHook(cfg.OnPreSync, projectRoot); err != nil {
+		if err := runHook(cfg.OnPreSync, projectRoot, hookStdout(cfg), hookStderr(cfg)); err != nil {
 			return nil, fmt.Errorf("pre-sync hook failed: %w", err)
 		}
 	}
@@ -179,20 +182,23 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		localChanged := false
 		if lockEntry != nil {
 			if oldFile := findLockFile(lockEntry, m.SourcePath); oldFile != nil {
-				// Check if upstream content is identical to what's on disk
-				if oldFile.SHA256 == upstreamHash {
-					lockFiles = append(lockFiles, lock.LockFile{
-						Path:   m.SourcePath,
-						Dest:   m.DestPath,
-						SHA256: upstreamHash,
-						Mode:   fileModeStr,
-						Status: "unchanged",
-					})
-					continue
-				}
 				localHash, hashErr := lock.SHA256File(destPath)
-				if hashErr == nil && localHash != oldFile.SHA256 {
-					localChanged = true
+				if hashErr == nil {
+					// Fast-path: treat as unchanged only when local file matches upstream content
+					if localHash == upstreamHash {
+						lockFiles = append(lockFiles, lock.LockFile{
+							Path:   m.SourcePath,
+							Dest:   m.DestPath,
+							SHA256: upstreamHash,
+							Mode:   fileModeStr,
+							Status: "unchanged",
+						})
+						continue
+					}
+					// Otherwise, detect local drift relative to the previous lock entry
+					if localHash != oldFile.SHA256 {
+						localChanged = true
+					}
 				}
 			}
 		}
@@ -278,7 +284,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 
 	// Run post-sync hook (skip in dry-run mode)
 	if cfg.OnPostSync != "" && !cfg.DryRun {
-		if err := runHook(cfg.OnPostSync, projectRoot); err != nil {
+		if err := runHook(cfg.OnPostSync, projectRoot, hookStdout(cfg), hookStderr(cfg)); err != nil {
 			return nil, fmt.Errorf("post-sync hook failed: %w", err)
 		}
 	}
@@ -328,6 +334,10 @@ func writeFile(destPath string, content []byte, mode os.FileMode) error {
 	if err := os.WriteFile(destPath, content, mode); err != nil {
 		return fmt.Errorf("writing %s: %w", destPath, err)
 	}
+	// os.WriteFile only applies mode on create; explicitly chmod for existing files
+	if err := os.Chmod(destPath, mode); err != nil {
+		return fmt.Errorf("setting permissions on %s: %w", destPath, err)
+	}
 	return nil
 }
 
@@ -344,12 +354,28 @@ func findLockFile(entry *lock.EnvEntry, sourcePath string) *lock.LockFile {
 	return nil
 }
 
+// hookStdout returns the configured stdout writer, defaulting to os.Stdout.
+func hookStdout(cfg EnvConfig) io.Writer {
+	if cfg.Stdout != nil {
+		return cfg.Stdout
+	}
+	return os.Stdout
+}
+
+// hookStderr returns the configured stderr writer, defaulting to os.Stderr.
+func hookStderr(cfg EnvConfig) io.Writer {
+	if cfg.Stderr != nil {
+		return cfg.Stderr
+	}
+	return os.Stderr
+}
+
 // runHook executes a shell command in the given directory.
-func runHook(command, dir string) error {
+func runHook(command, dir string, stdout, stderr io.Writer) error {
 	cmd := exec.Command("sh", "-c", command)
 	cmd.Dir = dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	return cmd.Run()
 }
 

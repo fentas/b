@@ -1,10 +1,13 @@
 package env
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fentas/b/pkg/lock"
@@ -100,7 +103,7 @@ func TestRunHook_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 	markerFile := filepath.Join(tmpDir, "hook-ran")
 
-	err := runHook(fmt.Sprintf("touch %s", markerFile), tmpDir)
+	err := runHook(fmt.Sprintf("touch %s", markerFile), tmpDir, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("runHook() error = %v", err)
 	}
@@ -111,7 +114,7 @@ func TestRunHook_Success(t *testing.T) {
 }
 
 func TestRunHook_Failure(t *testing.T) {
-	err := runHook("exit 1", t.TempDir())
+	err := runHook("exit 1", t.TempDir(), io.Discard, io.Discard)
 	if err == nil {
 		t.Error("expected error from failing hook")
 	}
@@ -119,9 +122,20 @@ func TestRunHook_Failure(t *testing.T) {
 
 func TestRunHook_UsesWorkingDir(t *testing.T) {
 	tmpDir := t.TempDir()
-	err := runHook("test -d .", tmpDir)
+	err := runHook("test -d .", tmpDir, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("runHook() should succeed in valid dir, got %v", err)
+	}
+}
+
+func TestRunHook_CapturesOutput(t *testing.T) {
+	var stdout bytes.Buffer
+	err := runHook("echo hello", t.TempDir(), &stdout, io.Discard)
+	if err != nil {
+		t.Fatalf("runHook() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "hello") {
+		t.Errorf("stdout = %q, want 'hello'", stdout.String())
 	}
 }
 

@@ -112,7 +112,7 @@ func ListTreeWithModes(root, ref, commit string) ([]TreeEntry, error) {
 		// Format: <mode> <type> <hash>\t<path>
 		tabIdx := strings.IndexByte(line, '\t')
 		if tabIdx == -1 {
-			continue
+			return nil, fmt.Errorf("git ls-tree: unexpected line format: %q", line)
 		}
 		path := line[tabIdx+1:]
 		fields := strings.Fields(line[:tabIdx])
