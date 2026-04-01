@@ -186,6 +186,16 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 				if hashErr == nil {
 					// Fast-path: treat as unchanged only when local file matches upstream content
 					if localHash == upstreamHash {
+						// Ensure file permissions match upstream even when content is identical
+						if !cfg.DryRun {
+							if info, statErr := os.Stat(destPath); statErr == nil {
+								if info.Mode().Perm() != fileMode {
+									if chmodErr := os.Chmod(destPath, fileMode); chmodErr != nil {
+										return nil, fmt.Errorf("updating permissions for %s: %w", destPath, chmodErr)
+									}
+								}
+							}
+						}
 						lockFiles = append(lockFiles, lock.LockFile{
 							Path:   m.SourcePath,
 							Dest:   m.DestPath,
