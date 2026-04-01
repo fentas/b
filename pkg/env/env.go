@@ -162,7 +162,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 
 		// Path traversal check: ensure resolved path stays under projectRoot
 		rel, err := filepath.Rel(projectRoot, destPath)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 			return nil, fmt.Errorf("path traversal rejected: %s resolves outside project root", m.DestPath)
 		}
 
@@ -196,12 +196,16 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 								}
 							}
 						}
+						unchangedStatus := "unchanged"
+						if cfg.DryRun {
+							unchangedStatus += " (dry-run)"
+						}
 						lockFiles = append(lockFiles, lock.LockFile{
 							Path:   m.SourcePath,
 							Dest:   m.DestPath,
 							SHA256: upstreamHash,
 							Mode:   fileModeStr,
-							Status: "unchanged",
+							Status: unchangedStatus,
 						})
 						continue
 					}

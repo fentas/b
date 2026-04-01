@@ -211,7 +211,7 @@ func (o *EnvRemoveOptions) Run(key string) error {
 
 				// Path traversal check: refuse to delete outside project root
 				rel, relErr := filepath.Rel(lockDir, destPath)
-				if relErr != nil || strings.HasPrefix(rel, "..") {
+				if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 					fmt.Fprintf(o.IO.ErrOut, "  Warning: skipping %s (resolves outside project root)\n", f.Dest)
 					continue
 				}
