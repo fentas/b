@@ -46,6 +46,15 @@ module.exports = {
       className: "homepage-sidebar-item",
     },
     {
+      type: "doc",
+      id: "env-sync",
+      label: "Env Sync",
+      customProps: {
+        sidebar_icon: "arrows-pointing-in",
+      },
+      className: "homepage-sidebar-item",
+    },
+    {
       type: "html",
       value: "Browse Docs",
       customProps: {
