@@ -502,7 +502,7 @@ func syncMessage(files []lock.LockFile, conflicts int) string {
 		case status == "merged":
 			merged++
 		case status == "conflict":
-			merged++ // conflicts are a type of merge
+			// conflicts are reported separately via the conflicts argument
 		}
 	}
 

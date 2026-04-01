@@ -217,8 +217,8 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		return nil
 	}
 
-	// Check for dest path conflicts between envs
-	o.checkEnvConflicts(refs)
+	// Check for dest path conflicts between envs (filtered by refs/group)
+	o.checkEnvConflicts(refs, o.Group)
 
 	lockDir := o.LockDir()
 	projectRoot := lockDir
@@ -522,8 +522,8 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 }
 
 // checkEnvConflicts detects when two env entries write to overlapping dest paths.
-// It checks the lock file for existing dest paths across all env entries.
-func (o *UpdateOptions) checkEnvConflicts(refs []string) {
+// It checks the lock file for existing dest paths, filtered by refs and group.
+func (o *UpdateOptions) checkEnvConflicts(refs []string, group string) {
 	if o.Config == nil || len(o.Config.Envs) < 2 {
 		return
 	}
@@ -533,7 +533,34 @@ func (o *UpdateOptions) checkEnvConflicts(refs []string) {
 		return
 	}
 
-	// Build a map of dest → env ref for all env entries in the lock
+	// Build set of active env keys (matching refs/group filter)
+	activeKeys := make(map[string]bool)
+	for _, entry := range o.Config.Envs {
+		if refs != nil {
+			found := false
+			for _, r := range refs {
+				if entry.Key == r {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+		if group != "" && entry.Group != group {
+			continue
+		}
+		ref := gitcache.RefBase(entry.Key)
+		label := gitcache.RefLabel(entry.Key)
+		key := ref
+		if label != "" {
+			key += "#" + label
+		}
+		activeKeys[key] = true
+	}
+
+	// Build a map of dest → env ref for active env entries in the lock
 	type destOwner struct {
 		ref  string
 		path string // source path
@@ -544,6 +571,9 @@ func (o *UpdateOptions) checkEnvConflicts(refs []string) {
 		key := envEntry.Ref
 		if envEntry.Label != "" {
 			key += "#" + envEntry.Label
+		}
+		if !activeKeys[key] {
+			continue
 		}
 		for _, f := range envEntry.Files {
 			if existing, ok := destMap[f.Dest]; ok {

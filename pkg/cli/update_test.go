@@ -1310,7 +1310,7 @@ func TestCheckEnvConflicts(t *testing.T) {
 	}
 
 	// nil Config → exits early
-	o.checkEnvConflicts(nil)
+	o.checkEnvConflicts(nil, "")
 	if errBuf.Len() > 0 {
 		t.Errorf("nil config should produce no output")
 	}
@@ -1351,7 +1351,7 @@ func TestCheckEnvConflicts_WithLabel(t *testing.T) {
 		},
 	}
 
-	o.checkEnvConflicts(nil)
+	o.checkEnvConflicts(nil, "")
 	if !strings.Contains(errBuf.String(), "Conflict") {
 		t.Errorf("expected conflict for label entries, got: %s", errBuf.String())
 	}
@@ -1381,7 +1381,7 @@ func TestCheckEnvConflicts_NilLock(t *testing.T) {
 		},
 	}
 
-	o.checkEnvConflicts(nil) // should not panic
+	o.checkEnvConflicts(nil, "") // should not panic
 	if errBuf.Len() > 0 {
 		t.Errorf("nil lock should produce no output, got: %s", errBuf.String())
 	}
@@ -1657,7 +1657,7 @@ func TestCheckEnvConflicts_ReadLockError(t *testing.T) {
 		},
 	}
 
-	o.checkEnvConflicts(nil) // should not panic, silently exits
+	o.checkEnvConflicts(nil, "") // should not panic, silently exits
 	// No conflict output since lock is nil
 }
 

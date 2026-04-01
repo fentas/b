@@ -66,7 +66,7 @@ func TestSyncMessage(t *testing.T) {
 				{Status: "conflict"},
 			},
 			conflicts: 1,
-			want:      "1 replaced, 1 merged, 1 conflict(s)",
+			want:      "1 replaced, 1 conflict(s)",
 		},
 		{
 			name: "all kept",

@@ -399,7 +399,7 @@ func TestCheckEnvConflicts_NoConflicts(t *testing.T) {
 		},
 	}
 
-	o.checkEnvConflicts(nil)
+	o.checkEnvConflicts(nil, "")
 
 	if errBuf.Len() > 0 {
 		t.Errorf("expected no conflict warnings, got: %s", errBuf.String())
@@ -447,7 +447,7 @@ func TestCheckEnvConflicts_WithConflicts(t *testing.T) {
 		},
 	}
 
-	o.checkEnvConflicts(nil)
+	o.checkEnvConflicts(nil, "")
 
 	if !bytes.Contains(errBuf.Bytes(), []byte("Conflict")) {
 		t.Errorf("expected conflict warning, got: %s", errBuf.String())
@@ -468,7 +468,7 @@ func TestCheckEnvConflicts_SingleEnv(t *testing.T) {
 	}
 
 	// Should exit early with < 2 envs
-	o.checkEnvConflicts(nil)
+	o.checkEnvConflicts(nil, "")
 	if errBuf.Len() > 0 {
 		t.Errorf("single env should not produce warnings")
 	}
@@ -483,7 +483,7 @@ func TestCheckEnvConflicts_NilConfig(t *testing.T) {
 	}
 
 	// Should not panic
-	o.checkEnvConflicts(nil)
+	o.checkEnvConflicts(nil, "")
 }
 
 // --- List tests ---
