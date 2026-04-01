@@ -242,6 +242,10 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 				if localHash != "" {
 					finalHash = localHash
 				}
+				// Record on-disk mode (not upstream) since we're keeping the local file
+				if info, statErr := os.Stat(destPath); statErr == nil {
+					fileModeStr = fileModeToString(info.Mode().Perm())
+				}
 
 			case StrategyMerge:
 				merged, hasConflict, mergeErr := doMerge(cacheRoot, baseRef, previousCommit, m.SourcePath, destPath, content)
@@ -406,8 +410,11 @@ func ValidatePathUnderRoot(root, destPath string) error {
 
 	resolvedAncestor, err := filepath.EvalSymlinks(ancestor)
 	if err != nil {
-		// Ancestor doesn't exist yet — will be created; basic check is sufficient
-		return nil
+		if os.IsNotExist(err) {
+			// Ancestor doesn't exist yet — will be created; basic check is sufficient
+			return nil
+		}
+		return fmt.Errorf("resolving ancestor %q: %w", ancestor, err)
 	}
 
 	relResolved, err := filepath.Rel(resolvedRoot, resolvedAncestor)

@@ -376,7 +376,7 @@ Hooks run in the project root directory. They are skipped in `--dry-run` mode.
 
 ## File modes
 
-**b** preserves executable file modes from upstream. Files with git mode `100755` are written with `0755` permissions; all others use `0644`. This ensures shell scripts synced from upstream remain executable.
+**b** preserves executable file modes from upstream. Files with git mode `100755` are written targeting `0755` permissions, but the initial write respects your system umask and may be more restrictive; subsequent updates normalize permissions to match upstream. Non-executable files target `0644`, also subject to umask on first write. This ensures shell scripts synced from upstream remain executable while honoring local security settings.
 
 ## Tips
 
