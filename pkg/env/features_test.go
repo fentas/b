@@ -267,3 +267,52 @@ func TestUnchangedDetection_LocalDiffers(t *testing.T) {
 		t.Error("local and upstream hashes should differ")
 	}
 }
+
+// --- ValidatePathUnderRoot ---
+
+func TestValidatePathUnderRoot_Valid(t *testing.T) {
+	tmpDir := t.TempDir()
+	destPath := filepath.Join(tmpDir, "sub", "file.yaml")
+
+	if err := ValidatePathUnderRoot(tmpDir, destPath); err != nil {
+		t.Errorf("expected valid path, got: %v", err)
+	}
+}
+
+func TestValidatePathUnderRoot_DotDotEscape(t *testing.T) {
+	tmpDir := t.TempDir()
+	destPath := filepath.Join(tmpDir, "..", "escape.yaml")
+
+	if err := ValidatePathUnderRoot(tmpDir, destPath); err == nil {
+		t.Error("expected error for .. escape")
+	}
+}
+
+func TestValidatePathUnderRoot_SymlinkEscape(t *testing.T) {
+	tmpDir := t.TempDir()
+	outsideDir := t.TempDir()
+
+	// Create a symlink inside tmpDir that points outside
+	symlinkPath := filepath.Join(tmpDir, "escape-link")
+	if err := os.Symlink(outsideDir, symlinkPath); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	destPath := filepath.Join(symlinkPath, "file.yaml")
+
+	if err := ValidatePathUnderRoot(tmpDir, destPath); err == nil {
+		t.Error("expected error for symlink escape")
+	}
+}
+
+func TestValidatePathUnderRoot_NestedValid(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Create a real nested directory
+	nested := filepath.Join(tmpDir, "a", "b", "c")
+	os.MkdirAll(nested, 0755)
+	destPath := filepath.Join(nested, "file.yaml")
+
+	if err := ValidatePathUnderRoot(tmpDir, destPath); err != nil {
+		t.Errorf("expected valid nested path, got: %v", err)
+	}
+}

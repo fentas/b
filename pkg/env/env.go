@@ -160,10 +160,9 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		}
 		destPath = filepath.Clean(destPath)
 
-		// Path traversal check: ensure resolved path stays under projectRoot
-		rel, err := filepath.Rel(projectRoot, destPath)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-			return nil, fmt.Errorf("path traversal rejected: %s resolves outside project root", m.DestPath)
+		// Path traversal check (including symlinks)
+		if err := ValidatePathUnderRoot(projectRoot, destPath); err != nil {
+			return nil, fmt.Errorf("path traversal rejected for %s: %w", m.DestPath, err)
 		}
 
 		// Read upstream content
@@ -375,6 +374,47 @@ func findLockFile(entry *lock.EnvEntry, sourcePath string) *lock.LockFile {
 			return &entry.Files[i]
 		}
 	}
+	return nil
+}
+
+// ValidatePathUnderRoot checks that destPath stays under root, including
+// resolving symlinks on the nearest existing ancestor directory.
+func ValidatePathUnderRoot(root, destPath string) error {
+	// Basic relative-path check
+	rel, err := filepath.Rel(root, destPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("resolves outside project root")
+	}
+
+	// Symlink-aware check: resolve the nearest existing ancestor and verify
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolving project root: %w", err)
+	}
+
+	ancestor := filepath.Dir(destPath)
+	for {
+		if info, statErr := os.Stat(ancestor); statErr == nil && info.IsDir() {
+			break
+		}
+		parent := filepath.Dir(ancestor)
+		if parent == ancestor {
+			break
+		}
+		ancestor = parent
+	}
+
+	resolvedAncestor, err := filepath.EvalSymlinks(ancestor)
+	if err != nil {
+		// Ancestor doesn't exist yet — will be created; basic check is sufficient
+		return nil
+	}
+
+	relResolved, err := filepath.Rel(resolvedRoot, resolvedAncestor)
+	if err != nil || relResolved == ".." || strings.HasPrefix(relResolved, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("resolves outside project root via symlink")
+	}
+
 	return nil
 }
 

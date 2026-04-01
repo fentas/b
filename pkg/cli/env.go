@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/fentas/goodies/templates"
 	"github.com/spf13/cobra"
 
+	"github.com/fentas/b/pkg/env"
 	"github.com/fentas/b/pkg/envmatch"
 	"github.com/fentas/b/pkg/gitcache"
 	"github.com/fentas/b/pkg/lock"
@@ -106,9 +106,8 @@ func (o *EnvStatusOptions) Run() error {
 			}
 			destPath = filepath.Clean(destPath)
 
-			// Skip paths that escape the project root
-			rel, relErr := filepath.Rel(lockDir, destPath)
-			if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			// Skip paths that escape the project root (including via symlinks)
+			if err := env.ValidatePathUnderRoot(lockDir, destPath); err != nil {
 				localDrift++
 				continue
 			}
@@ -218,9 +217,8 @@ func (o *EnvRemoveOptions) Run(key string) error {
 				}
 				destPath = filepath.Clean(destPath)
 
-				// Path traversal check: refuse to delete outside project root
-				rel, relErr := filepath.Rel(lockDir, destPath)
-				if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+				// Path traversal check (including symlinks): refuse to delete outside project root
+				if err := env.ValidatePathUnderRoot(lockDir, destPath); err != nil {
 					fmt.Fprintf(o.IO.ErrOut, "  Warning: skipping %s (resolves outside project root)\n", f.Dest)
 					continue
 				}
