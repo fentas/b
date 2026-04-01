@@ -290,6 +290,46 @@ func TestEnvRemove_DeletesFiles(t *testing.T) {
 	}
 }
 
+func TestEnvRemove_PathTraversal(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a file outside project root that a malicious lock entry might reference
+	outsideFile := filepath.Join(tmpDir, "..", "shouldnotdelete")
+	os.WriteFile(outsideFile, []byte("important"), 0644)
+	defer os.Remove(outsideFile)
+
+	lk := &lock.Lock{
+		Envs: []lock.EnvEntry{
+			{
+				Ref:    "github.com/org/evil",
+				Commit: "abc",
+				Files: []lock.LockFile{
+					{Path: "escape.yaml", Dest: "../shouldnotdelete"},
+				},
+			},
+		},
+	}
+	lock.WriteLock(tmpDir, lk, "v1.0")
+
+	errOut := &bytes.Buffer{}
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: errOut}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{}
+	shared.loadedConfigPath = filepath.Join(tmpDir, "b.yaml")
+	shared.bVersion = "v1.0"
+
+	o := &EnvRemoveOptions{SharedOptions: shared, DeleteFiles: true}
+	o.Run("github.com/org/evil")
+
+	// File outside project root should NOT be deleted
+	if _, err := os.Stat(outsideFile); os.IsNotExist(err) {
+		t.Error("file outside project root should not be deleted")
+	}
+	if !strings.Contains(errOut.String(), "outside project root") {
+		t.Errorf("expected path traversal warning, got: %q", errOut.String())
+	}
+}
+
 // --- Feature 9: env match ---
 
 func TestEnvMatch_ParsesArgs(t *testing.T) {

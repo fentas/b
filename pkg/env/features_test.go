@@ -79,6 +79,29 @@ func TestFileModeToString(t *testing.T) {
 	}
 }
 
+func TestWriteFile_ChmodExistingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	destPath := filepath.Join(tmpDir, "script.sh")
+
+	// Create file with 0644
+	if err := writeFile(destPath, []byte("#!/bin/sh"), 0644); err != nil {
+		t.Fatalf("writeFile() error = %v", err)
+	}
+	info, _ := os.Stat(destPath)
+	if info.Mode().Perm()&0100 != 0 {
+		t.Fatal("file should not be executable yet")
+	}
+
+	// Overwrite same content but with 0755 — should chmod existing file
+	if err := writeFile(destPath, []byte("#!/bin/sh"), 0755); err != nil {
+		t.Fatalf("writeFile() error = %v", err)
+	}
+	info, _ = os.Stat(destPath)
+	if info.Mode().Perm()&0100 == 0 {
+		t.Errorf("expected executable after writeFile with 0755, got %o", info.Mode().Perm())
+	}
+}
+
 func TestWriteFile_ExecutableMode(t *testing.T) {
 	tmpDir := t.TempDir()
 	destPath := filepath.Join(tmpDir, "script.sh")
