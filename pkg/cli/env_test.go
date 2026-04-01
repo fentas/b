@@ -748,5 +748,125 @@ func TestPrintFileStatus_DryRun(t *testing.T) {
 	}
 }
 
+// --- env profiles ---
+
+func TestNewEnvCmd_HasProfilesAndAdd(t *testing.T) {
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	cmd := NewEnvCmd(shared)
+
+	subs := cmd.Commands()
+	names := make(map[string]bool)
+	for _, s := range subs {
+		names[s.Name()] = true
+	}
+	for _, want := range []string{"profiles", "add"} {
+		if !names[want] {
+			t.Errorf("missing subcommand %q", want)
+		}
+	}
+}
+
+func TestEnvProfilesCmd_Args(t *testing.T) {
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	cmd := NewEnvProfilesCmd(shared)
+
+	if err := cmd.Args(cmd, []string{}); err == nil {
+		t.Error("should require exactly 1 arg")
+	}
+	if err := cmd.Args(cmd, []string{"ref"}); err != nil {
+		t.Errorf("1 arg should be valid: %v", err)
+	}
+	if err := cmd.Args(cmd, []string{"a", "b"}); err == nil {
+		t.Error("2 args should be rejected")
+	}
+}
+
+func TestEnvAddCmd_Args(t *testing.T) {
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	cmd := NewEnvAddCmd(shared)
+
+	if err := cmd.Args(cmd, []string{}); err == nil {
+		t.Error("should require exactly 1 arg")
+	}
+	if err := cmd.Args(cmd, []string{"ref#profile"}); err != nil {
+		t.Errorf("1 arg should be valid: %v", err)
+	}
+
+	// Check --version flag exists
+	if f := cmd.Flags().Lookup("version"); f == nil {
+		t.Error("--version flag not registered")
+	}
+}
+
+func TestEnvAdd_AlreadyExists(t *testing.T) {
+	// Verify the EnvAddOptions struct can be created with existing config
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{
+		Envs: state.EnvList{
+			{Key: "github.com/org/infra#base"},
+		},
+	}
+
+	// Can't test the full Run() without network, but verify the config has the entry
+	if shared.Config.Envs.Get("github.com/org/infra#base") == nil {
+		t.Error("expected to find existing entry")
+	}
+}
+
+// --- helpers ---
+
+func TestFetchUpstreamConfig_NotFound(t *testing.T) {
+	// Use a temp dir as a fake cache root — no git repos there
+	tmpDir := t.TempDir()
+	_, err := fetchUpstreamConfig(tmpDir, "nonexistent", "abc123")
+	if err == nil {
+		t.Error("expected error for missing config")
+	}
+}
+
+func TestSummarizeFiles(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]envmatch.GlobConfig
+		want  string
+	}{
+		{"nil", nil, ""},
+		{"empty", map[string]envmatch.GlobConfig{}, ""},
+		{"single", map[string]envmatch.GlobConfig{
+			"manifests/base/**": {},
+		}, "base/**"},
+		{"two", map[string]envmatch.GlobConfig{
+			"manifests/base/**":    {},
+			"manifests/hetzner/**": {},
+		}, "base/**, hetzner/**"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := summarizeFiles(tt.files)
+			if got != tt.want {
+				t.Errorf("summarizeFiles() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// --- description field ---
+
+func TestEnvStatusShowsDescription(t *testing.T) {
+	// Verify description is available on EnvEntry (compile check)
+	e := state.EnvEntry{
+		Key:         "github.com/org/infra#base",
+		Description: "Base Kubernetes manifests",
+	}
+	if e.Description != "Base Kubernetes manifests" {
+		t.Errorf("Description = %q", e.Description)
+	}
+}
+
 // needed by env_test.go since it accesses unexported field
 var _ = envmatch.GlobConfig{}

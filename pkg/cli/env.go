@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/fentas/goodies/templates"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v2"
 
 	"github.com/fentas/b/pkg/env"
 	"github.com/fentas/b/pkg/envmatch"
@@ -27,6 +30,8 @@ func NewEnvCmd(shared *SharedOptions) *cobra.Command {
 	cmd.AddCommand(NewEnvStatusCmd(shared))
 	cmd.AddCommand(NewEnvRemoveCmd(shared))
 	cmd.AddCommand(NewEnvMatchCmd(shared))
+	cmd.AddCommand(NewEnvProfilesCmd(shared))
+	cmd.AddCommand(NewEnvAddCmd(shared))
 
 	return cmd
 }
@@ -355,4 +360,324 @@ func (o *EnvMatchOptions) Run(args []string) error {
 	}
 
 	return nil
+}
+
+// --- env profiles ---
+
+// EnvProfilesOptions holds options for the env profiles command.
+type EnvProfilesOptions struct {
+	*SharedOptions
+}
+
+// NewEnvProfilesCmd creates the env profiles subcommand.
+func NewEnvProfilesCmd(shared *SharedOptions) *cobra.Command {
+	o := &EnvProfilesOptions{SharedOptions: shared}
+
+	return &cobra.Command{
+		Use:   "profiles <ref>",
+		Short: "Discover available env profiles from an upstream repo",
+		Long: `Fetch the upstream repo's b.yaml to list available env profiles (labeled env entries).
+If no b.yaml is found, shows the directory structure as suggested profiles.`,
+		Example: templates.Examples(`
+			# List profiles from upstream
+			b env profiles github.com/org/infra
+
+			# List profiles from a specific version
+			b env profiles github.com/org/infra@v2.0
+		`),
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return o.Run(args[0])
+		},
+	}
+}
+
+// Run executes the env profiles command.
+func (o *EnvProfilesOptions) Run(refArg string) error {
+	ref := gitcache.RefBase(refArg)
+	version := gitcache.RefVersion(refArg)
+	url := gitcache.GitURL(refArg)
+
+	commit, err := gitcache.ResolveRef(url, version)
+	if err != nil {
+		return fmt.Errorf("resolving %s: %w", refArg, err)
+	}
+
+	cacheRoot := gitcache.DefaultCacheRoot()
+	if err := gitcache.EnsureClone(cacheRoot, ref, url); err != nil {
+		return fmt.Errorf("cloning %s: %w", url, err)
+	}
+	if err := gitcache.Fetch(cacheRoot, ref, commit); err != nil {
+		return fmt.Errorf("fetching %s: %w", commit, err)
+	}
+
+	versionLabel := version
+	if versionLabel == "" {
+		versionLabel = shortCommit(commit)
+	}
+
+	// Try to find and parse upstream b.yaml
+	upstream, err := fetchUpstreamConfig(cacheRoot, ref, commit)
+	if err == nil && len(upstream.Envs) > 0 {
+		fmt.Fprintf(o.IO.Out, "Available profiles from %s @ %s:\n\n", ref, versionLabel)
+		for _, e := range upstream.Envs {
+			label := gitcache.RefLabel(e.Key)
+			name := label
+			if name == "" {
+				name = "(default)"
+			}
+			desc := e.Description
+			if desc == "" {
+				desc = summarizeFiles(e.Files)
+			}
+			fmt.Fprintf(o.IO.Out, "  %-24s %s\n", name, desc)
+			if e.Files != nil {
+				for glob, gc := range e.Files {
+					if gc.Dest != "" {
+						fmt.Fprintf(o.IO.Out, "    %s → %s\n", glob, gc.Dest)
+					} else {
+						fmt.Fprintf(o.IO.Out, "    %s\n", glob)
+					}
+				}
+			}
+			fmt.Fprintln(o.IO.Out)
+		}
+		fmt.Fprintf(o.IO.Out, "Install a profile with:\n  b env add %s#<profile>\n", ref)
+		return nil
+	}
+
+	// Fallback: auto-detect from directory structure
+	tree, err := gitcache.ListTree(cacheRoot, ref, commit)
+	if err != nil {
+		return fmt.Errorf("listing tree: %w", err)
+	}
+
+	dirs := make(map[string]int)
+	for _, p := range tree {
+		parts := strings.SplitN(p, "/", 2)
+		if len(parts) > 1 {
+			dirs[parts[0]]++
+		}
+	}
+
+	if len(dirs) == 0 {
+		fmt.Fprintf(o.IO.Out, "No profiles or directories found in %s\n", ref)
+		return nil
+	}
+
+	// Sort directory names
+	sortedDirs := make([]string, 0, len(dirs))
+	for d := range dirs {
+		sortedDirs = append(sortedDirs, d)
+	}
+	sort.Strings(sortedDirs)
+
+	fmt.Fprintf(o.IO.Out, "No b.yaml found in %s. Detected directories:\n\n", ref)
+	for _, dir := range sortedDirs {
+		count := dirs[dir]
+		fmt.Fprintf(o.IO.Out, "  %-24s %d file(s)\n", dir+"/", count)
+		fmt.Fprintf(o.IO.Out, "    b install %s:/%s/** ./%s\n\n", ref, dir, dir)
+	}
+
+	return nil
+}
+
+// --- env add ---
+
+// EnvAddOptions holds options for the env add command.
+type EnvAddOptions struct {
+	*SharedOptions
+	Version string
+}
+
+// NewEnvAddCmd creates the env add subcommand.
+func NewEnvAddCmd(shared *SharedOptions) *cobra.Command {
+	o := &EnvAddOptions{SharedOptions: shared}
+
+	cmd := &cobra.Command{
+		Use:   "add <ref>[#profile]",
+		Short: "Add an env profile from an upstream repo to your b.yaml",
+		Long: `Fetch the upstream repo's b.yaml and copy the specified profile into your local b.yaml.
+If no profile label is given, adds the default (unlabeled) env entry.`,
+		Example: templates.Examples(`
+			# Add a specific profile
+			b env add github.com/org/infra#monitoring
+
+			# Add with version pin
+			b env add --version v2.0 github.com/org/infra#base
+
+			# Add the default profile (no label)
+			b env add github.com/org/infra
+		`),
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return o.Run(args[0])
+		},
+	}
+
+	cmd.Flags().StringVar(&o.Version, "version", "", "Pin a specific version (tag/branch)")
+
+	return cmd
+}
+
+// Run executes the env add command.
+func (o *EnvAddOptions) Run(refArg string) error {
+	ref := gitcache.RefBase(refArg)
+	label := gitcache.RefLabel(refArg)
+	version := gitcache.RefVersion(refArg)
+	if o.Version != "" {
+		version = o.Version
+	}
+	url := gitcache.GitURL(refArg)
+
+	commit, err := gitcache.ResolveRef(url, version)
+	if err != nil {
+		return fmt.Errorf("resolving %s: %w", refArg, err)
+	}
+
+	cacheRoot := gitcache.DefaultCacheRoot()
+	if err := gitcache.EnsureClone(cacheRoot, ref, url); err != nil {
+		return fmt.Errorf("cloning %s: %w", url, err)
+	}
+	if err := gitcache.Fetch(cacheRoot, ref, commit); err != nil {
+		return fmt.Errorf("fetching %s: %w", commit, err)
+	}
+
+	// Fetch upstream config
+	upstream, err := fetchUpstreamConfig(cacheRoot, ref, commit)
+	if err != nil {
+		return fmt.Errorf("no b.yaml found in %s: %w", ref, err)
+	}
+
+	// Build the key to look up in upstream
+	lookupKey := ref
+	if label != "" {
+		lookupKey = ref + "#" + label
+	}
+
+	// Find the matching env entry in upstream
+	var source *state.EnvEntry
+	for _, e := range upstream.Envs {
+		if e.Key == lookupKey {
+			source = e
+			break
+		}
+	}
+
+	if source == nil {
+		// List available profiles
+		available := []string{}
+		for _, e := range upstream.Envs {
+			available = append(available, e.Key)
+		}
+		if len(available) > 0 {
+			return fmt.Errorf("profile %q not found in %s\n  Available: %s\n  Hint: run `b env profiles %s` to see all profiles",
+				lookupKey, ref, strings.Join(available, ", "), ref)
+		}
+		return fmt.Errorf("no env profiles found in %s's b.yaml", ref)
+	}
+
+	// Build local entry from upstream
+	localKey := lookupKey
+	entry := &state.EnvEntry{
+		Key:         localKey,
+		Description: source.Description,
+		Version:     version,
+		Ignore:      source.Ignore,
+		Strategy:    source.Strategy,
+		Group:       source.Group,
+		OnPreSync:   source.OnPreSync,
+		OnPostSync:  source.OnPostSync,
+		Files:       source.Files,
+	}
+	if entry.Version == "" {
+		entry.Version = source.Version
+	}
+
+	// Load or create local config
+	configPath, err := o.getConfigPath()
+	if err != nil {
+		return fmt.Errorf("cannot determine config path: %w", err)
+	}
+	if configPath == "" {
+		return fmt.Errorf("cannot save config: config path is not set")
+	}
+
+	config := o.Config
+	if config == nil {
+		config = &state.State{}
+	}
+
+	// Check if already exists
+	if existing := config.Envs.Get(localKey); existing != nil {
+		return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", localKey, localKey)
+	}
+
+	config.Envs = append(config.Envs, entry)
+
+	if err := state.SaveConfig(config, configPath); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(o.IO.Out, "Added %s to b.yaml", localKey)
+	if entry.Description != "" {
+		fmt.Fprintf(o.IO.Out, " (%s)", entry.Description)
+	}
+	fmt.Fprintln(o.IO.Out)
+
+	if entry.Files != nil {
+		for glob, gc := range entry.Files {
+			if gc.Dest != "" {
+				fmt.Fprintf(o.IO.Out, "  %s → %s\n", glob, gc.Dest)
+			} else {
+				fmt.Fprintf(o.IO.Out, "  %s\n", glob)
+			}
+		}
+	}
+
+	fmt.Fprintln(o.IO.Out, "\nRun `b update` to sync files.")
+	return nil
+}
+
+// --- shared helpers ---
+
+// fetchUpstreamConfig fetches and parses b.yaml (or .bin/b.yaml) from a cached repo.
+func fetchUpstreamConfig(cacheRoot, ref, commit string) (*state.State, error) {
+	// Try b.yaml
+	content, err := gitcache.ShowFile(cacheRoot, ref, commit, "b.yaml")
+	if err != nil {
+		// Try .bin/b.yaml
+		content, err = gitcache.ShowFile(cacheRoot, ref, commit, ".bin/b.yaml")
+		if err != nil {
+			return nil, fmt.Errorf("b.yaml not found")
+		}
+	}
+
+	var upstream state.State
+	if err := yaml.Unmarshal(content, &upstream); err != nil {
+		return nil, fmt.Errorf("parsing b.yaml: %w", err)
+	}
+	return &upstream, nil
+}
+
+// summarizeFiles builds a short summary from a files map (e.g. "3 glob(s)").
+func summarizeFiles(files map[string]envmatch.GlobConfig) string {
+	if len(files) == 0 {
+		return ""
+	}
+	globs := make([]string, 0, len(files))
+	for g := range files {
+		// Shorten: "manifests/hetzner/**" → "hetzner/**"
+		parts := strings.Split(g, "/")
+		if len(parts) > 1 {
+			globs = append(globs, strings.Join(parts[len(parts)-2:], "/"))
+		} else {
+			globs = append(globs, g)
+		}
+	}
+	sort.Strings(globs)
+	if len(globs) <= 3 {
+		return strings.Join(globs, ", ")
+	}
+	return fmt.Sprintf("%s, ... (%d total)", strings.Join(globs[:2], ", "), len(globs))
 }

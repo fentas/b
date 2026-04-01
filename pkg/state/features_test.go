@@ -156,6 +156,58 @@ func TestEnvEntry_HookFields_Marshal(t *testing.T) {
 	}
 }
 
+// --- Description field ---
+
+func TestEnvEntry_Description_Unmarshal(t *testing.T) {
+	yamlData := `
+github.com/org/infra#base:
+  description: "Base Kubernetes manifests"
+  version: v2.0
+github.com/org/infra#monitoring:
+  description: "Prometheus + Grafana stack"
+`
+	var list EnvList
+	if err := yaml.Unmarshal([]byte(yamlData), &list); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	for _, e := range list {
+		switch e.Key {
+		case "github.com/org/infra#base":
+			if e.Description != "Base Kubernetes manifests" {
+				t.Errorf("base description = %q", e.Description)
+			}
+		case "github.com/org/infra#monitoring":
+			if e.Description != "Prometheus + Grafana stack" {
+				t.Errorf("monitoring description = %q", e.Description)
+			}
+		}
+	}
+}
+
+func TestEnvEntry_Description_Roundtrip(t *testing.T) {
+	list := EnvList{
+		{Key: "github.com/org/infra#base", Description: "Base manifests", Version: "v2.0"},
+	}
+
+	data, err := yaml.Marshal(&list)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	var list2 EnvList
+	if err := yaml.Unmarshal(data, &list2); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if len(list2) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(list2))
+	}
+	if list2[0].Description != "Base manifests" {
+		t.Errorf("description = %q, want %q", list2[0].Description, "Base manifests")
+	}
+}
+
 // --- Feature 10+7: All new fields together ---
 
 func TestEnvEntry_AllNewFields_Roundtrip(t *testing.T) {

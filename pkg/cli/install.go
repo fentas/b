@@ -643,8 +643,13 @@ func (o *InstallOptions) discoverUpstreamConfig(ref string) string {
 	if len(upstream.Envs) > 0 {
 		lines = append(lines, "  Environments:")
 		for _, e := range upstream.Envs {
-			lines = append(lines, fmt.Sprintf("    - %s", e.Key))
+			if e.Description != "" {
+				lines = append(lines, fmt.Sprintf("    - %-30s %s", e.Key, e.Description))
+			} else {
+				lines = append(lines, fmt.Sprintf("    - %s", e.Key))
+			}
 		}
+		lines = append(lines, fmt.Sprintf("  Hint: run `b env profiles %s` to see details", ref))
 	}
 	if len(upstream.Binaries) > 0 {
 		lines = append(lines, "  Binaries:")
