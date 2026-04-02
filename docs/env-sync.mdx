@@ -53,7 +53,18 @@ profiles:
     files:
       manifests/hetzner/**:
         dest: hetzner/
+
+  # Compose profiles with includes
+  staging:
+    description: "Staging preset (base + monitoring)"
+    includes:
+      - base
+      - monitoring
+    ignore:
+      - "**/prod-*"
 ```
+
+Profiles with `includes` are resolved recursively when installed. The including profile's own fields override included ones. Circular includes are rejected.
 
 ### Discovering profiles
 
@@ -87,9 +98,32 @@ b env add github.com/org/infra#monitoring
 b env add --version v2.0 github.com/org/infra#base
 ```
 
-This copies the profile's configuration (files, strategy, hooks, etc.) into your local `b.yaml` as an env entry. Run `b update` to sync the files.
+This copies the profile's configuration (files, strategy, hooks, etc.) into your local `b.yaml` as an env entry. Profiles with `includes` are automatically flattened. Run `b update` to sync the files.
 
 **Version resolution**: `--version` flag takes priority. If omitted and the upstream profile specifies a version, that version is used. Otherwise, HEAD is resolved.
+
+### Interactive selection
+
+Browse and select profiles interactively:
+
+```bash
+$ b env add -i github.com/org/infra
+
+Available profiles from github.com/org/infra:
+
+  [1] base                 Base Kubernetes manifests
+  [2] hetzner              Hetzner-specific infrastructure
+  [3] monitoring           Prometheus + Grafana stack
+  [4] staging              Staging preset (base + monitoring)
+
+Select profiles (space-separated numbers, e.g. "1 3"): 1 3
+Added github.com/org/infra#base to b.yaml (Base Kubernetes manifests)
+Added github.com/org/infra#monitoring to b.yaml (Prometheus + Grafana stack)
+
+Run `b update` to sync files.
+```
+
+Add multiple profiles at once by entering space-separated numbers. Requires a terminal (not available in CI/CD).
 
 ---
 
@@ -119,6 +153,7 @@ envs:
 | Field | Description | Default |
 |-------|-------------|---------|
 | `description` | Human-readable description (shown by `b env profiles`) | none |
+| `includes` | List of profile names to compose from (profiles only) | none |
 | `version` | Git tag, branch, or commit SHA to pin | HEAD |
 | `strategy` | How to handle local changes: `replace`, `client`, or `merge` | `replace` |
 | `group` | Group name for selective syncing with `--group` | none |

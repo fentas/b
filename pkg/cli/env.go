@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -452,6 +454,9 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 				desc = summarizeFiles(e.Files)
 			}
 			fmt.Fprintf(o.IO.Out, "  %-24s %s\n", name, desc)
+			if len(e.Includes) > 0 {
+				fmt.Fprintf(o.IO.Out, "    includes: %s\n", strings.Join(e.Includes, ", "))
+			}
 			if e.Files != nil {
 				globs := make([]string, 0, len(e.Files))
 				for g := range e.Files {
@@ -514,7 +519,9 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 // EnvAddOptions holds options for the env add command.
 type EnvAddOptions struct {
 	*SharedOptions
-	Version string
+	Version     string
+	Interactive bool
+	stdinReader io.Reader // overridden by tests; nil means os.Stdin
 }
 
 // NewEnvAddCmd creates the env add subcommand.
@@ -525,21 +532,33 @@ func NewEnvAddCmd(shared *SharedOptions) *cobra.Command {
 		Use:   "add <ref>#<profile>",
 		Short: "Add an env profile from an upstream repo to your b.yaml",
 		Long: `Fetch the upstream repo's b.yaml and copy the specified profile into your local b.yaml.
-The profile name (after #) must match an entry in the upstream profiles section.`,
+The profile name (after #) must match an entry in the upstream profiles section.
+Use -i for interactive selection.`,
 		Example: templates.Examples(`
 			# Add a profile
 			b env add github.com/org/infra#monitoring
 
 			# Add with version pin
 			b env add --version v2.0 github.com/org/infra#base
+
+			# Interactive selection
+			b env add -i github.com/org/infra
 		`),
-		Args: cobra.ExactArgs(1),
+		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return o.Run(args[0])
+			if len(args) == 0 && !o.Interactive {
+				return fmt.Errorf("requires a ref argument (e.g. github.com/org/infra#profile) or use -i for interactive mode")
+			}
+			arg := ""
+			if len(args) > 0 {
+				arg = args[0]
+			}
+			return o.Run(arg)
 		},
 	}
 
 	cmd.Flags().StringVar(&o.Version, "version", "", "Pin a specific version (tag/branch)")
+	cmd.Flags().BoolVarP(&o.Interactive, "interactive", "i", false, "Interactively select profiles")
 
 	return cmd
 }
@@ -549,7 +568,6 @@ func (o *EnvAddOptions) Run(refArg string) error {
 	ref := gitcache.RefBase(refArg)
 	label := gitcache.RefLabel(refArg)
 	version := gitcache.RefVersion(refArg)
-	// Strip any #label suffix that may be embedded in the version (e.g. repo@v2.0#profile)
 	if idx := strings.Index(version, "#"); idx != -1 {
 		version = version[:idx]
 	}
@@ -557,118 +575,183 @@ func (o *EnvAddOptions) Run(refArg string) error {
 		version = o.Version
 	}
 
+	if o.Interactive {
+		return o.runInteractive(ref, version)
+	}
+
 	if label == "" {
-		return fmt.Errorf("profile name required — use %s#<name>\n  Hint: run `b env profiles %s` to see available profiles", ref, ref)
+		return fmt.Errorf("profile name required — use %s#<name>\n  Hint: run `b env profiles %s` to see available profiles\n  Hint: use -i for interactive selection", ref, ref)
 	}
 
-	// Build the canonical key and check early if it already exists
-	localKey := ref + "#" + label
-	if o.Config != nil {
-		if existing := o.Config.Envs.Get(localKey); existing != nil {
-			return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", localKey, localKey)
+	upstream, err := o.fetchUpstream(ref, version, refArg)
+	if err != nil {
+		return err
+	}
+
+	source, err := o.findProfile(label, ref, upstream)
+	if err != nil {
+		return err
+	}
+
+	return o.addProfile(ref, label, version, source, upstream)
+}
+
+// runInteractive shows a numbered list of profiles and lets the user select.
+func (o *EnvAddOptions) runInteractive(ref, version string) error {
+	if !isTTYFunc() {
+		return fmt.Errorf("interactive mode requires a terminal — use %s#<name> syntax instead", ref)
+	}
+
+	upstream, err := o.fetchUpstream(ref, version, ref)
+	if err != nil {
+		return err
+	}
+
+	if len(upstream.Profiles) == 0 {
+		return fmt.Errorf("no profiles found in %s's b.yaml", ref)
+	}
+
+	// Sort for stable display
+	sorted := make([]*state.EnvEntry, len(upstream.Profiles))
+	copy(sorted, upstream.Profiles)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Key < sorted[j].Key
+	})
+
+	fmt.Fprintf(o.IO.Out, "Available profiles from %s:\n\n", ref)
+	for i, e := range sorted {
+		desc := e.Description
+		if desc == "" {
+			desc = summarizeFiles(e.Files)
 		}
+		fmt.Fprintf(o.IO.Out, "  [%d] %-20s %s\n", i+1, e.Key, desc)
 	}
 
-	url := gitcache.GitURL(refArg)
+	fmt.Fprintf(o.IO.ErrOut, "\nSelect profiles (space-separated numbers, e.g. \"1 3\"): ")
+	reader := o.stdinReader
+	if reader == nil {
+		reader = os.Stdin
+	}
+	input, err := bufio.NewReader(reader).ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("reading input: %w", err)
+	}
 
+	// Parse selection
+	parts := strings.Fields(strings.TrimSpace(input))
+	if len(parts) == 0 {
+		return fmt.Errorf("no profiles selected")
+	}
+
+	added := 0
+	for _, part := range parts {
+		var idx int
+		if _, err := fmt.Sscanf(part, "%d", &idx); err != nil || idx < 1 || idx > len(sorted) {
+			fmt.Fprintf(o.IO.ErrOut, "  Skipping invalid selection: %s\n", part)
+			continue
+		}
+		selected := sorted[idx-1]
+		if err := o.addProfile(ref, selected.Key, version, selected, upstream); err != nil {
+			fmt.Fprintf(o.IO.ErrOut, "  Error adding %s: %v\n", selected.Key, err)
+			continue
+		}
+		added++
+	}
+
+	if added == 0 {
+		return fmt.Errorf("no profiles were added")
+	}
+	fmt.Fprintf(o.IO.Out, "\nRun `b update` to sync files.\n")
+	return nil
+}
+
+// fetchUpstream resolves, clones, fetches, and loads the upstream config.
+func (o *EnvAddOptions) fetchUpstream(ref, version, refArg string) (*state.State, error) {
+	url := gitcache.GitURL(refArg)
 	commit, err := gitcache.ResolveRef(url, version)
 	if err != nil {
-		return fmt.Errorf("resolving %s: %w", refArg, err)
+		return nil, fmt.Errorf("resolving %s: %w", refArg, err)
 	}
 
 	cacheRoot := gitcache.DefaultCacheRoot()
 	if err := gitcache.EnsureClone(cacheRoot, ref, url); err != nil {
-		return fmt.Errorf("cloning %s: %w", url, err)
+		return nil, fmt.Errorf("cloning %s: %w", url, err)
 	}
 	if err := gitcache.Fetch(cacheRoot, ref, commit); err != nil {
-		return fmt.Errorf("fetching %s: %w", commit, err)
+		return nil, fmt.Errorf("fetching %s: %w", commit, err)
 	}
 
-	// Fetch upstream config
 	upstream, err := fetchUpstreamConfig(cacheRoot, ref, commit)
 	if err != nil {
-		return fmt.Errorf("failed to load upstream b.yaml for %s: %w", ref, err)
+		return nil, fmt.Errorf("failed to load upstream b.yaml for %s: %w", ref, err)
 	}
+	return upstream, nil
+}
 
-	// Find the matching profile by short name (label)
-	var source *state.EnvEntry
-	if label != "" {
-		for _, e := range upstream.Profiles {
-			if e.Key == label {
-				source = e
-				break
-			}
+// findProfile looks up a profile by name in the upstream config.
+func (o *EnvAddOptions) findProfile(label, ref string, upstream *state.State) (*state.EnvEntry, error) {
+	for _, e := range upstream.Profiles {
+		if e.Key == label {
+			return e, nil
 		}
 	}
 
-	if source == nil {
-		available := []string{}
-		for _, e := range upstream.Profiles {
-			available = append(available, e.Key)
-		}
-		sort.Strings(available)
-		if len(available) > 0 {
-			return fmt.Errorf("profile %q not found in %s\n  Available: %s\n  Hint: run `b env profiles %s` to see all profiles",
-				label, ref, strings.Join(available, ", "), ref)
-		}
-		return fmt.Errorf("no profiles found in %s's b.yaml", ref)
+	available := []string{}
+	for _, e := range upstream.Profiles {
+		available = append(available, e.Key)
 	}
-
-	// If no explicit version was given and the source specifies one,
-	// re-fetch at source.Version so the copied config matches that version.
-	effectiveVersion := version
-	if effectiveVersion == "" && source.Version != "" {
-		effectiveVersion = source.Version
-		newCommit, err := gitcache.ResolveRef(url, effectiveVersion)
-		if err != nil {
-			return fmt.Errorf("resolving %s@%s: %w", ref, effectiveVersion, err)
-		}
-		if newCommit != commit {
-			if err := gitcache.Fetch(cacheRoot, ref, newCommit); err != nil {
-				return fmt.Errorf("fetching %s: %w", newCommit, err)
-			}
-			// Re-load config at the pinned version
-			versionConfig, err := fetchUpstreamConfig(cacheRoot, ref, newCommit)
-			if err != nil {
-				return fmt.Errorf("loading upstream config for %s@%s: %w", ref, effectiveVersion, err)
-			}
-			found := false
-			// Check profiles first, then envs
-			for _, e := range versionConfig.Profiles {
-				if e.Key == label {
-					source = e
-					found = true
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf("profile %q not found in %s@%s", label, ref, effectiveVersion)
-			}
-		}
+	sort.Strings(available)
+	if len(available) > 0 {
+		return nil, fmt.Errorf("profile %q not found in %s\n  Available: %s\n  Hint: run `b env profiles %s` to see all profiles",
+			label, ref, strings.Join(available, ", "), ref)
 	}
+	return nil, fmt.Errorf("no profiles found in %s's b.yaml", ref)
+}
 
-	// Build local entry from upstream (localKey set at top of function)
-	entry := &state.EnvEntry{
-		Key:         localKey,
-		Description: source.Description,
-		Version:     effectiveVersion,
-		Ignore:      source.Ignore,
-		Strategy:    source.Strategy,
-		Group:       source.Group,
-		OnPreSync:   source.OnPreSync,
-		OnPostSync:  source.OnPostSync,
-		Files:       source.Files,
-	}
+// addProfile resolves includes and adds a single profile to the local config.
+func (o *EnvAddOptions) addProfile(ref, label, version string, source *state.EnvEntry, upstream *state.State) error {
+	localKey := ref + "#" + label
 
-	// Load or create local config (fall back to default path for new projects)
-	configPath, err := o.getConfigPath()
-	if err != nil || configPath == "" {
-		configPath = path.GetDefaultConfigPath()
-	}
-
+	// Check if already exists
 	config := o.Config
 	if config == nil {
 		config = &state.State{}
+	}
+	if existing := config.Envs.Get(localKey); existing != nil {
+		return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", localKey, localKey)
+	}
+
+	// Resolve includes
+	resolved := source
+	if len(source.Includes) > 0 {
+		var err error
+		resolved, err = state.ResolveProfileIncludes(source, upstream.Profiles)
+		if err != nil {
+			return fmt.Errorf("resolving includes for %q: %w", label, err)
+		}
+	}
+
+	// Determine effective version
+	effectiveVersion := version
+	if effectiveVersion == "" && resolved.Version != "" {
+		effectiveVersion = resolved.Version
+	}
+
+	entry := &state.EnvEntry{
+		Key:         localKey,
+		Description: resolved.Description,
+		Version:     effectiveVersion,
+		Ignore:      resolved.Ignore,
+		Strategy:    resolved.Strategy,
+		Group:       resolved.Group,
+		OnPreSync:   resolved.OnPreSync,
+		OnPostSync:  resolved.OnPostSync,
+		Files:       resolved.Files,
+	}
+
+	configPath, err := o.getConfigPath()
+	if err != nil || configPath == "" {
+		configPath = path.GetDefaultConfigPath()
 	}
 
 	config.Envs = append(config.Envs, entry)
@@ -699,7 +782,6 @@ func (o *EnvAddOptions) Run(refArg string) error {
 		}
 	}
 
-	fmt.Fprintln(o.IO.Out, "\nRun `b update` to sync files.")
 	return nil
 }
 

@@ -19,6 +19,7 @@ type State struct {
 type EnvEntry struct {
 	Key         string                         `yaml:"-"` // map key: full ref in envs (e.g. "github.com/org/infra#label"), short name in profiles (e.g. "base")
 	Description string                         `yaml:"description,omitempty"`
+	Includes    []string                       `yaml:"includes,omitempty"` // compose from other profiles
 	Version     string                         `yaml:"version,omitempty"`
 	Ignore      []string                       `yaml:"ignore,omitempty"`
 	Strategy    string                         `yaml:"strategy,omitempty"`
@@ -43,6 +44,7 @@ func (list *EnvList) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		e := &EnvEntry{Key: key}
 		if r != nil {
 			e.Description = r.Description
+			e.Includes = r.Includes
 			e.Version = r.Version
 			e.Ignore = r.Ignore
 			e.Strategy = r.Strategy
@@ -63,6 +65,9 @@ func (list *EnvList) MarshalYAML() (interface{}, error) {
 		cfg := make(map[string]interface{})
 		if e.Description != "" {
 			cfg["description"] = e.Description
+		}
+		if len(e.Includes) > 0 {
+			cfg["includes"] = e.Includes
 		}
 		if e.Version != "" {
 			cfg["version"] = e.Version
@@ -132,6 +137,7 @@ func (list *EnvList) Remove(key string) bool {
 // envEntryRaw is used for YAML unmarshaling before converting files map.
 type envEntryRaw struct {
 	Description string                 `yaml:"description,omitempty"`
+	Includes    []string               `yaml:"includes,omitempty"`
 	Version     string                 `yaml:"version,omitempty"`
 	Ignore      []string               `yaml:"ignore,omitempty"`
 	Strategy    string                 `yaml:"strategy,omitempty"`

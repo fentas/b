@@ -790,14 +790,18 @@ func TestEnvAddCmd_Args(t *testing.T) {
 	shared := NewSharedOptions(io, nil)
 	cmd := NewEnvAddCmd(shared)
 
-	if err := cmd.Args(cmd, []string{}); err == nil {
-		t.Error("should require exactly 1 arg")
+	// 0 args is valid (for -i mode), 1 arg valid, 2 args rejected
+	if err := cmd.Args(cmd, []string{}); err != nil {
+		t.Errorf("0 args should be valid (for -i): %v", err)
 	}
 	if err := cmd.Args(cmd, []string{"ref#profile"}); err != nil {
 		t.Errorf("1 arg should be valid: %v", err)
 	}
+	if err := cmd.Args(cmd, []string{"a", "b"}); err == nil {
+		t.Error("2 args should be rejected")
+	}
 
-	// Check --version flag exists
+	// Check flags exist
 	if f := cmd.Flags().Lookup("version"); f == nil {
 		t.Error("--version flag not registered")
 	}
@@ -863,7 +867,7 @@ func TestFetchUpstreamConfig_ReturnsNotFoundSentinel(t *testing.T) {
 
 // --- env add early exit ---
 
-func TestEnvAdd_ExistingEntryFailsFast(t *testing.T) {
+func TestEnvAdd_ExistingEntryDetected(t *testing.T) {
 	out := &bytes.Buffer{}
 	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
 	shared := NewSharedOptions(io, nil)
@@ -873,8 +877,11 @@ func TestEnvAdd_ExistingEntryFailsFast(t *testing.T) {
 		},
 	}
 
+	source := &state.EnvEntry{Key: "base", Files: map[string]envmatch.GlobConfig{"a/**": {}}}
+	upstream := &state.State{Profiles: state.EnvList{source}}
+
 	o := &EnvAddOptions{SharedOptions: shared}
-	err := o.Run("github.com/org/infra#base")
+	err := o.addProfile("github.com/org/infra", "base", "", source, upstream)
 	if err == nil {
 		t.Fatal("expected error for existing entry")
 	}
@@ -884,27 +891,6 @@ func TestEnvAdd_ExistingEntryFailsFast(t *testing.T) {
 }
 
 // --- profiles top-level key in CLI ---
-
-func TestEnvAdd_ExistingEntryWithLabel(t *testing.T) {
-	// Verify that b env add checks for existing entry using the full ref#label key
-	out := &bytes.Buffer{}
-	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
-	shared := NewSharedOptions(io, nil)
-	shared.Config = &state.State{
-		Envs: state.EnvList{
-			{Key: "github.com/org/infra#monitoring"},
-		},
-	}
-
-	o := &EnvAddOptions{SharedOptions: shared}
-	err := o.Run("github.com/org/infra#monitoring")
-	if err == nil {
-		t.Fatal("expected error for existing entry")
-	}
-	if !strings.Contains(err.Error(), "already exists") {
-		t.Errorf("expected 'already exists' error, got: %v", err)
-	}
-}
 
 func TestEnvAdd_RequiresLabel(t *testing.T) {
 	out := &bytes.Buffer{}
@@ -940,6 +926,94 @@ func TestIsGitNotFound_Comprehensive(t *testing.T) {
 				t.Errorf("isGitNotFound() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// --- interactive mode ---
+
+func TestEnvAddInteractive_FlagRegistered(t *testing.T) {
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	cmd := NewEnvAddCmd(shared)
+
+	if f := cmd.Flags().Lookup("interactive"); f == nil {
+		t.Error("--interactive flag not registered")
+	}
+	if f := cmd.Flags().ShorthandLookup("i"); f == nil {
+		t.Error("-i shorthand not registered")
+	}
+}
+
+func TestEnvAddInteractive_NotTTY(t *testing.T) {
+	saveHooks(t)
+	isTTYFunc = func() bool { return false }
+
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	o := &EnvAddOptions{SharedOptions: shared, Interactive: true}
+	err := o.Run("github.com/org/infra")
+	if err == nil {
+		t.Fatal("expected error for non-TTY")
+	}
+	if !strings.Contains(err.Error(), "terminal") {
+		t.Errorf("expected terminal error, got: %v", err)
+	}
+}
+
+func TestEnvAdd_NoArgsWithoutFlag(t *testing.T) {
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	cmd := NewEnvAddCmd(shared)
+
+	err := cmd.RunE(cmd, []string{})
+	if err == nil {
+		t.Fatal("expected error for no args without -i")
+	}
+	if !strings.Contains(err.Error(), "requires a ref") {
+		t.Errorf("expected usage error, got: %v", err)
+	}
+}
+
+func TestEnvAdd_ResolvesIncludes(t *testing.T) {
+	tmpDir := t.TempDir()
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{}
+	shared.loadedConfigPath = filepath.Join(tmpDir, "b.yaml")
+
+	base := &state.EnvEntry{
+		Key:   "base",
+		Files: map[string]envmatch.GlobConfig{"manifests/base/**": {Dest: "base/"}},
+	}
+	staging := &state.EnvEntry{
+		Key:         "staging",
+		Description: "Staging preset",
+		Includes:    []string{"base"},
+		Ignore:      []string{"**/prod-*"},
+	}
+	upstream := &state.State{
+		Profiles: state.EnvList{base, staging},
+	}
+
+	o := &EnvAddOptions{SharedOptions: shared}
+	if err := o.addProfile("github.com/org/infra", "staging", "v2.0", staging, upstream); err != nil {
+		t.Fatalf("addProfile error: %v", err)
+	}
+
+	// Verify the added entry has merged files from base
+	added := shared.Config.Envs.Get("github.com/org/infra#staging")
+	if added == nil {
+		t.Fatal("expected entry in config")
+	}
+	if _, ok := added.Files["manifests/base/**"]; !ok {
+		t.Error("expected base files to be included")
+	}
+	if len(added.Ignore) == 0 || added.Ignore[0] != "**/prod-*" {
+		t.Errorf("expected ignore from staging, got: %v", added.Ignore)
+	}
+	if added.Description != "Staging preset" {
+		t.Errorf("description = %q", added.Description)
 	}
 }
 
