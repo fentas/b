@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -418,6 +419,9 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 
 	// Try to find and parse upstream b.yaml
 	upstream, err := fetchUpstreamConfig(cacheRoot, ref, commit)
+	if err != nil && !errors.Is(err, errConfigNotFound) {
+		return fmt.Errorf("loading upstream config: %w", err)
+	}
 	if err == nil {
 		if len(upstream.Envs) == 0 {
 			fmt.Fprintf(o.IO.Out, "No env profiles found in %s's b.yaml\n", ref)
@@ -565,7 +569,7 @@ func (o *EnvAddOptions) Run(refArg string) error {
 	// Fetch upstream config
 	upstream, err := fetchUpstreamConfig(cacheRoot, ref, commit)
 	if err != nil {
-		return fmt.Errorf("no b.yaml found in %s: %w", ref, err)
+		return fmt.Errorf("failed to load upstream b.yaml for %s: %w", ref, err)
 	}
 
 	// Build the key to look up in upstream
@@ -584,11 +588,12 @@ func (o *EnvAddOptions) Run(refArg string) error {
 	}
 
 	if source == nil {
-		// List available profiles
+		// List available profiles (sorted for stable output)
 		available := []string{}
 		for _, e := range upstream.Envs {
 			available = append(available, e.Key)
 		}
+		sort.Strings(available)
 		if len(available) > 0 {
 			return fmt.Errorf("profile %q not found in %s\n  Available: %s\n  Hint: run `b env profiles %s` to see all profiles",
 				lookupKey, ref, strings.Join(available, ", "), ref)
@@ -645,7 +650,13 @@ func (o *EnvAddOptions) Run(refArg string) error {
 	fmt.Fprintln(o.IO.Out)
 
 	if entry.Files != nil {
-		for glob, gc := range entry.Files {
+		globs := make([]string, 0, len(entry.Files))
+		for g := range entry.Files {
+			globs = append(globs, g)
+		}
+		sort.Strings(globs)
+		for _, glob := range globs {
+			gc := entry.Files[glob]
 			if gc.Dest != "" {
 				fmt.Fprintf(o.IO.Out, "  %s → %s\n", glob, gc.Dest)
 			} else {
@@ -660,6 +671,9 @@ func (o *EnvAddOptions) Run(refArg string) error {
 
 // --- shared helpers ---
 
+// errConfigNotFound is returned when neither b.yaml nor .bin/b.yaml exists upstream.
+var errConfigNotFound = errors.New("b.yaml not found")
+
 // fetchUpstreamConfig fetches and parses b.yaml (or .bin/b.yaml) from a cached repo.
 func fetchUpstreamConfig(cacheRoot, ref, commit string) (*state.State, error) {
 	// Try b.yaml
@@ -668,7 +682,7 @@ func fetchUpstreamConfig(cacheRoot, ref, commit string) (*state.State, error) {
 		// Try .bin/b.yaml
 		content, err = gitcache.ShowFile(cacheRoot, ref, commit, ".bin/b.yaml")
 		if err != nil {
-			return nil, fmt.Errorf("b.yaml not found")
+			return nil, errConfigNotFound
 		}
 	}
 

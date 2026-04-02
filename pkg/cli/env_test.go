@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -852,6 +853,19 @@ func TestSummarizeFiles(t *testing.T) {
 				t.Errorf("summarizeFiles() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// --- fetchUpstreamConfig error handling ---
+
+func TestFetchUpstreamConfig_ReturnsNotFoundSentinel(t *testing.T) {
+	tmpDir := t.TempDir()
+	_, err := fetchUpstreamConfig(tmpDir, "nonexistent", "abc123")
+	if err == nil {
+		t.Fatal("expected error for missing config")
+	}
+	if !errors.Is(err, errConfigNotFound) {
+		t.Errorf("expected errConfigNotFound, got: %v", err)
 	}
 }
 

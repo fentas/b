@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -642,7 +643,13 @@ func (o *InstallOptions) discoverUpstreamConfig(ref string) string {
 	var lines []string
 	if len(upstream.Envs) > 0 {
 		lines = append(lines, "  Environments:")
-		for _, e := range upstream.Envs {
+		// Sort for deterministic output
+		sortedEnvs := make([]*state.EnvEntry, len(upstream.Envs))
+		copy(sortedEnvs, upstream.Envs)
+		sort.Slice(sortedEnvs, func(i, j int) bool {
+			return sortedEnvs[i].Key < sortedEnvs[j].Key
+		})
+		for _, e := range sortedEnvs {
 			if e.Description != "" {
 				lines = append(lines, fmt.Sprintf("    - %-30s %s", e.Key, e.Description))
 			} else {
