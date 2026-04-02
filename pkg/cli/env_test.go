@@ -987,4 +987,30 @@ func TestEnvAdd_ResolvesIncludes(t *testing.T) {
 }
 
 // needed by env_test.go since it accesses unexported field
+func TestEnvAdd_EmptyFilesAfterResolve(t *testing.T) {
+	tmpDir := t.TempDir()
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{}
+	shared.loadedConfigPath = filepath.Join(tmpDir, "b.yaml")
+
+	// Profile with includes but no files anywhere
+	empty := &state.EnvEntry{Key: "empty"}
+	top := &state.EnvEntry{
+		Key:      "top",
+		Includes: []string{"empty"},
+	}
+	upstream := &state.State{Profiles: state.EnvList{empty, top}}
+
+	o := &EnvAddOptions{SharedOptions: shared}
+	err := o.addProfile("github.com/org/infra", "top", "", top, upstream)
+	if err == nil {
+		t.Fatal("expected error for empty files")
+	}
+	if !strings.Contains(err.Error(), "no file globs") {
+		t.Errorf("expected 'no file globs' error, got: %v", err)
+	}
+}
+
 var _ = envmatch.GlobConfig{}

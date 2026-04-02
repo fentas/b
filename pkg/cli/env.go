@@ -504,11 +504,17 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 	}
 	sort.Strings(sortedDirs)
 
+	// Use the original ref (with version) in install hints
+	installRef := ref
+	if version != "" {
+		installRef = ref + "@" + version
+	}
+
 	fmt.Fprintf(o.IO.Out, "No b.yaml found in %s. Detected directories:\n\n", ref)
 	for _, dir := range sortedDirs {
 		count := dirs[dir]
 		fmt.Fprintf(o.IO.Out, "  %-24s %d file(s)\n", dir+"/", count)
-		fmt.Fprintf(o.IO.Out, "    b install %s:/%s/** ./%s\n\n", ref, dir, dir)
+		fmt.Fprintf(o.IO.Out, "    b install %s:/%s/** ./%s\n\n", installRef, dir, dir)
 	}
 
 	return nil
@@ -734,6 +740,10 @@ func (o *EnvAddOptions) addProfile(ref, label, version string, source *state.Env
 		if err != nil {
 			return fmt.Errorf("resolving includes for %q: %w", label, err)
 		}
+	}
+
+	if len(resolved.Files) == 0 {
+		return fmt.Errorf("profile %q has no file globs — nothing to sync", label)
 	}
 
 	// Use only the user-specified version. If empty, the config was loaded
