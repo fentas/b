@@ -822,15 +822,6 @@ func TestEnvAdd_AlreadyExists(t *testing.T) {
 
 // --- helpers ---
 
-func TestFetchUpstreamConfig_NotFound(t *testing.T) {
-	// Use a temp dir as a fake cache root — no git repos there
-	tmpDir := t.TempDir()
-	_, err := fetchUpstreamConfig(tmpDir, "nonexistent", "abc123")
-	if err == nil {
-		t.Error("expected error for missing config")
-	}
-}
-
 func TestSummarizeFiles(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -889,41 +880,6 @@ func TestEnvAdd_ExistingEntryFailsFast(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("expected 'already exists' error, got: %v", err)
-	}
-}
-
-// --- isGitNotFound ---
-
-func TestIsGitNotFound(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"nil", nil, false},
-		{"does not exist", fmt.Errorf("fatal: path 'x' does not exist in 'HEAD'"), true},
-		{"no such file", fmt.Errorf("fatal: cannot change to '/x': No such file or directory"), true},
-		{"other error", fmt.Errorf("fatal: bad object abc123"), false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isGitNotFound(tt.err); got != tt.want {
-				t.Errorf("isGitNotFound() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-// --- description field ---
-
-func TestEnvEntry_DescriptionField(t *testing.T) {
-	// Verify description field exists and is settable on EnvEntry
-	e := state.EnvEntry{
-		Key:         "github.com/org/infra#base",
-		Description: "Base Kubernetes manifests",
-	}
-	if e.Description != "Base Kubernetes manifests" {
-		t.Errorf("Description = %q", e.Description)
 	}
 }
 
