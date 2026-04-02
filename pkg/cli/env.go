@@ -474,7 +474,11 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 			}
 			fmt.Fprintln(o.IO.Out)
 		}
-		fmt.Fprintf(o.IO.Out, "Install a profile with:\n  b env add %s#<name>\n", ref)
+		if version != "" {
+			fmt.Fprintf(o.IO.Out, "Install a profile with:\n  b env add --version %s %s#<name>\n", version, ref)
+		} else {
+			fmt.Fprintf(o.IO.Out, "Install a profile with:\n  b env add %s#<name>\n", ref)
+		}
 		return nil
 	}
 
@@ -535,7 +539,7 @@ func NewEnvAddCmd(shared *SharedOptions) *cobra.Command {
 	o := &EnvAddOptions{SharedOptions: shared}
 
 	cmd := &cobra.Command{
-		Use:   "add <ref>#<profile>",
+		Use:   "add <ref>#<profile> | add -i <ref>",
 		Short: "Add an env profile from an upstream repo to your b.yaml",
 		Long: `Fetch the upstream repo's b.yaml and copy the specified profile into your local b.yaml.
 The profile name (after #) must match an entry in the upstream profiles section.
@@ -579,7 +583,7 @@ func (o *EnvAddOptions) Run(refArg string) error {
 	}
 
 	if o.Interactive {
-		return o.runInteractive(ref, version)
+		return o.runInteractive(ref, version, refArg)
 	}
 
 	if label == "" {
@@ -608,12 +612,12 @@ func (o *EnvAddOptions) Run(refArg string) error {
 }
 
 // runInteractive shows a numbered list of profiles and lets the user select.
-func (o *EnvAddOptions) runInteractive(ref, version string) error {
+func (o *EnvAddOptions) runInteractive(ref, version, refArg string) error {
 	if !isTTYFunc() {
 		return fmt.Errorf("interactive mode requires a terminal — use %s#<name> syntax instead", ref)
 	}
 
-	upstream, err := o.fetchUpstream(ref, version, ref)
+	upstream, err := o.fetchUpstream(ref, version, refArg)
 	if err != nil {
 		return err
 	}
