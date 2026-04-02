@@ -927,5 +927,71 @@ func TestEnvEntry_DescriptionField(t *testing.T) {
 	}
 }
 
+// --- profiles top-level key in CLI ---
+
+func TestEnvAdd_ExistingEntryWithLabel(t *testing.T) {
+	// Verify that b env add checks for existing entry using the full ref#label key
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{
+		Envs: state.EnvList{
+			{Key: "github.com/org/infra#monitoring"},
+		},
+	}
+
+	o := &EnvAddOptions{SharedOptions: shared}
+	err := o.Run("github.com/org/infra#monitoring")
+	if err == nil {
+		t.Fatal("expected error for existing entry")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("expected 'already exists' error, got: %v", err)
+	}
+}
+
+func TestEnvAdd_NoLabel_NoConflictWithLabeled(t *testing.T) {
+	// b env add github.com/org/infra (no label) should not conflict
+	// with github.com/org/infra#base (has label)
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{
+		Envs: state.EnvList{
+			{Key: "github.com/org/infra#base"},
+		},
+	}
+
+	o := &EnvAddOptions{SharedOptions: shared}
+	// This will fail at ResolveRef (no network), but should NOT fail at
+	// the early "already exists" check since keys are different
+	err := o.Run("github.com/org/infra")
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		t.Errorf("should not conflict with labeled entry, got: %v", err)
+	}
+}
+
+func TestIsGitNotFound_Comprehensive(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"path does not exist", fmt.Errorf("fatal: path 'b.yaml' does not exist in 'HEAD'"), true},
+		{"no such file or directory", fmt.Errorf("fatal: cannot change to '/x': No such file or directory"), true},
+		{"bad object", fmt.Errorf("fatal: bad object abc123"), false},
+		{"permission denied", fmt.Errorf("error: permission denied"), false},
+		{"empty error", fmt.Errorf(""), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isGitNotFound(tt.err); got != tt.want {
+				t.Errorf("isGitNotFound() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // needed by env_test.go since it accesses unexported field
 var _ = envmatch.GlobConfig{}
