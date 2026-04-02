@@ -12,19 +12,21 @@ import (
 type State struct {
 	Binaries BinaryList `yaml:"binaries"`
 	Envs     EnvList    `yaml:"envs,omitempty"`
+	Profiles EnvList    `yaml:"profiles,omitempty"` // short-name profiles for upstream repos
 }
 
 // EnvEntry is a single env in b.yaml.
 type EnvEntry struct {
-	Key        string                         `yaml:"-"` // map key (e.g. "github.com/org/infra#label")
-	Version    string                         `yaml:"version,omitempty"`
-	Ignore     []string                       `yaml:"ignore,omitempty"`
-	Strategy   string                         `yaml:"strategy,omitempty"`
-	Group      string                         `yaml:"group,omitempty"`
-	OnPreSync  string                         `yaml:"onPreSync,omitempty"`
-	OnPostSync string                         `yaml:"onPostSync,omitempty"`
-	Files      map[string]envmatch.GlobConfig `yaml:"-"`               // custom unmarshal
-	RawFiles   map[string]interface{}         `yaml:"files,omitempty"` // for marshal roundtrip
+	Key         string                         `yaml:"-"` // map key: in envs, full ref with optional label (e.g. "github.com/org/infra" or "github.com/org/infra#label"); in profiles, short name (e.g. "base")
+	Description string                         `yaml:"description,omitempty"`
+	Includes    []string                       `yaml:"includes,omitempty"` // compose from other profiles
+	Version     string                         `yaml:"version,omitempty"`
+	Ignore      []string                       `yaml:"ignore,omitempty"`
+	Strategy    string                         `yaml:"strategy,omitempty"`
+	Group       string                         `yaml:"group,omitempty"`
+	OnPreSync   string                         `yaml:"onPreSync,omitempty"`
+	OnPostSync  string                         `yaml:"onPostSync,omitempty"`
+	Files       map[string]envmatch.GlobConfig `yaml:"-"` // populated via custom EnvList unmarshal
 }
 
 // EnvList is a list of env entries parsed from the envs map.
@@ -41,6 +43,8 @@ func (list *EnvList) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	for key, r := range raw {
 		e := &EnvEntry{Key: key}
 		if r != nil {
+			e.Description = r.Description
+			e.Includes = r.Includes
 			e.Version = r.Version
 			e.Ignore = r.Ignore
 			e.Strategy = r.Strategy
@@ -59,6 +63,12 @@ func (list *EnvList) MarshalYAML() (interface{}, error) {
 	result := make(map[string]interface{})
 	for _, e := range *list {
 		cfg := make(map[string]interface{})
+		if e.Description != "" {
+			cfg["description"] = e.Description
+		}
+		if len(e.Includes) > 0 {
+			cfg["includes"] = e.Includes
+		}
 		if e.Version != "" {
 			cfg["version"] = e.Version
 		}
@@ -126,13 +136,15 @@ func (list *EnvList) Remove(key string) bool {
 
 // envEntryRaw is used for YAML unmarshaling before converting files map.
 type envEntryRaw struct {
-	Version    string                 `yaml:"version,omitempty"`
-	Ignore     []string               `yaml:"ignore,omitempty"`
-	Strategy   string                 `yaml:"strategy,omitempty"`
-	Group      string                 `yaml:"group,omitempty"`
-	OnPreSync  string                 `yaml:"onPreSync,omitempty"`
-	OnPostSync string                 `yaml:"onPostSync,omitempty"`
-	Files      map[string]interface{} `yaml:"files,omitempty"`
+	Description string                 `yaml:"description,omitempty"`
+	Includes    []string               `yaml:"includes,omitempty"`
+	Version     string                 `yaml:"version,omitempty"`
+	Ignore      []string               `yaml:"ignore,omitempty"`
+	Strategy    string                 `yaml:"strategy,omitempty"`
+	Group       string                 `yaml:"group,omitempty"`
+	OnPreSync   string                 `yaml:"onPreSync,omitempty"`
+	OnPostSync  string                 `yaml:"onPostSync,omitempty"`
+	Files       map[string]interface{} `yaml:"files,omitempty"`
 }
 
 // parseFilesMap converts the raw files map into typed GlobConfig entries.
@@ -183,6 +195,14 @@ func (s *State) MarshalYAML() (interface{}, error) {
 			return nil, err
 		}
 		result["envs"] = envs
+	}
+
+	if len(s.Profiles) > 0 {
+		profiles, err := s.Profiles.MarshalYAML()
+		if err != nil {
+			return nil, err
+		}
+		result["profiles"] = profiles
 	}
 
 	return result, nil

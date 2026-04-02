@@ -135,7 +135,13 @@ b search terraform
 Sync configuration files from upstream git repositories:
 
 ```bash
-# Sync files using SCP-style syntax
+# Discover available profiles from an upstream repo
+b env profiles github.com/org/infra
+
+# Add a profile to your b.yaml
+b env add github.com/org/infra#monitoring
+
+# Or sync files manually using SCP-style syntax
 b install github.com/org/infra:/manifests/base/** ./base
 
 # Add to b.yaml and sync

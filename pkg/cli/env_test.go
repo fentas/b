@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -748,5 +750,267 @@ func TestPrintFileStatus_DryRun(t *testing.T) {
 	}
 }
 
+// --- env profiles ---
+
+func TestNewEnvCmd_HasProfilesAndAdd(t *testing.T) {
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	cmd := NewEnvCmd(shared)
+
+	subs := cmd.Commands()
+	names := make(map[string]bool)
+	for _, s := range subs {
+		names[s.Name()] = true
+	}
+	for _, want := range []string{"profiles", "add"} {
+		if !names[want] {
+			t.Errorf("missing subcommand %q", want)
+		}
+	}
+}
+
+func TestEnvProfilesCmd_Args(t *testing.T) {
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	cmd := NewEnvProfilesCmd(shared)
+
+	if err := cmd.Args(cmd, []string{}); err == nil {
+		t.Error("should require exactly 1 arg")
+	}
+	if err := cmd.Args(cmd, []string{"ref"}); err != nil {
+		t.Errorf("1 arg should be valid: %v", err)
+	}
+	if err := cmd.Args(cmd, []string{"a", "b"}); err == nil {
+		t.Error("2 args should be rejected")
+	}
+}
+
+func TestEnvAddCmd_Args(t *testing.T) {
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	cmd := NewEnvAddCmd(shared)
+
+	// 0 args rejected, 1 arg valid, 2 args rejected
+	if err := cmd.Args(cmd, []string{}); err == nil {
+		t.Error("0 args should be rejected")
+	}
+	if err := cmd.Args(cmd, []string{"ref#profile"}); err != nil {
+		t.Errorf("1 arg should be valid: %v", err)
+	}
+	if err := cmd.Args(cmd, []string{"a", "b"}); err == nil {
+		t.Error("2 args should be rejected")
+	}
+
+	// Check flags exist
+	if f := cmd.Flags().Lookup("version"); f == nil {
+		t.Error("--version flag not registered")
+	}
+}
+
+// --- helpers ---
+
+func TestSummarizeFiles(t *testing.T) {
+	tests := []struct {
+		name  string
+		files map[string]envmatch.GlobConfig
+		want  string
+	}{
+		{"nil", nil, ""},
+		{"empty", map[string]envmatch.GlobConfig{}, ""},
+		{"single", map[string]envmatch.GlobConfig{
+			"manifests/base/**": {},
+		}, "base/**"},
+		{"two", map[string]envmatch.GlobConfig{
+			"manifests/base/**":    {},
+			"manifests/hetzner/**": {},
+		}, "base/**, hetzner/**"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := summarizeFiles(tt.files)
+			if got != tt.want {
+				t.Errorf("summarizeFiles() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// --- fetchUpstreamConfig error handling ---
+
+func TestFetchUpstreamConfig_ReturnsNotFoundSentinel(t *testing.T) {
+	tmpDir := t.TempDir()
+	_, err := fetchUpstreamConfig(tmpDir, "nonexistent", "abc123")
+	if err == nil {
+		t.Fatal("expected error for missing config")
+	}
+	if !errors.Is(err, errConfigNotFound) {
+		t.Errorf("expected errConfigNotFound, got: %v", err)
+	}
+}
+
+// --- env add early exit ---
+
+func TestEnvAdd_ExistingEntryDetected(t *testing.T) {
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{
+		Envs: state.EnvList{
+			{Key: "github.com/org/infra#base"},
+		},
+	}
+
+	source := &state.EnvEntry{Key: "base", Files: map[string]envmatch.GlobConfig{"a/**": {}}}
+	upstream := &state.State{Profiles: state.EnvList{source}}
+
+	o := &EnvAddOptions{SharedOptions: shared}
+	err := o.addProfile("github.com/org/infra", "base", "", source, upstream)
+	if err == nil {
+		t.Fatal("expected error for existing entry")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("expected 'already exists' error, got: %v", err)
+	}
+}
+
+// --- profiles top-level key in CLI ---
+
+func TestEnvAdd_RequiresLabel(t *testing.T) {
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+
+	o := &EnvAddOptions{SharedOptions: shared}
+	err := o.Run("github.com/org/infra")
+	if err == nil {
+		t.Fatal("expected error for missing label")
+	}
+	if !strings.Contains(err.Error(), "profile name required") {
+		t.Errorf("expected 'profile name required' error, got: %v", err)
+	}
+}
+
+func TestIsGitNotFound_Comprehensive(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"path does not exist", fmt.Errorf("fatal: path 'b.yaml' does not exist in 'HEAD'"), true},
+		{"no such file or directory", fmt.Errorf("fatal: cannot change to '/x': No such file or directory"), true},
+		{"bad object", fmt.Errorf("fatal: bad object abc123"), false},
+		{"permission denied", fmt.Errorf("error: permission denied"), false},
+		{"empty error", fmt.Errorf(""), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isGitNotFound(tt.err); got != tt.want {
+				t.Errorf("isGitNotFound() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// --- interactive mode ---
+
+func TestEnvAddInteractive_FlagRegistered(t *testing.T) {
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	cmd := NewEnvAddCmd(shared)
+
+	if f := cmd.Flags().Lookup("interactive"); f == nil {
+		t.Error("--interactive flag not registered")
+	}
+	if f := cmd.Flags().ShorthandLookup("i"); f == nil {
+		t.Error("-i shorthand not registered")
+	}
+}
+
+func TestEnvAddInteractive_NotTTY(t *testing.T) {
+	saveHooks(t)
+	isTTYFunc = func() bool { return false }
+
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	o := &EnvAddOptions{SharedOptions: shared, Interactive: true}
+	err := o.Run("github.com/org/infra")
+	if err == nil {
+		t.Fatal("expected error for non-TTY")
+	}
+	if !strings.Contains(err.Error(), "terminal") {
+		t.Errorf("expected terminal error, got: %v", err)
+	}
+}
+
+func TestEnvAdd_ResolvesIncludes(t *testing.T) {
+	tmpDir := t.TempDir()
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{}
+	shared.loadedConfigPath = filepath.Join(tmpDir, "b.yaml")
+
+	base := &state.EnvEntry{
+		Key:   "base",
+		Files: map[string]envmatch.GlobConfig{"manifests/base/**": {Dest: "base/"}},
+	}
+	staging := &state.EnvEntry{
+		Key:         "staging",
+		Description: "Staging preset",
+		Includes:    []string{"base"},
+		Ignore:      []string{"**/prod-*"},
+	}
+	upstream := &state.State{
+		Profiles: state.EnvList{base, staging},
+	}
+
+	o := &EnvAddOptions{SharedOptions: shared}
+	if err := o.addProfile("github.com/org/infra", "staging", "v2.0", staging, upstream); err != nil {
+		t.Fatalf("addProfile error: %v", err)
+	}
+
+	// Verify the added entry has merged files from base
+	added := shared.Config.Envs.Get("github.com/org/infra#staging")
+	if added == nil {
+		t.Fatal("expected entry in config")
+	}
+	if _, ok := added.Files["manifests/base/**"]; !ok {
+		t.Error("expected base files to be included")
+	}
+	if len(added.Ignore) == 0 || added.Ignore[0] != "**/prod-*" {
+		t.Errorf("expected ignore from staging, got: %v", added.Ignore)
+	}
+	if added.Description != "Staging preset" {
+		t.Errorf("description = %q", added.Description)
+	}
+}
+
 // needed by env_test.go since it accesses unexported field
+func TestEnvAdd_EmptyFilesAfterResolve(t *testing.T) {
+	tmpDir := t.TempDir()
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{}
+	shared.loadedConfigPath = filepath.Join(tmpDir, "b.yaml")
+
+	// Profile with includes but no files anywhere
+	empty := &state.EnvEntry{Key: "empty"}
+	top := &state.EnvEntry{
+		Key:      "top",
+		Includes: []string{"empty"},
+	}
+	upstream := &state.State{Profiles: state.EnvList{empty, top}}
+
+	o := &EnvAddOptions{SharedOptions: shared}
+	err := o.addProfile("github.com/org/infra", "top", "", top, upstream)
+	if err == nil {
+		t.Fatal("expected error for empty files")
+	}
+	if !strings.Contains(err.Error(), "no file globs") {
+		t.Errorf("expected 'no file globs' error, got: %v", err)
+	}
+}
+
 var _ = envmatch.GlobConfig{}
