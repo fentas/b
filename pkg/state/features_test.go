@@ -171,17 +171,33 @@ github.com/org/infra#monitoring:
 		t.Fatalf("Unmarshal error: %v", err)
 	}
 
+	if len(list) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(list))
+	}
+
+	foundBase := false
+	foundMonitoring := false
+
 	for _, e := range list {
 		switch e.Key {
 		case "github.com/org/infra#base":
+			foundBase = true
 			if e.Description != "Base Kubernetes manifests" {
 				t.Errorf("base description = %q", e.Description)
 			}
 		case "github.com/org/infra#monitoring":
+			foundMonitoring = true
 			if e.Description != "Prometheus + Grafana stack" {
 				t.Errorf("monitoring description = %q", e.Description)
 			}
 		}
+	}
+
+	if !foundBase {
+		t.Error("expected entry github.com/org/infra#base to be present")
+	}
+	if !foundMonitoring {
+		t.Error("expected entry github.com/org/infra#monitoring to be present")
 	}
 }
 

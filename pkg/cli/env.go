@@ -418,9 +418,21 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 
 	// Try to find and parse upstream b.yaml
 	upstream, err := fetchUpstreamConfig(cacheRoot, ref, commit)
-	if err == nil && len(upstream.Envs) > 0 {
+	if err == nil {
+		if len(upstream.Envs) == 0 {
+			fmt.Fprintf(o.IO.Out, "No env profiles found in %s's b.yaml\n", ref)
+			return nil
+		}
+
+		// Sort envs for deterministic output
+		sortedEnvs := make([]*state.EnvEntry, len(upstream.Envs))
+		copy(sortedEnvs, upstream.Envs)
+		sort.Slice(sortedEnvs, func(i, j int) bool {
+			return sortedEnvs[i].Key < sortedEnvs[j].Key
+		})
+
 		fmt.Fprintf(o.IO.Out, "Available profiles from %s @ %s:\n\n", ref, versionLabel)
-		for _, e := range upstream.Envs {
+		for _, e := range sortedEnvs {
 			label := gitcache.RefLabel(e.Key)
 			name := label
 			if name == "" {
@@ -432,7 +444,14 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 			}
 			fmt.Fprintf(o.IO.Out, "  %-24s %s\n", name, desc)
 			if e.Files != nil {
-				for glob, gc := range e.Files {
+				// Sort globs for deterministic output
+				globs := make([]string, 0, len(e.Files))
+				for g := range e.Files {
+					globs = append(globs, g)
+				}
+				sort.Strings(globs)
+				for _, glob := range globs {
+					gc := e.Files[glob]
 					if gc.Dest != "" {
 						fmt.Fprintf(o.IO.Out, "    %s → %s\n", glob, gc.Dest)
 					} else {
@@ -660,7 +679,9 @@ func fetchUpstreamConfig(cacheRoot, ref, commit string) (*state.State, error) {
 	return &upstream, nil
 }
 
-// summarizeFiles builds a short summary from a files map (e.g. "3 glob(s)").
+// summarizeFiles builds a short summary from a files map by returning a
+// comma-separated list of shortened glob suffixes (e.g. "hetzner/**, base/**").
+// For more than three entries, returns the first two followed by "... (N total)".
 func summarizeFiles(files map[string]envmatch.GlobConfig) string {
 	if len(files) == 0 {
 		return ""

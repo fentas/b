@@ -857,8 +857,8 @@ func TestSummarizeFiles(t *testing.T) {
 
 // --- description field ---
 
-func TestEnvStatusShowsDescription(t *testing.T) {
-	// Verify description is available on EnvEntry (compile check)
+func TestEnvEntry_DescriptionField(t *testing.T) {
+	// Verify description field exists and is settable on EnvEntry
 	e := state.EnvEntry{
 		Key:         "github.com/org/infra#base",
 		Description: "Base Kubernetes manifests",
