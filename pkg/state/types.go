@@ -16,12 +16,15 @@ type State struct {
 
 // EnvEntry is a single env in b.yaml.
 type EnvEntry struct {
-	Key      string                         `yaml:"-"` // map key (e.g. "github.com/org/infra#label")
-	Version  string                         `yaml:"version,omitempty"`
-	Ignore   []string                       `yaml:"ignore,omitempty"`
-	Strategy string                         `yaml:"strategy,omitempty"`
-	Files    map[string]envmatch.GlobConfig `yaml:"-"`               // custom unmarshal
-	RawFiles map[string]interface{}         `yaml:"files,omitempty"` // for marshal roundtrip
+	Key        string                         `yaml:"-"` // map key (e.g. "github.com/org/infra#label")
+	Version    string                         `yaml:"version,omitempty"`
+	Ignore     []string                       `yaml:"ignore,omitempty"`
+	Strategy   string                         `yaml:"strategy,omitempty"`
+	Group      string                         `yaml:"group,omitempty"`
+	OnPreSync  string                         `yaml:"onPreSync,omitempty"`
+	OnPostSync string                         `yaml:"onPostSync,omitempty"`
+	Files      map[string]envmatch.GlobConfig `yaml:"-"`               // custom unmarshal
+	RawFiles   map[string]interface{}         `yaml:"files,omitempty"` // for marshal roundtrip
 }
 
 // EnvList is a list of env entries parsed from the envs map.
@@ -41,6 +44,9 @@ func (list *EnvList) UnmarshalYAML(unmarshal func(interface{}) error) error {
 			e.Version = r.Version
 			e.Ignore = r.Ignore
 			e.Strategy = r.Strategy
+			e.Group = r.Group
+			e.OnPreSync = r.OnPreSync
+			e.OnPostSync = r.OnPostSync
 			e.Files = parseFilesMap(r.Files)
 		}
 		data = append(data, e)
@@ -61,6 +67,15 @@ func (list *EnvList) MarshalYAML() (interface{}, error) {
 		}
 		if e.Strategy != "" && e.Strategy != "replace" {
 			cfg["strategy"] = e.Strategy
+		}
+		if e.Group != "" {
+			cfg["group"] = e.Group
+		}
+		if e.OnPreSync != "" {
+			cfg["onPreSync"] = e.OnPreSync
+		}
+		if e.OnPostSync != "" {
+			cfg["onPostSync"] = e.OnPostSync
 		}
 		if len(e.Files) > 0 {
 			files := make(map[string]interface{})
@@ -98,12 +113,26 @@ func (list *EnvList) Get(key string) *EnvEntry {
 	return nil
 }
 
+// Remove removes the env entry with the given key. Returns true if found.
+func (list *EnvList) Remove(key string) bool {
+	for i, e := range *list {
+		if e.Key == key {
+			*list = append((*list)[:i], (*list)[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
 // envEntryRaw is used for YAML unmarshaling before converting files map.
 type envEntryRaw struct {
-	Version  string                 `yaml:"version,omitempty"`
-	Ignore   []string               `yaml:"ignore,omitempty"`
-	Strategy string                 `yaml:"strategy,omitempty"`
-	Files    map[string]interface{} `yaml:"files,omitempty"`
+	Version    string                 `yaml:"version,omitempty"`
+	Ignore     []string               `yaml:"ignore,omitempty"`
+	Strategy   string                 `yaml:"strategy,omitempty"`
+	Group      string                 `yaml:"group,omitempty"`
+	OnPreSync  string                 `yaml:"onPreSync,omitempty"`
+	OnPostSync string                 `yaml:"onPostSync,omitempty"`
+	Files      map[string]interface{} `yaml:"files,omitempty"`
 }
 
 // parseFilesMap converts the raw files map into typed GlobConfig entries.

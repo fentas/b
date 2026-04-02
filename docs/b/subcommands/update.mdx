@@ -82,11 +82,38 @@ When multiple env entries write to the same destination path, **b** warns about 
   Hint: use 'dest' or 'ignore' in b.yaml to resolve
 ```
 
+### Dry-run
+
+Preview what would change without writing files or updating the lock:
+
+```bash
+b update --dry-run
+```
+
+### Rollback
+
+Revert envs to their previous commit (from `b.lock`):
+
+```bash
+b update --rollback github.com/org/infra
+```
+
+### Group filtering
+
+Only update envs tagged with a specific group:
+
+```bash
+b update --group=dev
+```
+
 ## Flags
 
 | Flag              | Description                               |
 |-------------------|-------------------------------------------|
 | `--strategy`      | Merge strategy for env updates: `replace`, `client`, or `merge` |
+| `--dry-run`       | Show what would change without writing files |
+| `--rollback`      | Rollback envs to their previous commit from lock |
+| `--group`         | Only update envs in this group |
 | `-h`, `--help`    | help for update                           |
 
 ## Global Flags
