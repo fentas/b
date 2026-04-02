@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -866,6 +867,50 @@ func TestFetchUpstreamConfig_ReturnsNotFoundSentinel(t *testing.T) {
 	}
 	if !errors.Is(err, errConfigNotFound) {
 		t.Errorf("expected errConfigNotFound, got: %v", err)
+	}
+}
+
+// --- env add early exit ---
+
+func TestEnvAdd_ExistingEntryFailsFast(t *testing.T) {
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{
+		Envs: state.EnvList{
+			{Key: "github.com/org/infra#base"},
+		},
+	}
+
+	o := &EnvAddOptions{SharedOptions: shared}
+	err := o.Run("github.com/org/infra#base")
+	if err == nil {
+		t.Fatal("expected error for existing entry")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("expected 'already exists' error, got: %v", err)
+	}
+}
+
+// --- isGitNotFound ---
+
+func TestIsGitNotFound(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"does not exist", fmt.Errorf("fatal: path 'x' does not exist in 'HEAD'"), true},
+		{"no such file", fmt.Errorf("fatal: cannot change to '/x': No such file or directory"), true},
+		{"other error", fmt.Errorf("fatal: bad object abc123"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isGitNotFound(tt.err); got != tt.want {
+				t.Errorf("isGitNotFound() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

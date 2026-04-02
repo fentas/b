@@ -474,7 +474,7 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 			}
 			fmt.Fprintln(o.IO.Out)
 		}
-		fmt.Fprintf(o.IO.Out, "Install a profile with:\n  b env add %s#<profile>\n", ref)
+		fmt.Fprintf(o.IO.Out, "Install a profile with:\n  b env add %s[#<profile>]\n", ref)
 		return nil
 	}
 
@@ -560,6 +560,18 @@ func (o *EnvAddOptions) Run(refArg string) error {
 	if o.Version != "" {
 		version = o.Version
 	}
+
+	// Build the canonical key and check early if it already exists
+	localKey := ref
+	if label != "" {
+		localKey = ref + "#" + label
+	}
+	if o.Config != nil {
+		if existing := o.Config.Envs.Get(localKey); existing != nil {
+			return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", localKey, localKey)
+		}
+	}
+
 	url := gitcache.GitURL(refArg)
 
 	commit, err := gitcache.ResolveRef(url, version)
@@ -581,16 +593,12 @@ func (o *EnvAddOptions) Run(refArg string) error {
 		return fmt.Errorf("failed to load upstream b.yaml for %s: %w", ref, err)
 	}
 
-	// Build the key to look up in upstream
-	lookupKey := ref
-	if label != "" {
-		lookupKey = ref + "#" + label
-	}
+	// localKey was already built at the top of the function
 
 	// Find the matching env entry in upstream
 	var source *state.EnvEntry
 	for _, e := range upstream.Envs {
-		if e.Key == lookupKey {
+		if e.Key == localKey {
 			source = e
 			break
 		}
@@ -607,7 +615,7 @@ func (o *EnvAddOptions) Run(refArg string) error {
 		sort.Strings(available)
 		if len(available) > 0 {
 			return fmt.Errorf("profile %q not found in %s\n  Available: %s\n  Hint: run `b env profiles %s` to see all profiles",
-				lookupKey, ref, strings.Join(available, ", "), ref)
+				localKey, ref, strings.Join(available, ", "), ref)
 		}
 		return fmt.Errorf("no env profiles found in %s's b.yaml", ref)
 	}
@@ -629,7 +637,7 @@ func (o *EnvAddOptions) Run(refArg string) error {
 			versionConfig, err := fetchUpstreamConfig(cacheRoot, ref, newCommit)
 			if err == nil {
 				for _, e := range versionConfig.Envs {
-					if e.Key == lookupKey {
+					if e.Key == localKey {
 						source = e
 						break
 					}
@@ -638,8 +646,7 @@ func (o *EnvAddOptions) Run(refArg string) error {
 		}
 	}
 
-	// Build local entry from upstream
-	localKey := lookupKey
+	// Build local entry from upstream (localKey set at top of function)
 	entry := &state.EnvEntry{
 		Key:         localKey,
 		Description: source.Description,
@@ -661,11 +668,6 @@ func (o *EnvAddOptions) Run(refArg string) error {
 	config := o.Config
 	if config == nil {
 		config = &state.State{}
-	}
-
-	// Check if already exists
-	if existing := config.Envs.Get(localKey); existing != nil {
-		return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", localKey, localKey)
 	}
 
 	config.Envs = append(config.Envs, entry)
@@ -716,17 +718,18 @@ func isGitNotFound(err error) bool {
 
 // fetchUpstreamConfig fetches and parses b.yaml (or .bin/b.yaml) from a cached repo.
 func fetchUpstreamConfig(cacheRoot, ref, commit string) (*state.State, error) {
-	// Try b.yaml
-	content, err := gitcache.ShowFile(cacheRoot, ref, commit, "b.yaml")
+	// Try b.yaml, then .bin/b.yaml
+	configPath := "b.yaml"
+	content, err := gitcache.ShowFile(cacheRoot, ref, commit, configPath)
 	if err != nil {
 		if !isGitNotFound(err) {
-			return nil, fmt.Errorf("fetching b.yaml: %w", err)
+			return nil, fmt.Errorf("fetching %s: %w", configPath, err)
 		}
-		// Try .bin/b.yaml
-		content, err = gitcache.ShowFile(cacheRoot, ref, commit, ".bin/b.yaml")
+		configPath = ".bin/b.yaml"
+		content, err = gitcache.ShowFile(cacheRoot, ref, commit, configPath)
 		if err != nil {
 			if !isGitNotFound(err) {
-				return nil, fmt.Errorf("fetching .bin/b.yaml: %w", err)
+				return nil, fmt.Errorf("fetching %s: %w", configPath, err)
 			}
 			return nil, errConfigNotFound
 		}
@@ -734,7 +737,7 @@ func fetchUpstreamConfig(cacheRoot, ref, commit string) (*state.State, error) {
 
 	var upstream state.State
 	if err := yaml.Unmarshal(content, &upstream); err != nil {
-		return nil, fmt.Errorf("parsing b.yaml: %w", err)
+		return nil, fmt.Errorf("parsing %s: %w", configPath, err)
 	}
 	return &upstream, nil
 }
