@@ -423,14 +423,22 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 		return fmt.Errorf("loading upstream config: %w", err)
 	}
 	if err == nil {
-		if len(upstream.Envs) == 0 {
+		// Filter to envs matching the requested ref
+		filteredEnvs := make([]*state.EnvEntry, 0, len(upstream.Envs))
+		for _, e := range upstream.Envs {
+			if gitcache.RefBase(e.Key) == ref {
+				filteredEnvs = append(filteredEnvs, e)
+			}
+		}
+
+		if len(filteredEnvs) == 0 {
 			fmt.Fprintf(o.IO.Out, "No env profiles found in %s's b.yaml\n", ref)
 			return nil
 		}
 
 		// Sort envs for deterministic output
-		sortedEnvs := make([]*state.EnvEntry, len(upstream.Envs))
-		copy(sortedEnvs, upstream.Envs)
+		sortedEnvs := make([]*state.EnvEntry, len(filteredEnvs))
+		copy(sortedEnvs, filteredEnvs)
 		sort.Slice(sortedEnvs, func(i, j int) bool {
 			return sortedEnvs[i].Key < sortedEnvs[j].Key
 		})
@@ -588,10 +596,12 @@ func (o *EnvAddOptions) Run(refArg string) error {
 	}
 
 	if source == nil {
-		// List available profiles (sorted for stable output)
+		// List available profiles matching this ref (sorted for stable output)
 		available := []string{}
 		for _, e := range upstream.Envs {
-			available = append(available, e.Key)
+			if gitcache.RefBase(e.Key) == ref {
+				available = append(available, e.Key)
+			}
 		}
 		sort.Strings(available)
 		if len(available) > 0 {
@@ -674,14 +684,29 @@ func (o *EnvAddOptions) Run(refArg string) error {
 // errConfigNotFound is returned when neither b.yaml nor .bin/b.yaml exists upstream.
 var errConfigNotFound = errors.New("b.yaml not found")
 
+// isGitNotFound checks if a git error indicates a missing path or repo.
+func isGitNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "does not exist") || strings.Contains(msg, "No such file or directory")
+}
+
 // fetchUpstreamConfig fetches and parses b.yaml (or .bin/b.yaml) from a cached repo.
 func fetchUpstreamConfig(cacheRoot, ref, commit string) (*state.State, error) {
 	// Try b.yaml
 	content, err := gitcache.ShowFile(cacheRoot, ref, commit, "b.yaml")
 	if err != nil {
+		if !isGitNotFound(err) {
+			return nil, fmt.Errorf("fetching b.yaml: %w", err)
+		}
 		// Try .bin/b.yaml
 		content, err = gitcache.ShowFile(cacheRoot, ref, commit, ".bin/b.yaml")
 		if err != nil {
+			if !isGitNotFound(err) {
+				return nil, fmt.Errorf("fetching .bin/b.yaml: %w", err)
+			}
 			return nil, errConfigNotFound
 		}
 	}
