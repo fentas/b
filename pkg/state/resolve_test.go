@@ -94,6 +94,45 @@ func TestResolveProfileIncludes_CircularDetected(t *testing.T) {
 	}
 }
 
+func TestResolveProfileIncludes_SharedDependency(t *testing.T) {
+	// Diamond: A includes B and C, both include D. Should NOT be a cycle.
+	d := &EnvEntry{
+		Key:   "d",
+		Files: map[string]envmatch.GlobConfig{"d/**": {Dest: "d/"}},
+	}
+	b := &EnvEntry{
+		Key:      "b",
+		Includes: []string{"d"},
+		Files:    map[string]envmatch.GlobConfig{"b/**": {Dest: "b/"}},
+	}
+	c := &EnvEntry{
+		Key:      "c",
+		Includes: []string{"d"},
+		Files:    map[string]envmatch.GlobConfig{"c/**": {Dest: "c/"}},
+	}
+	a := &EnvEntry{
+		Key:      "a",
+		Includes: []string{"b", "c"},
+	}
+	profiles := EnvList{a, b, c, d}
+
+	resolved, err := ResolveProfileIncludes(a, profiles)
+	if err != nil {
+		t.Fatalf("shared dependency should not be circular: %v", err)
+	}
+
+	// Should have files from d, b, c (d included once)
+	if _, ok := resolved.Files["d/**"]; !ok {
+		t.Error("missing d files")
+	}
+	if _, ok := resolved.Files["b/**"]; !ok {
+		t.Error("missing b files")
+	}
+	if _, ok := resolved.Files["c/**"]; !ok {
+		t.Error("missing c files")
+	}
+}
+
 func TestResolveProfileIncludes_SelfInclude(t *testing.T) {
 	a := &EnvEntry{Key: "a", Includes: []string{"a"}}
 	profiles := EnvList{a}

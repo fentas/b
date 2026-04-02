@@ -14,10 +14,11 @@ func ResolveProfileIncludes(profile *EnvEntry, allProfiles EnvList) (*EnvEntry, 
 		return profile, nil
 	}
 
-	// Collect profiles in dependency order (post-order traversal)
-	visited := make(map[string]bool)
+	// Collect profiles in dependency order (post-order DFS)
+	visited := make(map[string]bool) // fully processed nodes
+	stack := make(map[string]bool)   // current recursion stack (cycle detection)
 	var order []*EnvEntry
-	if err := collectIncludes(profile.Key, allProfiles, visited, &order); err != nil {
+	if err := collectIncludes(profile.Key, allProfiles, visited, stack, &order); err != nil {
 		return nil, err
 	}
 
@@ -60,24 +61,30 @@ func ResolveProfileIncludes(profile *EnvEntry, allProfiles EnvList) (*EnvEntry, 
 	return merged, nil
 }
 
-// collectIncludes performs a post-order traversal of includes.
-func collectIncludes(key string, profiles EnvList, visiting map[string]bool, order *[]*EnvEntry) error {
-	if visiting[key] {
+// collectIncludes performs a post-order DFS with proper cycle detection.
+// visited = fully processed nodes (skip), stack = current recursion path (cycle).
+func collectIncludes(key string, profiles EnvList, visited, stack map[string]bool, order *[]*EnvEntry) error {
+	if stack[key] {
 		return fmt.Errorf("circular include detected: %s", key)
 	}
-	visiting[key] = true
+	if visited[key] {
+		return nil // already processed via another path
+	}
 
 	profile := profiles.Get(key)
 	if profile == nil {
 		return fmt.Errorf("included profile %q not found", key)
 	}
 
+	stack[key] = true
 	for _, inc := range profile.Includes {
-		if err := collectIncludes(inc, profiles, visiting, order); err != nil {
+		if err := collectIncludes(inc, profiles, visited, stack, order); err != nil {
 			return err
 		}
 	}
+	stack[key] = false
 
+	visited[key] = true
 	*order = append(*order, profile)
 	return nil
 }

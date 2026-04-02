@@ -790,9 +790,9 @@ func TestEnvAddCmd_Args(t *testing.T) {
 	shared := NewSharedOptions(io, nil)
 	cmd := NewEnvAddCmd(shared)
 
-	// 0 args is valid (for -i mode), 1 arg valid, 2 args rejected
-	if err := cmd.Args(cmd, []string{}); err != nil {
-		t.Errorf("0 args should be valid (for -i): %v", err)
+	// 0 args rejected, 1 arg valid, 2 args rejected
+	if err := cmd.Args(cmd, []string{}); err == nil {
+		t.Error("0 args should be rejected")
 	}
 	if err := cmd.Args(cmd, []string{"ref#profile"}); err != nil {
 		t.Errorf("1 arg should be valid: %v", err)
@@ -960,17 +960,14 @@ func TestEnvAddInteractive_NotTTY(t *testing.T) {
 	}
 }
 
-func TestEnvAdd_NoArgsWithoutFlag(t *testing.T) {
+func TestEnvAdd_RequiresArg(t *testing.T) {
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
 	shared := NewSharedOptions(io, nil)
 	cmd := NewEnvAddCmd(shared)
 
-	err := cmd.RunE(cmd, []string{})
-	if err == nil {
-		t.Fatal("expected error for no args without -i")
-	}
-	if !strings.Contains(err.Error(), "requires a ref") {
-		t.Errorf("expected usage error, got: %v", err)
+	// ExactArgs(1) rejects 0 args
+	if err := cmd.Args(cmd, []string{}); err == nil {
+		t.Error("0 args should be rejected")
 	}
 }
 

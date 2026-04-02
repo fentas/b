@@ -544,11 +544,8 @@ Use -i for interactive selection.`,
 			# Interactive selection
 			b env add -i github.com/org/infra
 		`),
-		Args: cobra.RangeArgs(0, 1),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(args) == 0 && !o.Interactive {
-				return fmt.Errorf("requires a ref argument (e.g. github.com/org/infra#profile) or use -i for interactive mode")
-			}
 			arg := ""
 			if len(args) > 0 {
 				arg = args[0]
