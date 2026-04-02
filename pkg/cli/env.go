@@ -580,6 +580,14 @@ func (o *EnvAddOptions) Run(refArg string) error {
 		return fmt.Errorf("profile name required — use %s#<name>\n  Hint: run `b env profiles %s` to see available profiles\n  Hint: use -i for interactive selection", ref, ref)
 	}
 
+	// Fail fast if already in local config
+	localKey := ref + "#" + label
+	if o.Config != nil {
+		if existing := o.Config.Envs.Get(localKey); existing != nil {
+			return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", localKey, localKey)
+		}
+	}
+
 	upstream, err := o.fetchUpstream(ref, version, refArg)
 	if err != nil {
 		return err
@@ -710,10 +718,10 @@ func (o *EnvAddOptions) addProfile(ref, label, version string, source *state.Env
 	localKey := ref + "#" + label
 
 	// Check if already exists
-	config := o.Config
-	if config == nil {
-		config = &state.State{}
+	if o.Config == nil {
+		o.Config = &state.State{}
 	}
+	config := o.Config
 	if existing := config.Envs.Get(localKey); existing != nil {
 		return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", localKey, localKey)
 	}

@@ -8,7 +8,8 @@ import (
 
 // ResolveProfileIncludes flattens a profile by recursively merging included profiles.
 // Returns a new EnvEntry with all included fields merged. The profile's own fields
-// override included ones. Returns error on circular includes or missing profiles.
+// override included ones. If the profile has no includes, returns it unchanged.
+// Returns error on circular includes or missing profiles.
 func ResolveProfileIncludes(profile *EnvEntry, allProfiles EnvList) (*EnvEntry, error) {
 	if len(profile.Includes) == 0 {
 		return profile, nil
