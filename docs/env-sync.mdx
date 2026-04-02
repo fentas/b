@@ -100,7 +100,7 @@ b env add --version v2.0 github.com/org/infra#base
 
 This copies the profile's configuration (files, strategy, hooks, etc.) into your local `b.yaml` as an env entry. Profiles with `includes` are automatically flattened. Run `b update` to sync the files.
 
-**Version resolution**: `--version` flag takes priority. If omitted and the upstream profile specifies a version, that version is used. Otherwise, HEAD is resolved.
+**Version resolution**: If `--version` is given, the profile is pinned to that version. If omitted, the profile tracks the upstream default branch (HEAD).
 
 ### Interactive selection
 
