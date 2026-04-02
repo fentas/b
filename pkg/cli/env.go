@@ -775,9 +775,11 @@ func (o *EnvAddOptions) addProfile(ref, label, version string, source *state.Env
 		configPath = path.GetDefaultConfigPath()
 	}
 
+	originalLen := len(config.Envs)
 	config.Envs = append(config.Envs, entry)
 
 	if err := state.SaveConfig(config, configPath); err != nil {
+		config.Envs = config.Envs[:originalLen] // rollback on save failure
 		return err
 	}
 
