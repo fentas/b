@@ -82,6 +82,9 @@ Available profiles from github.com/org/infra @ v2.1:
   monitoring               Prometheus + Grafana stack
     manifests/monitoring/** → monitoring/
 
+  staging                  Staging preset (base + monitoring)
+    includes: base, monitoring
+
 Install a profile with:
   b env add github.com/org/infra#<name>
 ```
@@ -144,8 +147,10 @@ envs:
       manifests/hetzner/**:
         dest: hetzner/
 
-  # Minimal entry — syncs all files from HEAD
+  # Sync all files from HEAD
   github.com/org/shared-config:
+    files:
+      "**":
 ```
 
 ### Fields
@@ -158,7 +163,7 @@ envs:
 | `strategy` | How to handle local changes: `replace`, `client`, or `merge` | `replace` |
 | `group` | Group name for selective syncing with `--group` | none |
 | `ignore` | Glob patterns to exclude from all file matches | none |
-| `files` | Map of glob patterns to destination config | all files |
+| `files` | Map of glob patterns to destination config (required; use `"**"` for all files) | none |
 | `onPreSync` | Shell command to run before syncing | none |
 | `onPostSync` | Shell command to run after syncing | none |
 
