@@ -24,7 +24,7 @@ type EnvEntry struct {
 	Group       string                         `yaml:"group,omitempty"`
 	OnPreSync   string                         `yaml:"onPreSync,omitempty"`
 	OnPostSync  string                         `yaml:"onPostSync,omitempty"`
-	Files map[string]envmatch.GlobConfig `yaml:"-"` // populated via custom EnvList unmarshal
+	Files       map[string]envmatch.GlobConfig `yaml:"-"` // populated via custom EnvList unmarshal
 }
 
 // EnvList is a list of env entries parsed from the envs map.
