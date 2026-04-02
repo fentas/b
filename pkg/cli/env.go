@@ -381,7 +381,7 @@ func NewEnvProfilesCmd(shared *SharedOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "profiles <ref>",
 		Short: "Discover available env profiles from an upstream repo",
-		Long: `Fetch the upstream repo's b.yaml to list available env profiles (labeled env entries).
+		Long: `Fetch the upstream repo's b.yaml to list available profiles from the profiles section.
 If no b.yaml is found, shows the directory structure as suggested profiles.`,
 		Example: templates.Examples(`
 			# List profiles from upstream
