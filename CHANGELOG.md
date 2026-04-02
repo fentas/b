@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.9.0](https://github.com/fentas/b/compare/v4.8.0...v4.9.0) (2026-04-02)
+
+
+### Features
+
+* env profiles — discover and add preconfigured envs from upstream ([#113](https://github.com/fentas/b/issues/113)) ([49773ef](https://github.com/fentas/b/commit/49773ef6f5d773d652c762b0f4fe47c5e7a4bf49))
+* env sync improvements — 10 new features ([#112](https://github.com/fentas/b/issues/112)) ([866f0af](https://github.com/fentas/b/commit/866f0af3f3e2665d59efaf77962adb3c47a61e16))
+
 ## [4.8.0](https://github.com/fentas/b/compare/v4.7.1...v4.8.0) (2026-02-15)
 
 
