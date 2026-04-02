@@ -736,11 +736,9 @@ func (o *EnvAddOptions) addProfile(ref, label, version string, source *state.Env
 		}
 	}
 
-	// Determine effective version
+	// Use only the user-specified version. If empty, the config was loaded
+	// from HEAD and leaving version empty keeps that consistent.
 	effectiveVersion := version
-	if effectiveVersion == "" && resolved.Version != "" {
-		effectiveVersion = resolved.Version
-	}
 
 	entry := &state.EnvEntry{
 		Key:         localKey,
