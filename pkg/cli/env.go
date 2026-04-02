@@ -17,6 +17,7 @@ import (
 	"github.com/fentas/b/pkg/envmatch"
 	"github.com/fentas/b/pkg/gitcache"
 	"github.com/fentas/b/pkg/lock"
+	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/b/pkg/state"
 )
 
@@ -611,12 +612,38 @@ func (o *EnvAddOptions) Run(refArg string) error {
 		return fmt.Errorf("no env profiles found in %s's b.yaml", ref)
 	}
 
+	// If no explicit version was given and the source specifies one,
+	// re-fetch at source.Version so the copied config matches that version.
+	effectiveVersion := version
+	if effectiveVersion == "" && source.Version != "" {
+		effectiveVersion = source.Version
+		newCommit, err := gitcache.ResolveRef(url, effectiveVersion)
+		if err != nil {
+			return fmt.Errorf("resolving %s@%s: %w", ref, effectiveVersion, err)
+		}
+		if newCommit != commit {
+			if err := gitcache.Fetch(cacheRoot, ref, newCommit); err != nil {
+				return fmt.Errorf("fetching %s: %w", newCommit, err)
+			}
+			// Re-load config at the pinned version
+			versionConfig, err := fetchUpstreamConfig(cacheRoot, ref, newCommit)
+			if err == nil {
+				for _, e := range versionConfig.Envs {
+					if e.Key == lookupKey {
+						source = e
+						break
+					}
+				}
+			}
+		}
+	}
+
 	// Build local entry from upstream
 	localKey := lookupKey
 	entry := &state.EnvEntry{
 		Key:         localKey,
 		Description: source.Description,
-		Version:     version,
+		Version:     effectiveVersion,
 		Ignore:      source.Ignore,
 		Strategy:    source.Strategy,
 		Group:       source.Group,
@@ -624,17 +651,11 @@ func (o *EnvAddOptions) Run(refArg string) error {
 		OnPostSync:  source.OnPostSync,
 		Files:       source.Files,
 	}
-	if entry.Version == "" {
-		entry.Version = source.Version
-	}
 
-	// Load or create local config
+	// Load or create local config (fall back to default path for new projects)
 	configPath, err := o.getConfigPath()
-	if err != nil {
-		return fmt.Errorf("cannot determine config path: %w", err)
-	}
-	if configPath == "" {
-		return fmt.Errorf("cannot save config: config path is not set")
+	if err != nil || configPath == "" {
+		configPath = path.GetDefaultConfigPath()
 	}
 
 	config := o.Config
