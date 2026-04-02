@@ -9,130 +9,21 @@ description: "Sync configuration files from upstream git repositories with glob 
 ## Quick start
 
 ```bash
-# Discover available profiles from an upstream repo
-b env profiles github.com/org/infra
-
-# Add a profile to your b.yaml
-b env add github.com/org/infra#monitoring
-
-# Sync everything
-b update
-
-# Or sync files manually using SCP-style syntax
+# Sync files from any git repo
 b install github.com/org/infra:/manifests/base/** ./base
+
+# Add to b.yaml for repeated syncing
+b install --add github.com/org/infra@v2.0:/manifests/** ./config
+
+# Update all envs from b.yaml
+b update
 ```
-
----
-
-## Profiles
-
-Upstream repos can publish named **profiles** — preconfigured file sets that consumers can discover and install without manually writing glob patterns.
-
-### Publishing profiles (upstream repo)
-
-Add a `profiles` section to your `b.yaml` with short, descriptive names:
-
-```yaml
-# Upstream repo's b.yaml
-profiles:
-  base:
-    description: "Base Kubernetes manifests for all environments"
-    files:
-      manifests/base/**:
-        dest: base/
-
-  monitoring:
-    description: "Prometheus + Grafana stack"
-    strategy: merge
-    files:
-      manifests/monitoring/**:
-        dest: monitoring/
-
-  hetzner:
-    description: "Hetzner-specific cloud infrastructure"
-    files:
-      manifests/hetzner/**:
-        dest: hetzner/
-
-  # Compose profiles with includes
-  staging:
-    description: "Staging preset (base + monitoring)"
-    includes:
-      - base
-      - monitoring
-    ignore:
-      - "**/prod-*"
-```
-
-Profiles with `includes` are resolved recursively when installed. The including profile's own fields override included ones. Circular includes are rejected.
-
-### Discovering profiles
-
-```bash
-$ b env profiles github.com/org/infra@v2.1
-
-Available profiles from github.com/org/infra @ v2.1:
-
-  base                     Base Kubernetes manifests for all environments
-    manifests/base/** → base/
-
-  hetzner                  Hetzner-specific cloud infrastructure
-    manifests/hetzner/** → hetzner/
-
-  monitoring               Prometheus + Grafana stack
-    manifests/monitoring/** → monitoring/
-
-  staging                  Staging preset (base + monitoring)
-    includes: base, monitoring
-
-Install a profile with:
-  b env add github.com/org/infra#<name>
-```
-
-If the upstream repo has no `b.yaml`, the command falls back to listing the directory structure with suggested install commands.
-
-### Adding a profile
-
-```bash
-# Add a profile to your local b.yaml
-b env add github.com/org/infra#monitoring
-
-# Pin a specific version
-b env add --version v2.0 github.com/org/infra#base
-```
-
-This copies the profile's configuration (files, strategy, hooks, etc.) into your local `b.yaml` as an env entry. Profiles with `includes` are automatically flattened. Run `b update` to sync the files.
-
-**Version resolution**: If `--version` is given, the profile is pinned to that version. If omitted, the profile tracks the upstream default branch (HEAD).
-
-### Interactive selection
-
-Browse and select profiles interactively:
-
-```bash
-$ b env add -i github.com/org/infra
-
-Available profiles from github.com/org/infra:
-
-  [1] base                 Base Kubernetes manifests
-  [2] hetzner              Hetzner-specific infrastructure
-  [3] monitoring           Prometheus + Grafana stack
-  [4] staging              Staging preset (base + monitoring)
-
-Select profiles (space-separated numbers, e.g. "1 3"): 1 3
-Added github.com/org/infra#base to b.yaml (Base Kubernetes manifests)
-Added github.com/org/infra#monitoring to b.yaml (Prometheus + Grafana stack)
-
-Run `b update` to sync files.
-```
-
-Add multiple profiles at once by entering space-separated numbers. Requires a terminal (not available in CI/CD).
 
 ---
 
 ## Configuration
 
-Env entries in your local `b.yaml` define what to sync:
+Add env entries to the `envs` section of your `b.yaml`:
 
 ```yaml
 envs:
@@ -153,17 +44,17 @@ envs:
       "**":
 ```
 
+That's it — run `b update` to sync.
+
 ### Fields
 
 | Field | Description | Default |
 |-------|-------------|---------|
-| `description` | Human-readable description (shown by `b env profiles`) | none |
-| `includes` | List of profile names to compose from (profiles only) | none |
 | `version` | Git tag, branch, or commit SHA to pin | HEAD |
 | `strategy` | How to handle local changes: `replace`, `client`, or `merge` | `replace` |
 | `group` | Group name for selective syncing with `--group` | none |
 | `ignore` | Glob patterns to exclude from all file matches | none |
-| `files` | Map of glob patterns to destination config (required; use `"**"` for all files) | none |
+| `files` | Map of glob patterns to destination config (required; use `"**"` for all) | none |
 | `onPreSync` | Shell command to run before syncing | none |
 | `onPostSync` | Shell command to run after syncing | none |
 
@@ -296,8 +187,6 @@ Check for upstream changes and local drift without syncing:
 b env status
 ```
 
-Shows per-env: up-to-date, upstream changes available, locally modified files, missing files, or mode drift.
-
 ### Preview
 
 Test what a glob matches before adding it to config:
@@ -306,11 +195,7 @@ Test what a glob matches before adding it to config:
 b env match github.com/org/infra "manifests/base/**" ./base
 ```
 
-This populates the git cache but does not modify project files or `b.lock`.
-
 ### Remove
-
-Remove an env from `b.yaml` and `b.lock`:
 
 ```bash
 b env remove github.com/org/infra
@@ -318,19 +203,13 @@ b env remove github.com/org/infra#monitoring
 b env remove --delete-files github.com/org/infra
 ```
 
-With `--delete-files`, synced files are also deleted from disk.
-
 ### Dry-run
-
-Preview what `b update` would change without writing:
 
 ```bash
 b update --dry-run
 ```
 
 ### Rollback
-
-Revert envs to their previous commit from `b.lock`:
 
 ```bash
 b update --rollback
@@ -384,7 +263,110 @@ Hooks run in the project root directory and respect `--quiet` mode. They are ski
 
 ## File modes
 
-**b** preserves executable file modes from upstream. Files with git mode `100755` target `0755` permissions; others target `0644`. The initial write respects your system umask; subsequent updates normalize permissions to match upstream. This ensures synced scripts remain executable while honoring local security settings.
+**b** preserves executable file modes from upstream. Files with git mode `100755` target `0755` permissions; others target `0644`. The initial write respects your system umask; subsequent updates normalize permissions to match upstream.
+
+---
+
+## Profiles (optional)
+
+Profiles are an **optional** feature for upstream repos that want to offer preconfigured file sets to consumers. They are not required — you can always configure `envs` directly as shown above.
+
+### When to use profiles
+
+- You maintain a shared infrastructure repo and want to offer named presets (e.g. "base", "monitoring", "staging")
+- You want consumers to discover and install your file sets without knowing the directory structure
+- You want to compose presets from smaller building blocks using `includes`
+
+### Publishing profiles
+
+Add a `profiles` section to your upstream repo's `b.yaml`:
+
+```yaml
+profiles:
+  base:
+    description: "Base Kubernetes manifests"
+    files:
+      manifests/base/**:
+        dest: base/
+
+  monitoring:
+    description: "Prometheus + Grafana stack"
+    strategy: merge
+    files:
+      manifests/monitoring/**:
+        dest: monitoring/
+
+  staging:
+    description: "Staging preset (base + monitoring)"
+    includes:
+      - base
+      - monitoring
+    ignore:
+      - "**/prod-*"
+```
+
+Profile fields are the same as env fields, plus:
+
+| Field | Description |
+|-------|-------------|
+| `description` | Human-readable description shown in `b env profiles` |
+| `includes` | Compose from other profiles (resolved recursively; later overrides earlier) |
+
+### Discovering profiles
+
+```bash
+$ b env profiles github.com/org/infra@v2.1
+
+Available profiles from github.com/org/infra @ v2.1:
+
+  base                     Base Kubernetes manifests
+    manifests/base/** → base/
+
+  monitoring               Prometheus + Grafana stack
+    manifests/monitoring/** → monitoring/
+
+  staging                  Staging preset (base + monitoring)
+    includes: base, monitoring
+
+Install a profile with:
+  b env add --version v2.1 github.com/org/infra#<name>
+```
+
+If the upstream repo has no `b.yaml`, the command falls back to listing the directory structure with suggested install commands.
+
+### Installing a profile
+
+```bash
+# Add a profile to your local b.yaml
+b env add github.com/org/infra#monitoring
+
+# Pin a specific version
+b env add --version v2.0 github.com/org/infra#base
+```
+
+This copies the profile config into your local `envs` section. Profiles with `includes` are automatically flattened. Run `b update` to sync.
+
+**Version**: If `--version` is given, the profile is pinned. If omitted, it tracks HEAD.
+
+### Interactive selection
+
+```bash
+$ b env add -i github.com/org/infra
+
+Available profiles from github.com/org/infra:
+
+  [1] base                 Base Kubernetes manifests
+  [2] monitoring           Prometheus + Grafana stack
+  [3] staging              Staging preset (base + monitoring)
+
+Select profiles (space-separated numbers, e.g. "1 3"): 1 3
+Added github.com/org/infra#base to b.yaml
+Added github.com/org/infra#monitoring to b.yaml
+
+Run `b update` to sync files.
+```
+
+Requires a terminal (not available in CI/CD).
 
 ---
 
