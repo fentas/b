@@ -807,23 +807,6 @@ func TestEnvAddCmd_Args(t *testing.T) {
 	}
 }
 
-func TestEnvAdd_AlreadyExists(t *testing.T) {
-	// Verify the EnvAddOptions struct can be created with existing config
-	out := &bytes.Buffer{}
-	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
-	shared := NewSharedOptions(io, nil)
-	shared.Config = &state.State{
-		Envs: state.EnvList{
-			{Key: "github.com/org/infra#base"},
-		},
-	}
-
-	// Can't test the full Run() without network, but verify the config has the entry
-	if shared.Config.Envs.Get("github.com/org/infra#base") == nil {
-		t.Error("expected to find existing entry")
-	}
-}
-
 // --- helpers ---
 
 func TestSummarizeFiles(t *testing.T) {
@@ -960,16 +943,6 @@ func TestEnvAddInteractive_NotTTY(t *testing.T) {
 	}
 }
 
-func TestEnvAdd_RequiresArg(t *testing.T) {
-	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
-	shared := NewSharedOptions(io, nil)
-	cmd := NewEnvAddCmd(shared)
-
-	// ExactArgs(1) rejects 0 args
-	if err := cmd.Args(cmd, []string{}); err == nil {
-		t.Error("0 args should be rejected")
-	}
-}
 
 func TestEnvAdd_ResolvesIncludes(t *testing.T) {
 	tmpDir := t.TempDir()

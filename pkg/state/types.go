@@ -17,7 +17,7 @@ type State struct {
 
 // EnvEntry is a single env in b.yaml.
 type EnvEntry struct {
-	Key         string                         `yaml:"-"` // map key: full ref in envs (e.g. "github.com/org/infra#label"), short name in profiles (e.g. "base")
+	Key         string                         `yaml:"-"` // map key: in envs, full ref with optional label (e.g. "github.com/org/infra" or "github.com/org/infra#label"); in profiles, short name (e.g. "base")
 	Description string                         `yaml:"description,omitempty"`
 	Includes    []string                       `yaml:"includes,omitempty"` // compose from other profiles
 	Version     string                         `yaml:"version,omitempty"`
