@@ -224,6 +224,87 @@ func TestEnvEntry_Description_Roundtrip(t *testing.T) {
 	}
 }
 
+// --- Profiles top-level key ---
+
+func TestState_ProfilesSection_Roundtrip(t *testing.T) {
+	yamlData := `
+binaries: {}
+profiles:
+  base:
+    description: "Base manifests"
+    files:
+      manifests/base/**:
+        dest: base/
+  monitoring:
+    description: "Monitoring stack"
+    strategy: merge
+`
+	var s State
+	if err := yaml.Unmarshal([]byte(yamlData), &s); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if len(s.Profiles) != 2 {
+		t.Fatalf("expected 2 profiles, got %d", len(s.Profiles))
+	}
+
+	found := map[string]bool{}
+	for _, p := range s.Profiles {
+		found[p.Key] = true
+		if p.Key == "base" && p.Description != "Base manifests" {
+			t.Errorf("base description = %q", p.Description)
+		}
+		if p.Key == "monitoring" && p.Strategy != "merge" {
+			t.Errorf("monitoring strategy = %q", p.Strategy)
+		}
+	}
+	if !found["base"] || !found["monitoring"] {
+		t.Errorf("missing profiles: %v", found)
+	}
+
+	// Marshal and re-parse
+	data, err := yaml.Marshal(&s)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+	var s2 State
+	if err := yaml.Unmarshal(data, &s2); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+	if len(s2.Profiles) != 2 {
+		t.Fatalf("roundtrip: expected 2 profiles, got %d", len(s2.Profiles))
+	}
+}
+
+func TestState_ProfilesAndEnvsSeparate(t *testing.T) {
+	yamlData := `
+binaries: {}
+profiles:
+  base:
+    description: "Base config"
+envs:
+  github.com/org/infra:
+    version: v2.0
+`
+	var s State
+	if err := yaml.Unmarshal([]byte(yamlData), &s); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if len(s.Profiles) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(s.Profiles))
+	}
+	if len(s.Envs) != 1 {
+		t.Fatalf("expected 1 env, got %d", len(s.Envs))
+	}
+	if s.Profiles[0].Key != "base" {
+		t.Errorf("profile key = %q, want %q", s.Profiles[0].Key, "base")
+	}
+	if s.Envs[0].Key != "github.com/org/infra" {
+		t.Errorf("env key = %q", s.Envs[0].Key)
+	}
+}
+
 // --- Feature 10+7: All new fields together ---
 
 func TestEnvEntry_AllNewFields_Roundtrip(t *testing.T) {

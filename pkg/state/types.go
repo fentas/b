@@ -12,6 +12,7 @@ import (
 type State struct {
 	Binaries BinaryList `yaml:"binaries"`
 	Envs     EnvList    `yaml:"envs,omitempty"`
+	Profiles EnvList    `yaml:"profiles,omitempty"` // short-name profiles for upstream repos
 }
 
 // EnvEntry is a single env in b.yaml.
@@ -188,6 +189,14 @@ func (s *State) MarshalYAML() (interface{}, error) {
 			return nil, err
 		}
 		result["envs"] = envs
+	}
+
+	if len(s.Profiles) > 0 {
+		profiles, err := s.Profiles.MarshalYAML()
+		if err != nil {
+			return nil, err
+		}
+		result["profiles"] = profiles
 	}
 
 	return result, nil

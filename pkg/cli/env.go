@@ -430,32 +430,34 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 		return fmt.Errorf("loading upstream config: %w", err)
 	}
 	if err == nil {
-		// Filter to envs matching the requested ref
-		filteredEnvs := make([]*state.EnvEntry, 0, len(upstream.Envs))
-		for _, e := range upstream.Envs {
-			if gitcache.RefBase(e.Key) == ref {
-				filteredEnvs = append(filteredEnvs, e)
+		// Prefer the `profiles` section (short names); fall back to `envs` filtered by ref
+		profiles := upstream.Profiles
+		if len(profiles) == 0 {
+			for _, e := range upstream.Envs {
+				if gitcache.RefBase(e.Key) == ref {
+					profiles = append(profiles, e)
+				}
 			}
 		}
 
-		if len(filteredEnvs) == 0 {
-			fmt.Fprintf(o.IO.Out, "No env profiles found in %s's b.yaml\n", ref)
+		if len(profiles) == 0 {
+			fmt.Fprintf(o.IO.Out, "No profiles found in %s's b.yaml\n", ref)
 			return nil
 		}
 
-		// Sort envs for deterministic output
-		sortedEnvs := make([]*state.EnvEntry, len(filteredEnvs))
-		copy(sortedEnvs, filteredEnvs)
-		sort.Slice(sortedEnvs, func(i, j int) bool {
-			return sortedEnvs[i].Key < sortedEnvs[j].Key
+		// Sort for deterministic output
+		sorted := make([]*state.EnvEntry, len(profiles))
+		copy(sorted, profiles)
+		sort.Slice(sorted, func(i, j int) bool {
+			return sorted[i].Key < sorted[j].Key
 		})
 
 		fmt.Fprintf(o.IO.Out, "Available profiles from %s @ %s:\n\n", ref, versionLabel)
-		for _, e := range sortedEnvs {
-			label := gitcache.RefLabel(e.Key)
-			name := label
-			if name == "" {
-				name = "(default)"
+		for _, e := range sorted {
+			name := e.Key
+			// For envs-based profiles, show just the label
+			if gitcache.RefLabel(name) != "" {
+				name = gitcache.RefLabel(name)
 			}
 			desc := e.Description
 			if desc == "" {
@@ -463,7 +465,6 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 			}
 			fmt.Fprintf(o.IO.Out, "  %-24s %s\n", name, desc)
 			if e.Files != nil {
-				// Sort globs for deterministic output
 				globs := make([]string, 0, len(e.Files))
 				for g := range e.Files {
 					globs = append(globs, g)
@@ -480,7 +481,7 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 			}
 			fmt.Fprintln(o.IO.Out)
 		}
-		fmt.Fprintf(o.IO.Out, "Install a profile with:\n  b env add %s[#<profile>]\n", ref)
+		fmt.Fprintf(o.IO.Out, "Install a profile with:\n  b env add %s#<name>\n", ref)
 		return nil
 	}
 
@@ -603,31 +604,48 @@ func (o *EnvAddOptions) Run(refArg string) error {
 		return fmt.Errorf("failed to load upstream b.yaml for %s: %w", ref, err)
 	}
 
-	// localKey was already built at the top of the function
-
-	// Find the matching env entry in upstream
+	// Find the matching profile: check `profiles` section first (short name = label),
+	// then fall back to `envs` section (full ref key).
 	var source *state.EnvEntry
-	for _, e := range upstream.Envs {
-		if e.Key == localKey {
-			source = e
-			break
+	if label != "" {
+		// Look up by short name in profiles section
+		for _, e := range upstream.Profiles {
+			if e.Key == label {
+				source = e
+				break
+			}
+		}
+	}
+	// Fall back to envs section (full ref#label key)
+	if source == nil {
+		for _, e := range upstream.Envs {
+			if e.Key == localKey {
+				source = e
+				break
+			}
 		}
 	}
 
 	if source == nil {
-		// List available profiles matching this ref (sorted for stable output)
+		// Build available list from both profiles and envs
 		available := []string{}
+		for _, e := range upstream.Profiles {
+			available = append(available, e.Key)
+		}
 		for _, e := range upstream.Envs {
 			if gitcache.RefBase(e.Key) == ref {
-				available = append(available, e.Key)
+				l := gitcache.RefLabel(e.Key)
+				if l != "" {
+					available = append(available, l)
+				}
 			}
 		}
 		sort.Strings(available)
 		if len(available) > 0 {
 			return fmt.Errorf("profile %q not found in %s\n  Available: %s\n  Hint: run `b env profiles %s` to see all profiles",
-				localKey, ref, strings.Join(available, ", "), ref)
+				label, ref, strings.Join(available, ", "), ref)
 		}
-		return fmt.Errorf("no env profiles found in %s's b.yaml", ref)
+		return fmt.Errorf("no profiles found in %s's b.yaml", ref)
 	}
 
 	// If no explicit version was given and the source specifies one,
@@ -649,15 +667,25 @@ func (o *EnvAddOptions) Run(refArg string) error {
 				return fmt.Errorf("loading upstream config for %s@%s: %w", ref, effectiveVersion, err)
 			}
 			found := false
-			for _, e := range versionConfig.Envs {
-				if e.Key == localKey {
+			// Check profiles first, then envs
+			for _, e := range versionConfig.Profiles {
+				if e.Key == label {
 					source = e
 					found = true
 					break
 				}
 			}
 			if !found {
-				return fmt.Errorf("profile %q not found in %s@%s", localKey, ref, effectiveVersion)
+				for _, e := range versionConfig.Envs {
+					if e.Key == localKey {
+						source = e
+						found = true
+						break
+					}
+				}
+			}
+			if !found {
+				return fmt.Errorf("profile %q not found in %s@%s", label, ref, effectiveVersion)
 			}
 		}
 	}
