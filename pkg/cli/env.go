@@ -322,6 +322,9 @@ func (o *EnvMatchOptions) Run(args []string) error {
 
 	ref := gitcache.RefBase(refArg)
 	version := gitcache.RefVersion(refArg)
+	if idx := strings.Index(version, "#"); idx != -1 {
+		version = version[:idx]
+	}
 	url := gitcache.GitURL(refArg)
 
 	commit, err := gitcache.ResolveRef(url, version)
@@ -398,6 +401,9 @@ If no b.yaml is found, shows the directory structure as suggested profiles.`,
 func (o *EnvProfilesOptions) Run(refArg string) error {
 	ref := gitcache.RefBase(refArg)
 	version := gitcache.RefVersion(refArg)
+	if idx := strings.Index(version, "#"); idx != -1 {
+		version = version[:idx]
+	}
 	url := gitcache.GitURL(refArg)
 
 	commit, err := gitcache.ResolveRef(url, version)
@@ -557,6 +563,10 @@ func (o *EnvAddOptions) Run(refArg string) error {
 	ref := gitcache.RefBase(refArg)
 	label := gitcache.RefLabel(refArg)
 	version := gitcache.RefVersion(refArg)
+	// Strip any #label suffix that may be embedded in the version (e.g. repo@v2.0#profile)
+	if idx := strings.Index(version, "#"); idx != -1 {
+		version = version[:idx]
+	}
 	if o.Version != "" {
 		version = o.Version
 	}
