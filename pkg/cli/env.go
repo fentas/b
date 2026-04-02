@@ -430,20 +430,12 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 		return fmt.Errorf("loading upstream config: %w", err)
 	}
 	if err == nil {
-		// Prefer the `profiles` section (short names); fall back to `envs` filtered by ref
-		profiles := upstream.Profiles
-		if len(profiles) == 0 {
-			for _, e := range upstream.Envs {
-				if gitcache.RefBase(e.Key) == ref {
-					profiles = append(profiles, e)
-				}
-			}
-		}
-
-		if len(profiles) == 0 {
+		if len(upstream.Profiles) == 0 {
 			fmt.Fprintf(o.IO.Out, "No profiles found in %s's b.yaml\n", ref)
 			return nil
 		}
+
+		profiles := upstream.Profiles
 
 		// Sort for deterministic output
 		sorted := make([]*state.EnvEntry, len(profiles))
@@ -455,10 +447,6 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 		fmt.Fprintf(o.IO.Out, "Available profiles from %s @ %s:\n\n", ref, versionLabel)
 		for _, e := range sorted {
 			name := e.Key
-			// For envs-based profiles, show just the label
-			if gitcache.RefLabel(name) != "" {
-				name = gitcache.RefLabel(name)
-			}
 			desc := e.Description
 			if desc == "" {
 				desc = summarizeFiles(e.Files)
@@ -534,19 +522,16 @@ func NewEnvAddCmd(shared *SharedOptions) *cobra.Command {
 	o := &EnvAddOptions{SharedOptions: shared}
 
 	cmd := &cobra.Command{
-		Use:   "add <ref>[#profile]",
+		Use:   "add <ref>#<profile>",
 		Short: "Add an env profile from an upstream repo to your b.yaml",
 		Long: `Fetch the upstream repo's b.yaml and copy the specified profile into your local b.yaml.
-If no profile label is given, adds the default (unlabeled) env entry.`,
+The profile name (after #) must match an entry in the upstream profiles section.`,
 		Example: templates.Examples(`
-			# Add a specific profile
+			# Add a profile
 			b env add github.com/org/infra#monitoring
 
 			# Add with version pin
 			b env add --version v2.0 github.com/org/infra#base
-
-			# Add the default profile (no label)
-			b env add github.com/org/infra
 		`),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -572,11 +557,12 @@ func (o *EnvAddOptions) Run(refArg string) error {
 		version = o.Version
 	}
 
-	// Build the canonical key and check early if it already exists
-	localKey := ref
-	if label != "" {
-		localKey = ref + "#" + label
+	if label == "" {
+		return fmt.Errorf("profile name required — use %s#<name>\n  Hint: run `b env profiles %s` to see available profiles", ref, ref)
 	}
+
+	// Build the canonical key and check early if it already exists
+	localKey := ref + "#" + label
 	if o.Config != nil {
 		if existing := o.Config.Envs.Get(localKey); existing != nil {
 			return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", localKey, localKey)
@@ -604,11 +590,9 @@ func (o *EnvAddOptions) Run(refArg string) error {
 		return fmt.Errorf("failed to load upstream b.yaml for %s: %w", ref, err)
 	}
 
-	// Find the matching profile: check `profiles` section first (short name = label),
-	// then fall back to `envs` section (full ref key).
+	// Find the matching profile by short name (label)
 	var source *state.EnvEntry
 	if label != "" {
-		// Look up by short name in profiles section
 		for _, e := range upstream.Profiles {
 			if e.Key == label {
 				source = e
@@ -616,29 +600,11 @@ func (o *EnvAddOptions) Run(refArg string) error {
 			}
 		}
 	}
-	// Fall back to envs section (full ref#label key)
-	if source == nil {
-		for _, e := range upstream.Envs {
-			if e.Key == localKey {
-				source = e
-				break
-			}
-		}
-	}
 
 	if source == nil {
-		// Build available list from both profiles and envs
 		available := []string{}
 		for _, e := range upstream.Profiles {
 			available = append(available, e.Key)
-		}
-		for _, e := range upstream.Envs {
-			if gitcache.RefBase(e.Key) == ref {
-				l := gitcache.RefLabel(e.Key)
-				if l != "" {
-					available = append(available, l)
-				}
-			}
 		}
 		sort.Strings(available)
 		if len(available) > 0 {
@@ -673,15 +639,6 @@ func (o *EnvAddOptions) Run(refArg string) error {
 					source = e
 					found = true
 					break
-				}
-			}
-			if !found {
-				for _, e := range versionConfig.Envs {
-					if e.Key == localKey {
-						source = e
-						found = true
-						break
-					}
 				}
 			}
 			if !found {

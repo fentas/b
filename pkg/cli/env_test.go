@@ -950,24 +950,18 @@ func TestEnvAdd_ExistingEntryWithLabel(t *testing.T) {
 	}
 }
 
-func TestEnvAdd_NoLabel_NoConflictWithLabeled(t *testing.T) {
-	// b env add github.com/org/infra (no label) should not conflict
-	// with github.com/org/infra#base (has label)
+func TestEnvAdd_RequiresLabel(t *testing.T) {
 	out := &bytes.Buffer{}
 	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
 	shared := NewSharedOptions(io, nil)
-	shared.Config = &state.State{
-		Envs: state.EnvList{
-			{Key: "github.com/org/infra#base"},
-		},
-	}
 
 	o := &EnvAddOptions{SharedOptions: shared}
-	// This will fail at ResolveRef (no network), but should NOT fail at
-	// the early "already exists" check since keys are different
 	err := o.Run("github.com/org/infra")
-	if err != nil && strings.Contains(err.Error(), "already exists") {
-		t.Errorf("should not conflict with labeled entry, got: %v", err)
+	if err == nil {
+		t.Fatal("expected error for missing label")
+	}
+	if !strings.Contains(err.Error(), "profile name required") {
+		t.Errorf("expected 'profile name required' error, got: %v", err)
 	}
 }
 
