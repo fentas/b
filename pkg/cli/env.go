@@ -13,7 +13,6 @@ import (
 	"github.com/fentas/b/pkg/envmatch"
 	"github.com/fentas/b/pkg/gitcache"
 	"github.com/fentas/b/pkg/lock"
-	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/b/pkg/state"
 )
 
@@ -257,8 +256,11 @@ func (o *EnvRemoveOptions) Run(key string) error {
 	if o.Config != nil {
 		if o.Config.Envs.Remove(configKey) {
 			configPath, err := o.getConfigPath()
-			if err != nil || configPath == "" {
-				configPath = path.GetDefaultConfigPath()
+			if err != nil {
+				return fmt.Errorf("cannot determine config path: %w", err)
+			}
+			if configPath == "" {
+				return fmt.Errorf("cannot save updated config: config path is not set")
 			}
 			if err := state.SaveConfig(o.Config, configPath); err != nil {
 				return err

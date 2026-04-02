@@ -290,6 +290,13 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			status += " (dry-run)"
 		}
 
+		// Record actual on-disk mode (may differ from target due to umask)
+		if !cfg.DryRun && status != "kept" {
+			if info, statErr := os.Stat(destPath); statErr == nil {
+				fileModeStr = fileModeToString(info.Mode().Perm())
+			}
+		}
+
 		lockFiles = append(lockFiles, lock.LockFile{
 			Path:   m.SourcePath,
 			Dest:   m.DestPath,
