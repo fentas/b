@@ -11,14 +11,17 @@ Env sync is built into the [`b install`](/b/subcommands/install) and [`b update`
 ## Quick start
 
 ```bash
-# Sync files from a repo using SCP-style syntax
+# Discover available profiles from an upstream repo
+b env profiles github.com/org/infra
+
+# Add a profile to your b.yaml
+b env add github.com/org/infra#monitoring
+
+# Or sync files manually using SCP-style syntax
 b install github.com/org/infra:/manifests/base/** ./base
 
 # Pin a version
 b install github.com/org/infra@v2.0:/manifests/hetzner/** ./hetzner
-
-# Add to b.yaml and sync
-b install --add github.com/org/infra@v2.0:/manifests/** ./config
 
 # Update all envs from b.yaml
 b update
@@ -52,6 +55,7 @@ envs:
 
 | Field | Description | Default |
 |-------|-------------|---------|
+| `description` | Human-readable description (shown by `b env profiles`) | none |
 | `version` | Git tag, branch, or commit SHA to pin | `HEAD` (latest default branch) |
 | `strategy` | How to handle local changes: `replace`, `client`, or `merge` | `replace` |
 | `group` | Group name for selective syncing with `--group` | none |
@@ -284,6 +288,75 @@ b cache clean
 ```
 
 The cache uses shallow clones (`--depth 1`) to minimize disk usage. Only the specific commits needed for syncing are fetched.
+
+## Profiles
+
+Upstream repos can define named env profiles in their `b.yaml` using labels and descriptions. This lets consumers discover and install preconfigured file sets without manually writing glob patterns.
+
+### Publishing profiles (upstream repo)
+
+Add labeled env entries with `description` fields to your `b.yaml`:
+
+```yaml
+# In the upstream repo's b.yaml
+envs:
+  github.com/org/infra#base:
+    description: "Base Kubernetes manifests for all environments"
+    files:
+      manifests/base/**:
+        dest: base/
+
+  github.com/org/infra#monitoring:
+    description: "Prometheus + Grafana stack"
+    strategy: merge
+    files:
+      manifests/monitoring/**:
+        dest: monitoring/
+
+  github.com/org/infra#hetzner:
+    description: "Hetzner-specific cloud infrastructure"
+    files:
+      manifests/hetzner/**:
+        dest: hetzner/
+```
+
+### Discovering profiles
+
+List available profiles from an upstream repo:
+
+```bash
+$ b env profiles github.com/org/infra
+
+Available profiles from github.com/org/infra @ v2.1:
+
+  base                     Base Kubernetes manifests for all environments
+    manifests/base/** → base/
+
+  hetzner                  Hetzner-specific cloud infrastructure
+    manifests/hetzner/** → hetzner/
+
+  monitoring               Prometheus + Grafana stack
+    manifests/monitoring/** → monitoring/
+
+Install a profile with:
+  b env add github.com/org/infra#base
+```
+
+If the upstream repo has no `b.yaml`, `b env profiles` falls back to listing the directory structure with suggested install commands.
+
+### Adding a profile
+
+Install a profile into your local `b.yaml`:
+
+```bash
+# Add a profile
+b env add github.com/org/infra#monitoring
+
+# Add with a pinned version
+b env add --version v2.0 github.com/org/infra#base
+```
+
+This copies the profile's configuration (files, strategy, hooks, etc.) from the upstream `b.yaml` into yours. Run `b update` to sync the files.
 
 ## Managing envs
 
