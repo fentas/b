@@ -635,13 +635,19 @@ func (o *EnvAddOptions) Run(refArg string) error {
 			}
 			// Re-load config at the pinned version
 			versionConfig, err := fetchUpstreamConfig(cacheRoot, ref, newCommit)
-			if err == nil {
-				for _, e := range versionConfig.Envs {
-					if e.Key == localKey {
-						source = e
-						break
-					}
+			if err != nil {
+				return fmt.Errorf("loading upstream config for %s@%s: %w", ref, effectiveVersion, err)
+			}
+			found := false
+			for _, e := range versionConfig.Envs {
+				if e.Key == localKey {
+					source = e
+					found = true
+					break
 				}
+			}
+			if !found {
+				return fmt.Errorf("profile %q not found in %s@%s", localKey, ref, effectiveVersion)
 			}
 		}
 	}
