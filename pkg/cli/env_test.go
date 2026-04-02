@@ -943,7 +943,6 @@ func TestEnvAddInteractive_NotTTY(t *testing.T) {
 	}
 }
 
-
 func TestEnvAdd_ResolvesIncludes(t *testing.T) {
 	tmpDir := t.TempDir()
 	out := &bytes.Buffer{}
