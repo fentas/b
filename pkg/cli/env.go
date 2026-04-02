@@ -660,8 +660,8 @@ func (o *EnvAddOptions) runInteractive(ref, version, refArg string) error {
 
 	added := 0
 	for _, part := range parts {
-		var idx int
-		if _, err := fmt.Sscanf(part, "%d", &idx); err != nil {
+		idx, err := strconv.Atoi(part)
+		if err != nil {
 			fmt.Fprintf(o.IO.ErrOut, "  Skipping invalid input: %s\n", part)
 			continue
 		}
