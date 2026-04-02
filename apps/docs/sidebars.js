@@ -50,7 +50,7 @@ module.exports = {
       id: "env-sync",
       label: "Env Sync",
       customProps: {
-        sidebar_icon: "arrows-pointing-in",
+        sidebar_icon: "cloud-arrow-up",
       },
       className: "homepage-sidebar-item",
     },
