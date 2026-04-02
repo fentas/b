@@ -657,8 +657,12 @@ func (o *EnvAddOptions) runInteractive(ref, version string) error {
 	added := 0
 	for _, part := range parts {
 		var idx int
-		if _, err := fmt.Sscanf(part, "%d", &idx); err != nil || idx < 1 || idx > len(sorted) {
-			fmt.Fprintf(o.IO.ErrOut, "  Skipping invalid selection: %s\n", part)
+		if _, err := fmt.Sscanf(part, "%d", &idx); err != nil {
+			fmt.Fprintf(o.IO.ErrOut, "  Skipping invalid input: %s\n", part)
+			continue
+		}
+		if idx < 1 || idx > len(sorted) {
+			fmt.Fprintf(o.IO.ErrOut, "  Skipping out-of-range selection: %d (valid: 1-%d)\n", idx, len(sorted))
 			continue
 		}
 		selected := sorted[idx-1]
