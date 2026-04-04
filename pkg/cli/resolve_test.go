@@ -41,7 +41,7 @@ func TestResolveAmbiguousAssets_EmptyList(t *testing.T) {
 	resolveAmbiguousAssets([]*binary.Binary{}, true, out)
 }
 
-func TestResolveAmbiguousAssets_PreservedExistingResolvedAsset(t *testing.T) {
+func TestResolveAmbiguousAssets_SkipsAlreadyResolved(t *testing.T) {
 	existing := &provider.Asset{Name: "already-set", URL: "http://example.com"}
 	b := &binary.Binary{
 		Name:          "test",
@@ -52,9 +52,9 @@ func TestResolveAmbiguousAssets_PreservedExistingResolvedAsset(t *testing.T) {
 	out := &streams.IO{Out: &discardWriter{}, ErrOut: &discardWriter{}}
 	resolveAmbiguousAssets([]*binary.Binary{b}, true, out)
 
-	// Should not overwrite — provider detection will fail, but existing should stay
+	// Already resolved — should be skipped entirely
 	if b.ResolvedAsset != existing {
-		t.Error("existing ResolvedAsset should not be overwritten on provider error")
+		t.Error("already-resolved binary should be skipped")
 	}
 }
 

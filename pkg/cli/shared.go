@@ -313,7 +313,7 @@ func guardedAssetSelector(mu *sync.Mutex, bin *binary.Binary, quiet bool, io *st
 // skip re-fetching and use it directly.
 func resolveAmbiguousAssets(binaries []*binary.Binary, quiet bool, io *streams.IO) {
 	for _, b := range binaries {
-		if !b.AutoDetect {
+		if !b.AutoDetect || b.ResolvedAsset != nil {
 			continue
 		}
 
