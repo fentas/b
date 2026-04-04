@@ -67,7 +67,7 @@ func redactWrap(err error, authHeader string) error {
 	if authHeader == "" {
 		return err
 	}
-	return fmt.Errorf("%s", redactAuth(err.Error(), authHeader))
+	return fmt.Errorf("%s: %w", redactAuth(err.Error(), authHeader), err)
 }
 
 // ResolveLocalRef resolves a version to a commit SHA for a local repo.
@@ -101,7 +101,7 @@ func ResolveRefAuth(url, version, authHeader string) (string, error) {
 	ac := authCmd(authHeader, "ls-remote", url, version)
 	out, err := outputAuth(ac)
 	if err != nil {
-		return "", fmt.Errorf("git ls-remote %s %s: %s", url, version, redactAuth(err.Error(), authHeader))
+		return "", fmt.Errorf("git ls-remote %s %s: %w", url, version, redactWrap(err, authHeader))
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	for _, line := range lines {
