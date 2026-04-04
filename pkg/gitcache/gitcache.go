@@ -28,6 +28,11 @@ func CacheDir(root, ref string) string {
 // EnsureClone creates a shallow bare clone if the cache directory doesn't exist.
 // If it already exists, this is a no-op.
 func EnsureClone(root, ref, url string) error {
+	return EnsureCloneAuth(root, ref, url, "")
+}
+
+// EnsureCloneAuth creates a shallow bare clone with optional auth token.
+func EnsureCloneAuth(root, ref, url, token string) error {
 	dir := CacheDir(root, ref)
 	if _, err := os.Stat(dir); err == nil {
 		return nil // already cached
@@ -35,14 +40,29 @@ func EnsureClone(root, ref, url string) error {
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return fmt.Errorf("creating cache root %s: %w", root, err)
 	}
-	// git clone --bare --depth 1 <url> <dir>
-	return run("git", "clone", "--bare", "--depth", "1", url, dir)
+	args := authArgs(token, "clone", "--bare", "--depth", "1", url, dir)
+	return run(args...)
 }
 
 // Fetch fetches a specific commit or tag into the cache.
 func Fetch(root, ref, commitOrTag string) error {
+	return FetchAuth(root, ref, commitOrTag, "")
+}
+
+// FetchAuth fetches with optional auth token.
+func FetchAuth(root, ref, commitOrTag, token string) error {
 	dir := CacheDir(root, ref)
-	return run("git", "-C", dir, "fetch", "--depth", "1", "origin", commitOrTag)
+	args := authArgs(token, "-C", dir, "fetch", "--depth", "1", "origin", commitOrTag)
+	return run(args...)
+}
+
+// authArgs prepends git auth header config when token is non-empty.
+func authArgs(token string, gitArgs ...string) []string {
+	if token != "" {
+		header := fmt.Sprintf("http.extraHeader=Authorization: Bearer %s", token)
+		return append([]string{"git", "-c", header}, gitArgs...)
+	}
+	return append([]string{"git"}, gitArgs...)
 }
 
 // ResolveLocalRef resolves a version to a commit SHA for a local repo.
@@ -65,10 +85,16 @@ func ResolveLocalRef(repoPath, version string) (string, error) {
 // ResolveRef resolves a version (tag/branch/HEAD) to a commit SHA via ls-remote.
 // If version is empty, it resolves HEAD.
 func ResolveRef(url, version string) (string, error) {
+	return ResolveRefAuth(url, version, "")
+}
+
+// ResolveRefAuth resolves with optional auth token.
+func ResolveRefAuth(url, version, token string) (string, error) {
 	if version == "" {
 		version = "HEAD"
 	}
-	out, err := output("git", "ls-remote", url, version)
+	args := authArgs(token, "ls-remote", url, version)
+	out, err := output(args...)
 	if err != nil {
 		return "", fmt.Errorf("git ls-remote %s %s: %w", url, version, err)
 	}
@@ -277,10 +303,9 @@ func DiffNoIndex(a, b []byte, labelA, labelB string) (string, error) {
 	return stdout.String(), nil
 }
 
-// GitURL converts a ref to a clone-ready URL.
-// For remote refs like "github.com/org/repo", returns "https://github.com/org/repo.git".
-// For git:// protocol, local, or relative paths, use ResolveGitURL with a configDir instead.
-// This function does NOT support local/relative paths or auth token injection.
+// GitURL converts a ref to a clone-ready URL (without auth credentials).
+// Delegates to ResolveGitURL with empty configDir. For local/relative paths
+// or auth token support, use ResolveGitURL directly.
 func GitURL(ref string) string {
 	resolved := ResolveGitURL(ref, "")
 	return resolved.URL

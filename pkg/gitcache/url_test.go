@@ -134,59 +134,62 @@ func TestResolveGitURL_GitlabRef(t *testing.T) {
 	}
 }
 
-// --- Auth injection ---
+// --- Auth token detection ---
 
-func TestInjectAuth_GitHub(t *testing.T) {
+func TestDetectAuthToken_GitHub(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_test123")
-	url := injectAuth("https://github.com/org/repo.git", "github.com/org/repo")
-	if url != "https://x-access-token:ghp_test123@github.com/org/repo.git" {
-		t.Errorf("URL = %q", url)
+	token := detectAuthToken("github.com/org/repo")
+	if token != "ghp_test123" {
+		t.Errorf("token = %q", token)
 	}
 }
 
-func TestInjectAuth_GitLab(t *testing.T) {
+func TestDetectAuthToken_GitLab(t *testing.T) {
 	t.Setenv("GITLAB_TOKEN", "glpat-test")
-	url := injectAuth("https://gitlab.com/org/repo.git", "gitlab.com/org/repo")
-	if url != "https://x-access-token:glpat-test@gitlab.com/org/repo.git" {
-		t.Errorf("URL = %q", url)
+	token := detectAuthToken("gitlab.com/org/repo")
+	if token != "glpat-test" {
+		t.Errorf("token = %q", token)
 	}
 }
 
-func TestInjectAuth_Gitea(t *testing.T) {
+func TestDetectAuthToken_Gitea(t *testing.T) {
 	t.Setenv("GITEA_TOKEN", "giteatok")
-	url := injectAuth("https://codeberg.org/org/repo.git", "codeberg.org/org/repo")
-	if url != "https://x-access-token:giteatok@codeberg.org/org/repo.git" {
-		t.Errorf("URL = %q", url)
+	token := detectAuthToken("codeberg.org/org/repo")
+	if token != "giteatok" {
+		t.Errorf("token = %q", token)
 	}
 }
 
-func TestInjectAuth_NoToken(t *testing.T) {
-	// Ensure no tokens are set
+func TestDetectAuthToken_NoToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GITLAB_TOKEN", "")
 	t.Setenv("GITEA_TOKEN", "")
-	url := injectAuth("https://github.com/org/repo.git", "github.com/org/repo")
-	if url != "https://github.com/org/repo.git" {
-		t.Errorf("URL should be unchanged, got %q", url)
+	token := detectAuthToken("github.com/org/repo")
+	if token != "" {
+		t.Errorf("expected empty token, got %q", token)
 	}
 }
 
-func TestInjectAuth_UnknownHost(t *testing.T) {
+func TestDetectAuthToken_UnknownHost(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_test")
-	url := injectAuth("https://custom.host.com/org/repo.git", "custom.host.com/org/repo")
-	if url != "https://custom.host.com/org/repo.git" {
-		t.Errorf("URL should be unchanged for unknown host, got %q", url)
+	token := detectAuthToken("custom.host.com/org/repo")
+	if token != "" {
+		t.Errorf("expected empty token for unknown host, got %q", token)
 	}
 }
 
-func TestResolveGitURL_AuthInjection(t *testing.T) {
+func TestResolveGitURL_AuthToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_integrated")
 	r := ResolveGitURL("github.com/org/repo", "")
 	if r.IsLocal {
 		t.Error("expected remote")
 	}
-	if r.URL != "https://x-access-token:ghp_integrated@github.com/org/repo.git" {
-		t.Errorf("URL = %q", r.URL)
+	// URL should NOT contain the token (no credential leaking)
+	if r.URL != "https://github.com/org/repo.git" {
+		t.Errorf("URL = %q, should not contain token", r.URL)
+	}
+	if r.AuthToken != "ghp_integrated" {
+		t.Errorf("AuthToken = %q", r.AuthToken)
 	}
 }
 
@@ -194,7 +197,10 @@ func TestResolveGitURL_LocalNoAuth(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_shouldnotappear")
 	r := ResolveGitURL("/home/user/repo", "")
 	if r.URL != "/home/user/repo" {
-		t.Errorf("local repo should not have auth injected, got %q", r.URL)
+		t.Errorf("URL = %q", r.URL)
+	}
+	if r.AuthToken != "" {
+		t.Errorf("local repo should not have auth token, got %q", r.AuthToken)
 	}
 }
 
@@ -214,7 +220,9 @@ func TestResolveLocalRef_Integration(t *testing.T) {
 	}
 
 	// Create a file and commit
-	os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("hello"), 0644)
+	if err := os.WriteFile(filepath.Join(tmpDir, "test.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
 	for _, cmd := range [][]string{
 		{"git", "-C", tmpDir, "add", "-A"},
 		{"git", "-C", tmpDir, "commit", "-m", "init", "--no-gpg-sign"},

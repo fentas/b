@@ -8,8 +8,9 @@ import (
 
 // ResolvedRef holds a parsed and resolved git reference.
 type ResolvedRef struct {
-	URL     string // clone URL (https://... or local path)
-	IsLocal bool   // true for local filesystem repos
+	URL       string // clone URL (https://... or local path) — never contains credentials
+	IsLocal   bool   // true for local filesystem repos
+	AuthToken string // auth token for HTTPS operations (empty if none)
 }
 
 // ResolveGitURL converts a ref to a clone-ready URL or local path.
@@ -19,7 +20,8 @@ type ResolvedRef struct {
 //   - Local absolute paths: "/home/user/repo" → "/home/user/repo"
 //   - Local relative paths: "../../repo" → resolved to absolute (relative to configDir)
 //
-// Auth tokens are injected into HTTPS URLs when available.
+// Auth tokens are detected from environment variables but NOT embedded in URLs.
+// Use AuthToken with git -c http.extraHeader for authenticated operations.
 func ResolveGitURL(ref, configDir string) ResolvedRef {
 	// Strip fragment label (e.g. #monitoring)
 	if i := strings.Index(ref, "#"); i != -1 {
@@ -47,15 +49,14 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 
 	// Handle relative paths (starts with . or ..)
 	if strings.HasPrefix(ref, ".") || strings.HasPrefix(ref, "..") {
-		abs := filepath.Join(configDir, ref)
-		abs = filepath.Clean(abs)
+		abs, _ := filepath.Abs(filepath.Join(configDir, ref))
 		return ResolvedRef{URL: abs, IsLocal: true}
 	}
 
 	// Remote ref: "github.com/org/repo" → "https://github.com/org/repo.git"
 	url := "https://" + ref + ".git"
-	url = injectAuth(url, ref)
-	return ResolvedRef{URL: url, IsLocal: false}
+	token := detectAuthToken(ref)
+	return ResolvedRef{URL: url, IsLocal: false, AuthToken: token}
 }
 
 // resolveRepo determines if a repo path is local or remote.
@@ -67,39 +68,30 @@ func resolveRepo(repo, configDir string) ResolvedRef {
 
 	// Relative path (starts with . or ..)
 	if strings.HasPrefix(repo, ".") || strings.HasPrefix(repo, "..") {
-		abs := filepath.Join(configDir, repo)
-		abs = filepath.Clean(abs)
+		abs, _ := filepath.Abs(filepath.Join(configDir, repo))
 		return ResolvedRef{URL: abs, IsLocal: true}
 	}
 
 	// Remote: "github.com/org/repo"
 	url := "https://" + repo + ".git"
-	url = injectAuth(url, repo)
-	return ResolvedRef{URL: url, IsLocal: false}
+	token := detectAuthToken(repo)
+	return ResolvedRef{URL: url, IsLocal: false, AuthToken: token}
 }
 
-// injectAuth embeds an auth token into an HTTPS URL if the corresponding
-// environment variable is set. Supports GitHub, GitLab, and Gitea/Codeberg.
-func injectAuth(url, ref string) string {
+// detectAuthToken returns the auth token for a given ref based on host matching.
+func detectAuthToken(ref string) string {
 	host := ref
 	if i := strings.Index(host, "/"); i > 0 {
 		host = host[:i]
 	}
 
-	var token string
 	switch {
 	case strings.Contains(host, "github"):
-		token = os.Getenv("GITHUB_TOKEN")
+		return os.Getenv("GITHUB_TOKEN")
 	case strings.Contains(host, "gitlab"):
-		token = os.Getenv("GITLAB_TOKEN")
+		return os.Getenv("GITLAB_TOKEN")
 	case strings.Contains(host, "gitea") || strings.Contains(host, "codeberg"):
-		token = os.Getenv("GITEA_TOKEN")
+		return os.Getenv("GITEA_TOKEN")
 	}
-
-	if token == "" {
-		return url
-	}
-
-	// Embed token: https://host/... → https://x-access-token:TOKEN@host/...
-	return strings.Replace(url, "https://", "https://x-access-token:"+token+"@", 1)
+	return ""
 }
