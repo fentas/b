@@ -78,6 +78,12 @@ func TestIsReleaseProvider_Docker(t *testing.T) {
 	}
 }
 
+func TestIsReleaseProvider_Nil(t *testing.T) {
+	if provider.IsReleaseProvider(nil) {
+		t.Error("nil should NOT be a release provider")
+	}
+}
+
 func TestIsReleaseProvider_Git(t *testing.T) {
 	if provider.IsReleaseProvider(&provider.Git{}) {
 		t.Error("Git should NOT be a release provider")
