@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.10.0](https://github.com/fentas/b/compare/v4.9.0...v4.10.0) (2026-04-04)
+
+
+### Features
+
+* unified ref resolution for envs — local repos, git://, auth tokens ([#116](https://github.com/fentas/b/issues/116)) ([373e145](https://github.com/fentas/b/commit/373e145e1a97969b846eefb1a626fd839c42dd0d))
+
+
+### Bug Fixes
+
+* resolve ambiguous assets before progress bars, clean error output ([#115](https://github.com/fentas/b/issues/115)) ([ccdc278](https://github.com/fentas/b/commit/ccdc27861693c3b34b3a73e21067926351371164))
+
 ## [4.9.0](https://github.com/fentas/b/compare/v4.8.0...v4.9.0) (2026-04-02)
 
 
