@@ -125,6 +125,142 @@ func TestResolveGitURL_DotRelativePath(t *testing.T) {
 	}
 }
 
+// --- SSH refs ---
+
+func TestResolveGitURL_SSH_Implicit(t *testing.T) {
+	r := ResolveGitURL("git@github.com:org/repo", "")
+	if !r.IsSSH {
+		t.Error("expected SSH")
+	}
+	if r.IsLocal {
+		t.Error("should not be local")
+	}
+	if r.URL != "git@github.com:org/repo.git" {
+		t.Errorf("URL = %q", r.URL)
+	}
+	if r.AuthToken != "" {
+		t.Errorf("SSH should have no auth token, got %q", r.AuthToken)
+	}
+}
+
+func TestResolveGitURL_SSH_ImplicitWithGitSuffix(t *testing.T) {
+	r := ResolveGitURL("git@github.com:org/repo.git", "")
+	if r.URL != "git@github.com:org/repo.git" {
+		t.Errorf("URL = %q, should not double-add .git", r.URL)
+	}
+}
+
+func TestResolveGitURL_SSH_Explicit(t *testing.T) {
+	r := ResolveGitURL("ssh://git@github.com/org/repo", "")
+	if !r.IsSSH {
+		t.Error("expected SSH")
+	}
+	if r.URL != "ssh://git@github.com/org/repo.git" {
+		t.Errorf("URL = %q", r.URL)
+	}
+}
+
+func TestResolveGitURL_SSH_CustomPort(t *testing.T) {
+	r := ResolveGitURL("ssh://git@custom.host:2222/org/repo", "")
+	if !r.IsSSH {
+		t.Error("expected SSH")
+	}
+	if r.URL != "ssh://git@custom.host:2222/org/repo.git" {
+		t.Errorf("URL = %q", r.URL)
+	}
+}
+
+func TestResolveGitURL_SSH_WithLabel(t *testing.T) {
+	r := ResolveGitURL("git@github.com:org/repo#monitoring", "")
+	if !r.IsSSH {
+		t.Error("expected SSH")
+	}
+	if r.URL != "git@github.com:org/repo.git" {
+		t.Errorf("URL = %q, label should be stripped", r.URL)
+	}
+}
+
+func TestResolveGitURL_SSH_WithVersion(t *testing.T) {
+	// git@github.com:org/repo@v2.0 — the last @ is the version, not the SSH user
+	r := ResolveGitURL("git@github.com:org/repo@v2.0", "")
+	if !r.IsSSH {
+		t.Error("expected SSH")
+	}
+	if r.URL != "git@github.com:org/repo.git" {
+		t.Errorf("URL = %q, version should be stripped", r.URL)
+	}
+}
+
+func TestIsSSHImplicit(t *testing.T) {
+	tests := []struct {
+		ref  string
+		want bool
+	}{
+		{"git@github.com:org/repo", true},
+		{"git@gitlab.com:group/project.git", true},
+		{"ssh://git@github.com/org/repo", false}, // explicit, not implicit
+		{"github.com/org/repo", false},
+		{"https://github.com/org/repo.git", false},
+		{"../../local", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.ref, func(t *testing.T) {
+			if got := isSSHImplicit(tt.ref); got != tt.want {
+				t.Errorf("isSSHImplicit(%q) = %v, want %v", tt.ref, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsSSHURL(t *testing.T) {
+	tests := []struct {
+		url  string
+		want bool
+	}{
+		{"git@github.com:org/repo.git", true},
+		{"ssh://git@github.com/org/repo.git", true},
+		{"https://github.com/org/repo.git", false},
+		{"/local/repo", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			if got := IsSSHURL(tt.url); got != tt.want {
+				t.Errorf("IsSSHURL(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
+// --- RefBase/RefVersion with SSH ---
+
+func TestRefBase_SSH(t *testing.T) {
+	got := RefBase("git@github.com:org/repo")
+	if got != "git@github.com:org/repo" {
+		t.Errorf("RefBase = %q, should preserve SSH ref", got)
+	}
+}
+
+func TestRefBase_SSH_WithVersion(t *testing.T) {
+	got := RefBase("git@github.com:org/repo@v2.0")
+	if got != "git@github.com:org/repo" {
+		t.Errorf("RefBase = %q, should strip version but keep git@", got)
+	}
+}
+
+func TestRefVersion_SSH(t *testing.T) {
+	got := RefVersion("git@github.com:org/repo@v2.0")
+	if got != "v2.0" {
+		t.Errorf("RefVersion = %q, want v2.0", got)
+	}
+}
+
+func TestRefVersion_SSH_NoVersion(t *testing.T) {
+	got := RefVersion("git@github.com:org/repo")
+	if got != "" {
+		t.Errorf("RefVersion = %q, want empty", got)
+	}
+}
+
 func TestResolveGitURL_GitlabRef(t *testing.T) {
 	r := ResolveGitURL("gitlab.com/group/project", "")
 	if r.IsLocal {

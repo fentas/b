@@ -35,15 +35,11 @@ func (g *Git) LatestVersion(ref string) (string, error) {
 	}
 
 	if isLocalRepo(repo) {
-		out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
-		if err != nil {
-			return "", fmt.Errorf("git rev-parse HEAD in %s: %w", repo, err)
-		}
-		return strings.TrimSpace(string(out)), nil
+		return gitcache.ResolveLocalRef(repo, "HEAD")
 	}
 
-	url := "https://" + repo + ".git"
-	return gitcache.ResolveRef(url, "HEAD")
+	resolved := gitcache.ResolveGitURL(repo, "")
+	return gitcache.ResolveRefAuth(resolved.URL, "HEAD", resolved.AuthToken)
 }
 
 // FetchRelease is not used for git — use Install instead.
@@ -93,16 +89,16 @@ func (g *Git) installFromLocal(repo, filePath, version, dest string) (string, er
 // installFromRemote clones/caches a remote repo and extracts the file.
 func (g *Git) installFromRemote(repo, filePath, version, dest string) (string, error) {
 	cacheRoot := gitcache.DefaultCacheRoot()
-	url := "https://" + repo + ".git"
+	resolved := gitcache.ResolveGitURL(repo, "")
 
-	if err := gitcache.EnsureClone(cacheRoot, repo, url); err != nil {
-		return "", fmt.Errorf("cloning %s: %w", url, err)
+	if err := gitcache.EnsureCloneAuth(cacheRoot, repo, resolved.URL, resolved.AuthToken); err != nil {
+		return "", fmt.Errorf("cloning %s: %w", resolved.URL, err)
 	}
 
 	commit := version
 	if commit == "" {
 		var err error
-		commit, err = gitcache.ResolveRef(url, "HEAD")
+		commit, err = gitcache.ResolveRefAuth(resolved.URL, "HEAD", resolved.AuthToken)
 		if err != nil {
 			return "", err
 		}

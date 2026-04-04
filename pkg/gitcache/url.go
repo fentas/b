@@ -9,33 +9,54 @@ import (
 
 // ResolvedRef holds a parsed and resolved git reference.
 type ResolvedRef struct {
-	URL       string // clone URL (https://... or local path) — never contains credentials
+	URL       string // clone URL (https://, ssh://, git@host:repo, or local path)
 	IsLocal   bool   // true for local filesystem repos
-	AuthToken string // auth token for HTTPS operations (empty if none)
+	IsSSH     bool   // true for SSH URLs (git@ or ssh://)
+	AuthToken string // auth token for HTTPS operations (empty for SSH/local)
 }
 
 // ResolveGitURL converts a ref to a clone-ready URL or local path.
 // Handles:
+//   - SSH refs: "git@github.com:org/repo" → passed through as-is (uses ssh-agent)
+//   - SSH protocol: "ssh://git@host/org/repo" → passed through as-is
 //   - Remote refs: "github.com/org/repo" → "https://github.com/org/repo.git"
-//   - git:// protocol: "git://../../repo" → resolved local path or "https://host/repo.git"
-//   - Local absolute paths: "/home/user/repo" → "/home/user/repo"
-//   - Local relative paths: "../../repo" → resolved to absolute (relative to configDir)
+//   - git:// protocol: "git://../../repo" → resolved local path or remote URL
+//   - Local paths: "/abs/path" or "../../rel" → resolved to absolute
 //
-// Auth tokens are detected from environment variables but NOT embedded in URLs.
-// Use AuthToken with git -c http.extraHeader for authenticated operations.
+// SSH URLs use the system's SSH agent (SSH_AUTH_SOCK) for authentication.
+// HTTPS URLs use AuthToken with git -c http.extraHeader.
 func ResolveGitURL(ref, configDir string) ResolvedRef {
-	// Strip fragment label (e.g. #monitoring)
-	if i := strings.Index(ref, "#"); i != -1 {
-		ref = ref[:i]
+	// Strip fragment label (e.g. #monitoring) — but preserve for version stripping
+	cleanRef := ref
+	if i := strings.Index(cleanRef, "#"); i != -1 {
+		cleanRef = cleanRef[:i]
 	}
-	// Strip version (e.g. @v2.0)
-	if i := strings.Index(ref, "@"); i != -1 {
-		ref = ref[:i]
+	// Strip version (e.g. @v2.0) — careful not to strip git@ prefix
+	if i := strings.LastIndex(cleanRef, "@"); i > 0 && !isSSHUserPrefix(cleanRef, i) {
+		cleanRef = cleanRef[:i]
 	}
 
-	// Handle git:// protocol prefix
-	if strings.HasPrefix(ref, "git://") {
-		raw := strings.TrimPrefix(ref, "git://")
+	// SSH implicit format: git@host:org/repo.git
+	if isSSHImplicit(cleanRef) {
+		url := cleanRef
+		if !strings.HasSuffix(url, ".git") {
+			url += ".git"
+		}
+		return ResolvedRef{URL: url, IsSSH: true}
+	}
+
+	// SSH explicit format: ssh://git@host/org/repo
+	if strings.HasPrefix(cleanRef, "ssh://") {
+		url := cleanRef
+		if !strings.HasSuffix(url, ".git") {
+			url += ".git"
+		}
+		return ResolvedRef{URL: url, IsSSH: true}
+	}
+
+	// git:// protocol prefix (custom b protocol for local/remote repos)
+	if strings.HasPrefix(cleanRef, "git://") {
+		raw := strings.TrimPrefix(cleanRef, "git://")
 		// Strip colon-separated filepath (git://repo:filepath),
 		// but preserve host:port forms (colon before first slash).
 		if colon := strings.Index(raw, ":"); colon >= 0 {
@@ -47,34 +68,31 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 		return resolveRepo(raw, configDir)
 	}
 
-	// Handle absolute local paths
-	if strings.HasPrefix(ref, "/") {
-		return ResolvedRef{URL: ref, IsLocal: true}
+	// Absolute local path
+	if strings.HasPrefix(cleanRef, "/") {
+		return ResolvedRef{URL: cleanRef, IsLocal: true}
 	}
 
-	// Handle relative paths (starts with . or ..)
-	if strings.HasPrefix(ref, ".") || strings.HasPrefix(ref, "..") {
-		abs, err := filepath.Abs(filepath.Join(configDir, ref))
+	// Relative path (starts with . or ..)
+	if strings.HasPrefix(cleanRef, ".") || strings.HasPrefix(cleanRef, "..") {
+		abs, err := filepath.Abs(filepath.Join(configDir, cleanRef))
 		if err != nil {
-			return ResolvedRef{URL: filepath.Clean(filepath.Join(configDir, ref)), IsLocal: true}
+			return ResolvedRef{URL: filepath.Clean(filepath.Join(configDir, cleanRef)), IsLocal: true}
 		}
 		return ResolvedRef{URL: abs, IsLocal: true}
 	}
 
 	// Remote ref: "github.com/org/repo" → "https://github.com/org/repo.git"
-	url := "https://" + ref + ".git"
-	token := detectAuthToken(ref)
+	url := "https://" + cleanRef + ".git"
+	token := detectAuthToken(cleanRef)
 	return ResolvedRef{URL: url, IsLocal: false, AuthToken: token}
 }
 
 // resolveRepo determines if a repo path is local or remote.
 func resolveRepo(repo, configDir string) ResolvedRef {
-	// Absolute local path
 	if strings.HasPrefix(repo, "/") {
 		return ResolvedRef{URL: repo, IsLocal: true}
 	}
-
-	// Relative path (starts with . or ..)
 	if strings.HasPrefix(repo, ".") || strings.HasPrefix(repo, "..") {
 		abs, err := filepath.Abs(filepath.Join(configDir, repo))
 		if err != nil {
@@ -82,11 +100,33 @@ func resolveRepo(repo, configDir string) ResolvedRef {
 		}
 		return ResolvedRef{URL: abs, IsLocal: true}
 	}
-
-	// Remote: "github.com/org/repo"
+	// Remote
 	url := "https://" + repo + ".git"
 	token := detectAuthToken(repo)
 	return ResolvedRef{URL: url, IsLocal: false, AuthToken: token}
+}
+
+// isSSHImplicit detects the "git@host:path" SSH URL format.
+// Must have @ before : and no :// protocol prefix.
+func isSSHImplicit(ref string) bool {
+	if strings.Contains(ref, "://") {
+		return false
+	}
+	at := strings.Index(ref, "@")
+	colon := strings.Index(ref, ":")
+	return at >= 0 && colon > at
+}
+
+// isSSHUserPrefix checks if the @ at position i is part of a git@ user prefix
+// (e.g. "git@github.com:...") rather than a version separator (e.g. "repo@v2.0").
+func isSSHUserPrefix(ref string, atIdx int) bool {
+	prefix := ref[:atIdx]
+	return prefix == "git" || prefix == "ssh://git"
+}
+
+// IsSSHURL returns true if a URL uses SSH transport.
+func IsSSHURL(url string) bool {
+	return strings.HasPrefix(url, "ssh://") || isSSHImplicit(url)
 }
 
 // matchesTrustedHost reports whether host exactly matches domain or is a subdomain.
@@ -96,7 +136,6 @@ func matchesTrustedHost(host, domain string) bool {
 }
 
 // detectAuthToken returns the auth token for a given ref based on trusted host matching.
-// Only matches exact domains or subdomains to prevent token leakage to attacker-controlled hosts.
 func detectAuthToken(ref string) string {
 	host := ref
 	if i := strings.Index(host, "/"); i > 0 {
@@ -126,8 +165,7 @@ func redactToken(s, token string) string {
 }
 
 // authArgs prepends git auth header config when token is non-empty.
-// NOTE: Error messages from run()/output() will contain the token in argv.
-// Use redactToken() on any error before surfacing to users.
+// Skips Bearer header for SSH URLs (SSH uses ssh-agent, not HTTP headers).
 func authArgs(token string, gitArgs ...string) []string {
 	if token != "" {
 		header := fmt.Sprintf("http.extraHeader=Authorization: Bearer %s", token)

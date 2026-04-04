@@ -24,6 +24,7 @@ Features:
 - **30+ pre-packaged binaries** (kubectl, k9s, jq, helm, etc.) with auto-detection
 - **Install from GitHub, GitLab, Gitea/Forgejo, Go modules, Docker images, and git repos** ([docs](https://binary.help/b/subcommands/install))
 - **Sync env files** from git repos with glob matching and three-way merge
+- **SSH & HTTPS** — use SSH keys (ssh-agent) or tokens for private repos
 - **Lockfile** (`b.lock`) for reproducible installations with SHA256 verification
 - **direnv integration** for per-project binary management
 
@@ -51,6 +52,9 @@ b install go://golang.org/x/tools/cmd/goimports
 b install docker://alpine/helm
 b install "git:///home/user/myrepo:.scripts/tool"
 b install "git://github.com/org/repo:bin/app@v1.0"
+
+# SSH repos (uses ssh-agent)
+b install "git://git@github.com:org/private-repo:bin/app"
 
 # Install and add to b.yaml
 b install --add jq@1.7

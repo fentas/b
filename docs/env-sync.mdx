@@ -116,6 +116,56 @@ envs:
 
 Labels create separate lock entries so each group is tracked independently.
 
+### SSH repos
+
+Use SSH URLs for private repos or repos where you have SSH key access:
+
+```yaml
+envs:
+  # Implicit SSH format
+  git@github.com:org/private-infra:
+    files:
+      manifests/**:
+        dest: manifests/
+
+  # Explicit SSH format
+  ssh://git@github.com/org/private-infra:
+    files:
+      configs/**:
+        dest: configs/
+```
+
+SSH authentication uses your system's ssh-agent (`SSH_AUTH_SOCK`). No tokens or passwords are needed — just ensure your SSH key is loaded:
+
+```bash
+# Verify ssh-agent has your key
+ssh-add -l
+
+# Add a key if needed
+ssh-add ~/.ssh/id_ed25519
+```
+
+### Local repos
+
+Sync files from local git repos using relative or absolute paths:
+
+```yaml
+envs:
+  # Relative to b.yaml location
+  git://../../shared-config#base:
+    files:
+      manifests/**:
+        dest: manifests/
+
+  # Absolute path
+  /home/user/repos/shared-config:
+    files:
+      configs/**:
+        dest: configs/
+```
+
+Local repos are used directly — no cloning or network access required.
+
 ---
 
 ## SCP syntax
