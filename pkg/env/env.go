@@ -76,8 +76,11 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		strategy = StrategyReplace
 	}
 
-	baseRef := gitcache.RefBase(cfg.Ref)
 	resolved := gitcache.ResolveGitURL(cfg.Ref, cfg.ConfigDir)
+	baseRef := gitcache.RefBase(cfg.Ref)
+	if resolved.IsLocal {
+		baseRef = cfg.Ref // local paths may contain # or @ — use as-is for lock keys
+	}
 
 	// Resolve version to commit (or use forced commit)
 	var commit string

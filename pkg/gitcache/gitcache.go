@@ -310,13 +310,15 @@ func GitURL(ref string) string {
 }
 
 // RefBase strips version and fragment from a ref, returning the bare repo ref.
-// e.g. "github.com/org/repo@v2.0" → "github.com/org/repo"
-// e.g. "github.com/org/repo#label" → "github.com/org/repo"
+// Local paths (starting with / or ./ or ../) are returned unchanged.
 func RefBase(ref string) string {
+	// Local paths may contain # or @ — return as-is
+	if strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "./") || strings.HasPrefix(ref, "../") {
+		return ref
+	}
 	if i := strings.Index(ref, "#"); i != -1 {
 		ref = ref[:i]
 	}
-	// Use LastIndex to skip SSH user@ prefix (git@github.com:...)
 	if i := strings.LastIndex(ref, "@"); i > 0 && !IsSSHUserAt(ref, i) {
 		ref = ref[:i]
 	}

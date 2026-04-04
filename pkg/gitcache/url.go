@@ -130,8 +130,8 @@ func IsSSHUserAt(ref string, atIdx int) bool {
 
 	// scp-style: user@host:path — the part after @ must contain a ':'
 	// indicating host:path format. Version separators (repo@v2.0) don't.
-	// Also the prefix must be a simple username (no slashes, no dots with TLD).
-	if strings.Contains(rest, ":") && !strings.Contains(prefix, "/") && !strings.Contains(prefix, ".") {
+	// Username must not contain slashes (paths like github.com/org/repo@v2.0).
+	if strings.Contains(rest, ":") && !strings.Contains(prefix, "/") {
 		return true
 	}
 
