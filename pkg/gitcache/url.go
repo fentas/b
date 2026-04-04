@@ -26,7 +26,20 @@ type ResolvedRef struct {
 // SSH URLs use the system's SSH agent (SSH_AUTH_SOCK) for authentication.
 // HTTPS URLs use AuthToken with git -c http.extraHeader.
 func ResolveGitURL(ref, configDir string) ResolvedRef {
-	// Strip fragment label (e.g. #monitoring) — but preserve for version stripping
+	// Detect absolute/relative local paths BEFORE stripping #/@ to avoid
+	// truncating paths containing those characters (e.g. /home/me/repo@work).
+	if strings.HasPrefix(ref, "/") {
+		return ResolvedRef{URL: ref, IsLocal: true}
+	}
+	if strings.HasPrefix(ref, "./") || strings.HasPrefix(ref, "../") || ref == "." || ref == ".." {
+		abs, err := filepath.Abs(filepath.Join(configDir, ref))
+		if err != nil {
+			return ResolvedRef{URL: filepath.Clean(filepath.Join(configDir, ref)), IsLocal: true}
+		}
+		return ResolvedRef{URL: abs, IsLocal: true}
+	}
+
+	// Strip fragment label (e.g. #monitoring)
 	cleanRef := ref
 	if i := strings.Index(cleanRef, "#"); i != -1 {
 		cleanRef = cleanRef[:i]
@@ -66,20 +79,6 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 			}
 		}
 		return resolveRepo(raw, configDir)
-	}
-
-	// Absolute local path
-	if strings.HasPrefix(cleanRef, "/") {
-		return ResolvedRef{URL: cleanRef, IsLocal: true}
-	}
-
-	// Relative path (starts with . or ..)
-	if strings.HasPrefix(cleanRef, ".") || strings.HasPrefix(cleanRef, "..") {
-		abs, err := filepath.Abs(filepath.Join(configDir, cleanRef))
-		if err != nil {
-			return ResolvedRef{URL: filepath.Clean(filepath.Join(configDir, cleanRef)), IsLocal: true}
-		}
-		return ResolvedRef{URL: abs, IsLocal: true}
 	}
 
 	// Remote ref: "github.com/org/repo" → "https://github.com/org/repo.git"

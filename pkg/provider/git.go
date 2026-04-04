@@ -24,7 +24,7 @@ type Git struct{}
 func (g *Git) Name() string { return "git" }
 
 func (g *Git) Match(ref string) bool {
-	return strings.HasPrefix(ref, "git://")
+	return strings.HasPrefix(ref, "git://") || gitcache.IsSSHURL(ref)
 }
 
 // LatestVersion returns the HEAD commit SHA for the repo.
@@ -130,16 +130,33 @@ func parseGitRef(ref string) (repo, filePath string, err error) {
 		return "", "", fmt.Errorf("empty git ref: %s", ref)
 	}
 
-	// Strip version suffix (@v1.0.0) before parsing
-	raw, _ = ParseRef("git://" + raw)
-	raw = strings.TrimPrefix(raw, "git://")
+	// Strip version suffix (@v1.0.0) before parsing — but preserve git@ SSH prefix
+	if i := strings.LastIndex(raw, "@"); i > 0 {
+		prefix := raw[:i]
+		if prefix != "git" && prefix != "ssh://git" {
+			raw = raw[:i] // strip version
+		}
+	}
 
-	// Local absolute path: starts with /
-	// The colon separator between repo and filepath must be found carefully.
-	// For local: /home/user/repo:.scripts/lo — first colon after the path
-	// For remote: github.com/org/repo:scripts/tool.sh — first colon
+	// SSH implicit format: git@host:org/repo:filepath
+	// Has two colons — first is SSH host separator, last is our filepath separator.
+	if gitcache.IsSSHURL(raw) {
+		idx := strings.LastIndex(raw, ":")
+		if idx < 0 {
+			return "", "", fmt.Errorf("git ref missing filepath separator ':' — expected <ssh-url>:<filepath>, got %s", ref)
+		}
+		// For SSH implicit (git@host:org/repo:file), we need at least 2 colons
+		// First colon is after host, last colon separates filepath
+		firstColon := strings.Index(raw, ":")
+		if firstColon == idx {
+			// Only one colon — it's the SSH host separator, no filepath
+			return "", "", fmt.Errorf("git ref missing filepath separator — expected <ssh-url>:<filepath>, got %s", ref)
+		}
+		return raw[:idx], raw[idx+1:], nil
+	}
+
+	// Local absolute path: /home/user/repo:.scripts/lo
 	if strings.HasPrefix(raw, "/") {
-		// Local path: find colon that separates repo path from file path
 		idx := strings.Index(raw, ":")
 		if idx < 0 {
 			return "", "", fmt.Errorf("git ref missing filepath separator ':' — expected git://<repo>:<filepath>, got %s", ref)
@@ -147,7 +164,16 @@ func parseGitRef(ref string) (repo, filePath string, err error) {
 		return raw[:idx], raw[idx+1:], nil
 	}
 
-	// Remote: find the colon separator
+	// Relative local path: ../../repo:filepath
+	if strings.HasPrefix(raw, ".") {
+		idx := strings.Index(raw, ":")
+		if idx < 0 {
+			return "", "", fmt.Errorf("git ref missing filepath separator ':' — expected git://<repo>:<filepath>, got %s", ref)
+		}
+		return raw[:idx], raw[idx+1:], nil
+	}
+
+	// Remote: github.com/org/repo:scripts/tool.sh
 	idx := strings.Index(raw, ":")
 	if idx < 0 {
 		return "", "", fmt.Errorf("git ref missing filepath separator ':' — expected git://<repo>:<filepath>, got %s", ref)
