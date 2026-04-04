@@ -116,6 +116,29 @@ The SCP syntax is: `<repo>[@<version>]:/<glob> [<dest>]`
 - **glob** — A file pattern to match in the repository (e.g., `manifests/**`)
 - **dest** (optional) — Local directory for the synced files; defaults to the matched path structure
 
+### Install from SSH repos
+
+Use SSH URLs for private repositories (requires ssh-agent):
+
+```bash
+# Binary from SSH repo
+b install "git@github.com:org/private-repo:bin/tool"
+
+# Env sync from SSH repo (in b.yaml)
+# git@github.com:org/infra:
+#   files:
+#     manifests/**:
+#       dest: manifests/
+```
+
+### Install from local repos
+
+```bash
+# Binary from local repo
+b install "git:///home/user/myrepo:bin/tool"
+b install "git://../../shared-repo:scripts/deploy.sh"
+```
+
 ## Flags
 
 | Flag         | Description                               |

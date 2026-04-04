@@ -54,7 +54,7 @@ b install "git:///home/user/myrepo:.scripts/tool"
 b install "git://github.com/org/repo:bin/app@v1.0"
 
 # SSH repos (uses ssh-agent)
-b install "git://git@github.com:org/private-repo:bin/app"
+b install "git@github.com:org/private-repo:bin/app"
 
 # Install and add to b.yaml
 b install --add jq@1.7
