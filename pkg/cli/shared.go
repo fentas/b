@@ -238,8 +238,15 @@ func (o *SharedOptions) ProjectRoot() string {
 	if cwd, err := os.Getwd(); err == nil {
 		return cwd
 	}
-	// Last resort: parent of lockDir (strips .bin/)
-	return filepath.Dir(o.LockDir())
+	// Last resort: derive from lockDir
+	lockDir := o.LockDir()
+	if filepath.Base(lockDir) == ".bin" {
+		return filepath.Dir(lockDir)
+	}
+	if lockDir != "" {
+		return lockDir
+	}
+	return "."
 }
 
 // ValidateBinaryPath ensures we have a valid binary installation path
