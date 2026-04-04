@@ -345,10 +345,17 @@ func resolveAmbiguousAssets(binaries []*binary.Binary, quiet bool, io *streams.I
 		repoName := provider.BinaryName(b.ProviderRef)
 		candidates := provider.MatchAssets(release.Assets, repoName, b.AssetFilter)
 
-		if len(candidates) < 2 || candidates[0].Score != candidates[1].Score {
-			continue // no ambiguity
+		if len(candidates) == 0 {
+			continue
 		}
 
+		// No ambiguity — cache the winner to avoid re-fetching during download
+		if len(candidates) < 2 || candidates[0].Score != candidates[1].Score {
+			b.ResolvedAsset = candidates[0].Asset
+			continue
+		}
+
+		// Ambiguous — prompt user (or auto-pick in quiet/non-TTY mode)
 		sel := defaultAssetSelector(b, quiet, io)
 		asset, err := sel(candidates)
 		if err != nil {
