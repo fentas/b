@@ -36,9 +36,13 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 	// Handle git:// protocol prefix
 	if strings.HasPrefix(ref, "git://") {
 		raw := strings.TrimPrefix(ref, "git://")
-		// Strip colon-separated filepath (git://repo:filepath)
-		if i := strings.Index(raw, ":"); i >= 0 {
-			raw = raw[:i]
+		// Strip colon-separated filepath (git://repo:filepath),
+		// but preserve host:port forms (colon before first slash).
+		if colon := strings.Index(raw, ":"); colon >= 0 {
+			slash := strings.Index(raw, "/")
+			if slash == -1 || colon > slash {
+				raw = raw[:colon]
+			}
 		}
 		return resolveRepo(raw, configDir)
 	}

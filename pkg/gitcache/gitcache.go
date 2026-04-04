@@ -105,7 +105,8 @@ func ResolveRefAuth(url, version, token string) (string, error) {
 	// If version is HEAD and ls-remote returned nothing useful, try refs/heads/main, master
 	if version == "HEAD" {
 		for _, branch := range []string{"refs/heads/main", "refs/heads/master"} {
-			out, err = output("git", "ls-remote", url, branch)
+			fallbackArgs := authArgs(token, "ls-remote", url, branch)
+			out, err = output(fallbackArgs...)
 			if err == nil {
 				parts := strings.Fields(strings.TrimSpace(out))
 				if len(parts) >= 2 {
