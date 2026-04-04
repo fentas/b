@@ -259,6 +259,7 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			Ref:        ref,
 			Label:      label,
 			Version:    entry.Version,
+			ConfigDir:  lockDir,
 			Ignore:     entry.Ignore,
 			Strategy:   strategy,
 			Files:      entry.Files,

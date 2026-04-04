@@ -45,6 +45,23 @@ func Fetch(root, ref, commitOrTag string) error {
 	return run("git", "-C", dir, "fetch", "--depth", "1", "origin", commitOrTag)
 }
 
+// ResolveLocalRef resolves a version to a commit SHA for a local repo.
+func ResolveLocalRef(repoPath, version string) (string, error) {
+	if version == "" || version == "HEAD" {
+		out, err := output("git", "-C", repoPath, "rev-parse", "HEAD")
+		if err != nil {
+			return "", fmt.Errorf("git rev-parse HEAD in %s: %w", repoPath, err)
+		}
+		return strings.TrimSpace(out), nil
+	}
+	// Try as a ref
+	out, err := output("git", "-C", repoPath, "rev-parse", version)
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse %s in %s: %w", version, repoPath, err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // ResolveRef resolves a version (tag/branch/HEAD) to a commit SHA via ls-remote.
 // If version is empty, it resolves HEAD.
 func ResolveRef(url, version string) (string, error) {
@@ -100,6 +117,22 @@ func ListTree(root, ref, commit string) ([]string, error) {
 // ListTreeWithModes returns all file entries with their git modes.
 func ListTreeWithModes(root, ref, commit string) ([]TreeEntry, error) {
 	dir := CacheDir(root, ref)
+	return ListTreeWithModesDir(dir, commit)
+}
+
+// ShowFile returns the contents of a single file at the given commit.
+func ShowFile(root, ref, commit, path string) ([]byte, error) {
+	dir := CacheDir(root, ref)
+	return ShowFileDir(dir, commit, path)
+}
+
+// ShowFileDir returns the contents of a single file at the given commit using a direct directory path.
+func ShowFileDir(dir, commit, path string) ([]byte, error) {
+	return outputBytes("git", "-C", dir, "show", commit+":"+path)
+}
+
+// ListTreeWithModesDir returns all file entries with their git modes, using a direct directory path.
+func ListTreeWithModesDir(dir, commit string) ([]TreeEntry, error) {
 	out, err := output("git", "-C", dir, "ls-tree", "-r", commit)
 	if err != nil {
 		return nil, err
@@ -110,7 +143,6 @@ func ListTreeWithModes(root, ref, commit string) ([]TreeEntry, error) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	entries := make([]TreeEntry, 0, len(lines))
 	for _, line := range lines {
-		// Format: <mode> <type> <hash>\t<path>
 		tabIdx := strings.IndexByte(line, '\t')
 		if tabIdx == -1 {
 			return nil, fmt.Errorf("git ls-tree: unexpected line format: %q", line)
@@ -124,12 +156,6 @@ func ListTreeWithModes(root, ref, commit string) ([]TreeEntry, error) {
 		entries = append(entries, TreeEntry{Path: path, Mode: mode})
 	}
 	return entries, nil
-}
-
-// ShowFile returns the contents of a single file at the given commit.
-func ShowFile(root, ref, commit, path string) ([]byte, error) {
-	dir := CacheDir(root, ref)
-	return outputBytes("git", "-C", dir, "show", commit+":"+path)
 }
 
 // run executes a git command, returning an error that includes stderr.
@@ -251,18 +277,13 @@ func DiffNoIndex(a, b []byte, labelA, labelB string) (string, error) {
 	return stdout.String(), nil
 }
 
-// GitURL converts a ref like "github.com/org/repo" or "github.com/org/repo#label"
-// to a clone URL like "https://github.com/org/repo.git".
+// GitURL converts a ref to a clone-ready URL.
+// For remote refs like "github.com/org/repo", returns "https://github.com/org/repo.git".
+// For git:// protocol, local, or relative paths, use ResolveGitURL with a configDir instead.
+// This function does NOT support local/relative paths or auth token injection.
 func GitURL(ref string) string {
-	// Strip fragment label (e.g. #monitoring)
-	if i := strings.Index(ref, "#"); i != -1 {
-		ref = ref[:i]
-	}
-	// Strip version
-	if i := strings.Index(ref, "@"); i != -1 {
-		ref = ref[:i]
-	}
-	return "https://" + ref + ".git"
+	resolved := ResolveGitURL(ref, "")
+	return resolved.URL
 }
 
 // RefBase strips version and fragment from a ref, returning the bare repo ref.

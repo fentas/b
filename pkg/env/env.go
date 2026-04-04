@@ -33,6 +33,7 @@ type EnvConfig struct {
 	Ref             string                         // e.g. "github.com/org/infra"
 	Label           string                         // fragment label (e.g. "monitoring")
 	Version         string                         // tag/branch (resolved to commit in lock)
+	ConfigDir       string                         // directory of b.yaml (for resolving relative paths)
 	Ignore          []string                       // global ignore patterns
 	Strategy        string                         // replace (default) | client | merge
 	Files           map[string]envmatch.GlobConfig // glob → config
@@ -76,15 +77,20 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 	}
 
 	baseRef := gitcache.RefBase(cfg.Ref)
-	url := gitcache.GitURL(cfg.Ref)
+	resolved := gitcache.ResolveGitURL(cfg.Ref, cfg.ConfigDir)
 
 	// Resolve version to commit (or use forced commit)
 	var commit string
 	var err error
 	if cfg.ForceCommit != "" {
 		commit = cfg.ForceCommit
+	} else if resolved.IsLocal {
+		commit, err = gitcache.ResolveLocalRef(resolved.URL, cfg.Version)
+		if err != nil {
+			return nil, fmt.Errorf("resolving %s@%s: %w", cfg.Ref, cfg.Version, err)
+		}
 	} else {
-		commit, err = gitcache.ResolveRef(url, cfg.Version)
+		commit, err = gitcache.ResolveRef(resolved.URL, cfg.Version)
 		if err != nil {
 			return nil, fmt.Errorf("resolving %s@%s: %w", cfg.Ref, cfg.Version, err)
 		}
@@ -109,16 +115,22 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		}
 	}
 
-	// Clone and fetch
-	if err := gitcache.EnsureClone(cacheRoot, baseRef, url); err != nil {
-		return nil, fmt.Errorf("cloning %s: %w", url, err)
-	}
-	if err := gitcache.Fetch(cacheRoot, baseRef, commit); err != nil {
-		return nil, fmt.Errorf("fetching %s: %w", commit, err)
+	// For local repos, use the repo directly. For remote, clone/fetch into cache.
+	var repoDir string
+	if resolved.IsLocal {
+		repoDir = resolved.URL
+	} else {
+		if err := gitcache.EnsureClone(cacheRoot, baseRef, resolved.URL); err != nil {
+			return nil, fmt.Errorf("cloning %s: %w", resolved.URL, err)
+		}
+		if err := gitcache.Fetch(cacheRoot, baseRef, commit); err != nil {
+			return nil, fmt.Errorf("fetching %s: %w", commit, err)
+		}
+		repoDir = gitcache.CacheDir(cacheRoot, baseRef)
 	}
 
 	// List tree with modes and match globs
-	treeEntries, err := gitcache.ListTreeWithModes(cacheRoot, baseRef, commit)
+	treeEntries, err := gitcache.ListTreeWithModesDir(repoDir, commit)
 	if err != nil {
 		return nil, fmt.Errorf("listing tree for %s@%s: %w", cfg.Ref, safeShort(commit), err)
 	}
@@ -140,7 +152,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 	previousCommit := ""
 	if lockEntry != nil {
 		previousCommit = lockEntry.Commit
-		if strategy == StrategyMerge && previousCommit != "" {
+		if strategy == StrategyMerge && previousCommit != "" && !resolved.IsLocal {
 			if err := gitcache.Fetch(cacheRoot, baseRef, previousCommit); err != nil {
 				// Non-fatal: if we can't fetch the old commit, fall back to replace
 				previousCommit = ""
@@ -166,7 +178,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		}
 
 		// Read upstream content
-		content, err := gitcache.ShowFile(cacheRoot, baseRef, commit, m.SourcePath)
+		content, err := gitcache.ShowFileDir(repoDir, commit, m.SourcePath)
 		if err != nil {
 			return nil, fmt.Errorf("reading %s from %s@%s: %w", m.SourcePath, cfg.Ref, safeShort(commit), err)
 		}
@@ -248,7 +260,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 				}
 
 			case StrategyMerge:
-				merged, hasConflict, mergeErr := doMerge(cacheRoot, baseRef, previousCommit, m.SourcePath, destPath, content)
+				merged, hasConflict, mergeErr := doMerge(repoDir, previousCommit, m.SourcePath, destPath, content)
 				if mergeErr != nil {
 					// Merge failed, fall back to replace with warning
 					status = "replaced (merge failed: " + mergeErr.Error() + ")"
@@ -327,7 +339,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 
 // doMerge performs a three-way merge for a single file.
 // base = file at previousCommit, local = current file on disk, upstream = new content.
-func doMerge(cacheRoot, baseRef, previousCommit, sourcePath, destPath string, upstream []byte) ([]byte, bool, error) {
+func doMerge(repoDir, previousCommit, sourcePath, destPath string, upstream []byte) ([]byte, bool, error) {
 	// Read local file
 	local, err := os.ReadFile(destPath)
 	if err != nil {
@@ -337,7 +349,7 @@ func doMerge(cacheRoot, baseRef, previousCommit, sourcePath, destPath string, up
 	// Get base version (file at previous commit)
 	var base []byte
 	if previousCommit != "" {
-		base, err = gitcache.ShowFile(cacheRoot, baseRef, previousCommit, sourcePath)
+		base, err = gitcache.ShowFileDir(repoDir, previousCommit, sourcePath)
 		if err != nil {
 			// Can't get base — treat as new file, fall back
 			return nil, false, fmt.Errorf("reading base version: %w", err)
