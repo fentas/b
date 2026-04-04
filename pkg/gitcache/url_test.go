@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -250,7 +251,148 @@ func TestResolveLocalRef_Integration(t *testing.T) {
 	}
 }
 
-// runOutput is a test helper that runs a command and returns combined output.
+// --- authArgs ---
+
+func TestAuthArgs_NoToken(t *testing.T) {
+	args := authArgs("", "ls-remote", "https://github.com/org/repo.git", "HEAD")
+	if args[0] != "git" {
+		t.Errorf("args[0] = %q, want 'git'", args[0])
+	}
+	if args[1] != "ls-remote" {
+		t.Errorf("args[1] = %q, want 'ls-remote'", args[1])
+	}
+	// Should not have -c http.extraHeader
+	for _, a := range args {
+		if strings.Contains(a, "extraHeader") {
+			t.Error("should not have extraHeader without token")
+		}
+	}
+}
+
+func TestAuthArgs_WithToken(t *testing.T) {
+	args := authArgs("ghp_secret", "clone", "--bare", "https://github.com/org/repo.git")
+	if args[0] != "git" {
+		t.Errorf("args[0] = %q", args[0])
+	}
+	if args[1] != "-c" {
+		t.Errorf("args[1] = %q, want '-c'", args[1])
+	}
+	if !strings.Contains(args[2], "Bearer ghp_secret") {
+		t.Errorf("args[2] = %q, should contain Bearer token", args[2])
+	}
+	if args[3] != "clone" {
+		t.Errorf("args[3] = %q, want 'clone'", args[3])
+	}
+}
+
+// --- ShowFileDir / ListTreeWithModesDir integration ---
+
+func TestShowFileDir_Integration(t *testing.T) {
+	tmpDir := t.TempDir()
+	initTestRepo(t, tmpDir)
+
+	commit := getHeadCommit(t, tmpDir)
+
+	content, err := ShowFileDir(tmpDir, commit, "test.txt")
+	if err != nil {
+		t.Fatalf("ShowFileDir error: %v", err)
+	}
+	if string(content) != "hello" {
+		t.Errorf("content = %q, want 'hello'", content)
+	}
+}
+
+func TestShowFileDir_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	initTestRepo(t, tmpDir)
+	commit := getHeadCommit(t, tmpDir)
+
+	_, err := ShowFileDir(tmpDir, commit, "nonexistent.txt")
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestListTreeWithModesDir_Integration(t *testing.T) {
+	tmpDir := t.TempDir()
+	initTestRepo(t, tmpDir)
+	commit := getHeadCommit(t, tmpDir)
+
+	entries, err := ListTreeWithModesDir(tmpDir, commit)
+	if err != nil {
+		t.Fatalf("ListTreeWithModesDir error: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("expected at least one entry")
+	}
+	found := false
+	for _, e := range entries {
+		if e.Path == "test.txt" {
+			found = true
+			if e.Mode != "100644" {
+				t.Errorf("mode = %q, want 100644", e.Mode)
+			}
+		}
+	}
+	if !found {
+		t.Error("test.txt not found in tree")
+	}
+}
+
+// --- ResolveLocalRef error case ---
+
+func TestResolveLocalRef_InvalidRepo(t *testing.T) {
+	_, err := ResolveLocalRef(t.TempDir(), "")
+	if err == nil {
+		t.Error("expected error for non-git directory")
+	}
+}
+
+func TestResolveLocalRef_InvalidVersion(t *testing.T) {
+	tmpDir := t.TempDir()
+	initTestRepo(t, tmpDir)
+
+	_, err := ResolveLocalRef(tmpDir, "nonexistent-tag-xyz")
+	if err == nil {
+		t.Error("expected error for invalid version")
+	}
+}
+
+// --- test helpers ---
+
+func initTestRepo(t *testing.T, dir string) {
+	t.Helper()
+	for _, cmd := range [][]string{
+		{"git", "init", dir},
+		{"git", "-C", dir, "config", "user.email", "test@test.com"},
+		{"git", "-C", dir, "config", "user.name", "Test"},
+	} {
+		if out, err := runOutput(cmd...); err != nil {
+			t.Fatalf("%v: %v\n%s", cmd, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	for _, cmd := range [][]string{
+		{"git", "-C", dir, "add", "-A"},
+		{"git", "-C", dir, "commit", "-m", "init", "--no-gpg-sign"},
+	} {
+		if out, err := runOutput(cmd...); err != nil {
+			t.Fatalf("%v: %v\n%s", cmd, err, out)
+		}
+	}
+}
+
+func getHeadCommit(t *testing.T, dir string) string {
+	t.Helper()
+	commit, err := ResolveLocalRef(dir, "HEAD")
+	if err != nil {
+		t.Fatalf("getHeadCommit: %v", err)
+	}
+	return commit
+}
+
 func runOutput(args ...string) (string, error) {
 	cmd := exec.Command(args[0], args[1:]...)
 	out, err := cmd.CombinedOutput()
