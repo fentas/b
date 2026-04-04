@@ -99,7 +99,9 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		}
 	}
 
-	// Check if up-to-date (skip when forcing a specific commit)
+	// Check if up-to-date (skip when forcing a specific commit).
+	// NOTE: This skips when the commit hasn't changed. If only the local config
+	// changed (e.g. select filters), use --force to re-sync.
 	if cfg.ForceCommit == "" && lockEntry != nil && lockEntry.Commit == commit {
 		return &SyncResult{
 			Ref:     baseRef,
