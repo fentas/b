@@ -186,6 +186,14 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			return nil, fmt.Errorf("reading %s from %s@%s: %w", m.SourcePath, cfg.Ref, safeShort(commit), err)
 		}
 
+		// Apply select filter for YAML/JSON files
+		if len(m.Select) > 0 {
+			content, err = filterContent(content, m.Select, m.SourcePath)
+			if err != nil {
+				return nil, fmt.Errorf("filtering %s: %w", m.SourcePath, err)
+			}
+		}
+
 		upstreamHash := fmt.Sprintf("%x", sha256.Sum256(content))
 
 		// Determine file mode from upstream

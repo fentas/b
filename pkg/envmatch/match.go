@@ -12,13 +12,15 @@ import (
 type GlobConfig struct {
 	Dest   string   // destination prefix (replaces glob prefix)
 	Ignore []string // per-glob ignore patterns (additive to global)
+	Select []string // YAML/JSON key selectors (e.g. [".binaries", ".envs"])
 }
 
 // MatchedFile is a single file matched by a glob, with its computed destination.
 type MatchedFile struct {
-	SourcePath string // path in the upstream repo
-	DestPath   string // local destination path
-	GlobKey    string // which glob matched this file
+	SourcePath string   // path in the upstream repo
+	DestPath   string   // local destination path
+	GlobKey    string   // which glob matched this file
+	Select     []string // YAML/JSON key selectors (from GlobConfig)
 }
 
 // MatchGlobs matches globs against a file tree and returns matched files
@@ -59,6 +61,7 @@ func MatchGlobs(tree []string, globs map[string]GlobConfig, globalIgnore []strin
 				SourcePath: path,
 				DestPath:   dest,
 				GlobKey:    glob,
+				Select:     cfg.Select,
 			})
 		}
 	}

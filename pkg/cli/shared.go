@@ -225,6 +225,23 @@ func (o *SharedOptions) LockDir() string {
 	return filepath.Dir(path.GetDefaultConfigPath())
 }
 
+// ProjectRoot returns the project root directory for env file destinations.
+// Priority: PATH_BASE > git root > CWD.
+// This is where synced env files are written (not .bin/).
+func (o *SharedOptions) ProjectRoot() string {
+	if p := os.Getenv("PATH_BASE"); p != "" {
+		return p
+	}
+	if gitRoot, err := path.GetGitRootDirectory(); err == nil {
+		return gitRoot
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	// Last resort: parent of lockDir (strips .bin/)
+	return filepath.Dir(o.LockDir())
+}
+
 // ValidateBinaryPath ensures we have a valid binary installation path
 func (o *SharedOptions) ValidateBinaryPath() error {
 	path := path.GetBinaryPath()

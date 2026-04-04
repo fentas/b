@@ -90,14 +90,20 @@ func (list *EnvList) MarshalYAML() (interface{}, error) {
 		if len(e.Files) > 0 {
 			files := make(map[string]interface{})
 			for glob, gc := range e.Files {
-				if gc.Dest == "" && len(gc.Ignore) == 0 {
+				if gc.Dest == "" && len(gc.Ignore) == 0 && len(gc.Select) == 0 {
 					files[glob] = nil // bare key
-				} else if len(gc.Ignore) == 0 {
+				} else if len(gc.Ignore) == 0 && len(gc.Select) == 0 && gc.Dest != "" {
 					files[glob] = gc.Dest // string shorthand
 				} else {
-					obj := map[string]interface{}{"dest": gc.Dest}
+					obj := map[string]interface{}{}
+					if gc.Dest != "" {
+						obj["dest"] = gc.Dest
+					}
 					if len(gc.Ignore) > 0 {
 						obj["ignore"] = gc.Ignore
+					}
+					if len(gc.Select) > 0 {
+						obj["select"] = gc.Select
 					}
 					files[glob] = obj
 				}
@@ -170,6 +176,13 @@ func parseFilesMap(raw map[string]interface{}) map[string]envmatch.GlobConfig {
 				if ignList, ok := ign.([]interface{}); ok {
 					for _, item := range ignList {
 						gc.Ignore = append(gc.Ignore, fmt.Sprintf("%v", item))
+					}
+				}
+			}
+			if sel, ok := val["select"]; ok {
+				if selList, ok := sel.([]interface{}); ok {
+					for _, item := range selList {
+						gc.Select = append(gc.Select, fmt.Sprintf("%v", item))
 					}
 				}
 			}

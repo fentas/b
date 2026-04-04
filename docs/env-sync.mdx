@@ -68,12 +68,36 @@ files:
   # String shorthand — set destination directory
   manifests/hetzner/**: hetzner/
 
-  # Full config — dest and per-glob ignore
+  # Full config — dest, per-glob ignore, and select
   manifests/monitoring/**:
     dest: monitoring/
     ignore:
       - "*.test.yaml"
+
+  # Select specific keys from YAML/JSON files
+  .bin/b.yaml:
+    select:
+      - .binaries
 ```
+
+### Select (YAML/JSON filtering)
+
+For YAML and JSON files, `select` extracts specific keys instead of syncing the entire file:
+
+```yaml
+files:
+  config.yaml:
+    select:
+      - .database
+      - .logging
+  .bin/b.yaml:
+    select:
+      - .binaries
+```
+
+Selectors use dot-path notation (e.g. `.binaries`, `.database.host`). Only the selected keys are written to the destination file. This is useful when an upstream file contains sections you don't want (like profiles or env definitions).
+
+Supported file extensions: `.yaml`, `.yml`, `.json`.
 
 ### Glob patterns
 
