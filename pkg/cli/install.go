@@ -455,9 +455,10 @@ func (o *InstallOptions) runEnvInstalls() error {
 	// Handle SCP-style installs
 	for _, ei := range o.envInstalls {
 		cfg := env.EnvConfig{
-			Ref:     ei.ref,
-			Label:   ei.label,
-			Version: ei.version,
+			Ref:       ei.ref,
+			Label:     ei.label,
+			Version:   ei.version,
+			ConfigDir: lockDir,
 			Files: map[string]envmatch.GlobConfig{
 				ei.glob: {Dest: ei.dest},
 			},
@@ -540,12 +541,13 @@ func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 		ref := gitcache.RefBase(entry.Key)
 
 		cfg := env.EnvConfig{
-			Ref:      ref,
-			Label:    label,
-			Version:  entry.Version,
-			Ignore:   entry.Ignore,
-			Strategy: entry.Strategy,
-			Files:    entry.Files,
+			Ref:       ref,
+			Label:     label,
+			Version:   entry.Version,
+			ConfigDir: lockDir,
+			Ignore:    entry.Ignore,
+			Strategy:  entry.Strategy,
+			Files:     entry.Files,
 		}
 
 		lockEntry := lk.FindEnv(ref, label)

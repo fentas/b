@@ -17,6 +17,9 @@ func TestGitMatch(t *testing.T) {
 		{"git:///home/user/repo:.scripts/lo", true},
 		{"git://github.com/org/repo:scripts/tool.sh", true},
 		{"git://github.com/org/repo:scripts/tool.sh@v1.0", true},
+		{"git@github.com:org/repo:bin/app", true},
+		{"git@gitlab.com:group/project:scripts/deploy.sh", true},
+		{"ssh://git@github.com/org/repo:bin/app", true},
 		{"github.com/org/repo", false},
 		{"go://github.com/org/repo", false},
 		{"docker://alpine/helm", false},
@@ -65,6 +68,28 @@ func TestParseGitRef(t *testing.T) {
 			wantRepo: "/tmp/my-repo",
 			wantFile: "bin/app",
 		},
+		// SSH implicit: git@host:org/repo:filepath
+		{
+			ref:      "git@github.com:org/repo:bin/app",
+			wantRepo: "git@github.com:org/repo",
+			wantFile: "bin/app",
+		},
+		{
+			ref:      "git@gitlab.com:group/project:scripts/deploy.sh",
+			wantRepo: "git@gitlab.com:group/project",
+			wantFile: "scripts/deploy.sh",
+		},
+		{
+			ref:      "git@github.com:org/repo:bin/app@v1.0",
+			wantRepo: "git@github.com:org/repo",
+			wantFile: "bin/app",
+		},
+		// SSH implicit without filepath (error — needs filepath for binaries)
+		{
+			ref:     "git@github.com:org/repo",
+			wantErr: true,
+		},
+		// git:// prefix errors
 		{
 			ref:     "git://no-colon-here",
 			wantErr: true,

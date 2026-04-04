@@ -24,7 +24,7 @@ type Git struct{}
 func (g *Git) Name() string { return "git" }
 
 func (g *Git) Match(ref string) bool {
-	return strings.HasPrefix(ref, "git://")
+	return strings.HasPrefix(ref, "git://") || gitcache.IsSSHURL(ref)
 }
 
 // LatestVersion returns the HEAD commit SHA for the repo.
@@ -35,15 +35,11 @@ func (g *Git) LatestVersion(ref string) (string, error) {
 	}
 
 	if isLocalRepo(repo) {
-		out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
-		if err != nil {
-			return "", fmt.Errorf("git rev-parse HEAD in %s: %w", repo, err)
-		}
-		return strings.TrimSpace(string(out)), nil
+		return gitcache.ResolveLocalRef(repo, "HEAD")
 	}
 
-	url := "https://" + repo + ".git"
-	return gitcache.ResolveRef(url, "HEAD")
+	resolved := gitcache.ResolveGitURL(repo, "")
+	return gitcache.ResolveRefAuth(resolved.URL, "HEAD", resolved.AuthHeader)
 }
 
 // FetchRelease is not used for git — use Install instead.
@@ -93,23 +89,23 @@ func (g *Git) installFromLocal(repo, filePath, version, dest string) (string, er
 // installFromRemote clones/caches a remote repo and extracts the file.
 func (g *Git) installFromRemote(repo, filePath, version, dest string) (string, error) {
 	cacheRoot := gitcache.DefaultCacheRoot()
-	url := "https://" + repo + ".git"
+	resolved := gitcache.ResolveGitURL(repo, "")
 
-	if err := gitcache.EnsureClone(cacheRoot, repo, url); err != nil {
-		return "", fmt.Errorf("cloning %s: %w", url, err)
+	if err := gitcache.EnsureCloneAuth(cacheRoot, repo, resolved.URL, resolved.AuthHeader); err != nil {
+		return "", fmt.Errorf("cloning %s: %w", resolved.URL, err)
 	}
 
 	commit := version
 	if commit == "" {
 		var err error
-		commit, err = gitcache.ResolveRef(url, "HEAD")
+		commit, err = gitcache.ResolveRefAuth(resolved.URL, "HEAD", resolved.AuthHeader)
 		if err != nil {
 			return "", err
 		}
 	}
 
 	// Fetch the specific ref if not already present
-	if err := gitcache.Fetch(cacheRoot, repo, commit); err != nil {
+	if err := gitcache.FetchAuth(cacheRoot, repo, commit, resolved.AuthHeader); err != nil {
 		// Ignore fetch errors if the commit is already cached
 		_ = err
 	}
@@ -134,16 +130,32 @@ func parseGitRef(ref string) (repo, filePath string, err error) {
 		return "", "", fmt.Errorf("empty git ref: %s", ref)
 	}
 
-	// Strip version suffix (@v1.0.0) before parsing
-	raw, _ = ParseRef("git://" + raw)
-	raw = strings.TrimPrefix(raw, "git://")
+	// Strip version suffix (@v1.0.0) before parsing — but preserve SSH user@ prefix
+	if i := strings.LastIndex(raw, "@"); i > 0 {
+		if !gitcache.IsSSHUserAt(raw, i) {
+			raw = raw[:i] // strip version
+		}
+	}
 
-	// Local absolute path: starts with /
-	// The colon separator between repo and filepath must be found carefully.
-	// For local: /home/user/repo:.scripts/lo — first colon after the path
-	// For remote: github.com/org/repo:scripts/tool.sh — first colon
+	// SSH implicit format: git@host:org/repo:filepath
+	// Has two colons — first is SSH host separator, last is our filepath separator.
+	if gitcache.IsSSHURL(raw) {
+		idx := strings.LastIndex(raw, ":")
+		if idx < 0 {
+			return "", "", fmt.Errorf("git ref missing filepath separator ':' — expected <ssh-url>:<filepath>, got %s", ref)
+		}
+		// For SSH implicit (git@host:org/repo:file), we need at least 2 colons
+		// First colon is after host, last colon separates filepath
+		firstColon := strings.Index(raw, ":")
+		if firstColon == idx {
+			// Only one colon — it's the SSH host separator, no filepath
+			return "", "", fmt.Errorf("git ref missing filepath separator — expected <ssh-url>:<filepath>, got %s", ref)
+		}
+		return raw[:idx], raw[idx+1:], nil
+	}
+
+	// Local absolute path: /home/user/repo:.scripts/lo
 	if strings.HasPrefix(raw, "/") {
-		// Local path: find colon that separates repo path from file path
 		idx := strings.Index(raw, ":")
 		if idx < 0 {
 			return "", "", fmt.Errorf("git ref missing filepath separator ':' — expected git://<repo>:<filepath>, got %s", ref)
@@ -151,7 +163,16 @@ func parseGitRef(ref string) (repo, filePath string, err error) {
 		return raw[:idx], raw[idx+1:], nil
 	}
 
-	// Remote: find the colon separator
+	// Relative local path: ../../repo:filepath
+	if strings.HasPrefix(raw, ".") {
+		idx := strings.Index(raw, ":")
+		if idx < 0 {
+			return "", "", fmt.Errorf("git ref missing filepath separator ':' — expected git://<repo>:<filepath>, got %s", ref)
+		}
+		return raw[:idx], raw[idx+1:], nil
+	}
+
+	// Remote: github.com/org/repo:scripts/tool.sh
 	idx := strings.Index(raw, ":")
 	if idx < 0 {
 		return "", "", fmt.Errorf("git ref missing filepath separator ':' — expected git://<repo>:<filepath>, got %s", ref)

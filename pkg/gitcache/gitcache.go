@@ -28,6 +28,11 @@ func CacheDir(root, ref string) string {
 // EnsureClone creates a shallow bare clone if the cache directory doesn't exist.
 // If it already exists, this is a no-op.
 func EnsureClone(root, ref, url string) error {
+	return EnsureCloneAuth(root, ref, url, "")
+}
+
+// EnsureCloneAuth creates a shallow bare clone with optional auth token.
+func EnsureCloneAuth(root, ref, url, authHeader string) error {
 	dir := CacheDir(root, ref)
 	if _, err := os.Stat(dir); err == nil {
 		return nil // already cached
@@ -35,25 +40,68 @@ func EnsureClone(root, ref, url string) error {
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return fmt.Errorf("creating cache root %s: %w", root, err)
 	}
-	// git clone --bare --depth 1 <url> <dir>
-	return run("git", "clone", "--bare", "--depth", "1", url, dir)
+	ac := authCmd(authHeader, "clone", "--bare", "--depth", "1", url, dir)
+	if err := runAuth(ac); err != nil {
+		return redactWrap(err, authHeader)
+	}
+	return nil
 }
 
 // Fetch fetches a specific commit or tag into the cache.
 func Fetch(root, ref, commitOrTag string) error {
+	return FetchAuth(root, ref, commitOrTag, "")
+}
+
+// FetchAuth fetches with optional auth token.
+func FetchAuth(root, ref, commitOrTag, authHeader string) error {
 	dir := CacheDir(root, ref)
-	return run("git", "-C", dir, "fetch", "--depth", "1", "origin", commitOrTag)
+	ac := authCmd(authHeader, "-C", dir, "fetch", "--depth", "1", "origin", commitOrTag)
+	if err := runAuth(ac); err != nil {
+		return redactWrap(err, authHeader)
+	}
+	return nil
+}
+
+// redactWrap wraps an error with a redacted message while preserving the error chain.
+func redactWrap(err error, authHeader string) error {
+	if authHeader == "" {
+		return err
+	}
+	return fmt.Errorf("%s: %w", redactAuth(err.Error(), authHeader), err)
+}
+
+// ResolveLocalRef resolves a version to a commit SHA for a local repo.
+func ResolveLocalRef(repoPath, version string) (string, error) {
+	if version == "" || version == "HEAD" {
+		out, err := output("git", "-C", repoPath, "rev-parse", "HEAD")
+		if err != nil {
+			return "", fmt.Errorf("git rev-parse HEAD in %s: %w", repoPath, err)
+		}
+		return strings.TrimSpace(out), nil
+	}
+	// Try as a ref
+	out, err := output("git", "-C", repoPath, "rev-parse", version)
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse %s in %s: %w", version, repoPath, err)
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // ResolveRef resolves a version (tag/branch/HEAD) to a commit SHA via ls-remote.
 // If version is empty, it resolves HEAD.
 func ResolveRef(url, version string) (string, error) {
+	return ResolveRefAuth(url, version, "")
+}
+
+// ResolveRefAuth resolves with optional auth token.
+func ResolveRefAuth(url, version, authHeader string) (string, error) {
 	if version == "" {
 		version = "HEAD"
 	}
-	out, err := output("git", "ls-remote", url, version)
+	ac := authCmd(authHeader, "ls-remote", url, version)
+	out, err := outputAuth(ac)
 	if err != nil {
-		return "", fmt.Errorf("git ls-remote %s %s: %w", url, version, err)
+		return "", fmt.Errorf("git ls-remote %s %s: %w", url, version, redactWrap(err, authHeader))
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	for _, line := range lines {
@@ -65,7 +113,8 @@ func ResolveRef(url, version string) (string, error) {
 	// If version is HEAD and ls-remote returned nothing useful, try refs/heads/main, master
 	if version == "HEAD" {
 		for _, branch := range []string{"refs/heads/main", "refs/heads/master"} {
-			out, err = output("git", "ls-remote", url, branch)
+			fallbackAC := authCmd(authHeader, "ls-remote", url, branch)
+			out, err = outputAuth(fallbackAC)
 			if err == nil {
 				parts := strings.Fields(strings.TrimSpace(out))
 				if len(parts) >= 2 {
@@ -100,6 +149,22 @@ func ListTree(root, ref, commit string) ([]string, error) {
 // ListTreeWithModes returns all file entries with their git modes.
 func ListTreeWithModes(root, ref, commit string) ([]TreeEntry, error) {
 	dir := CacheDir(root, ref)
+	return ListTreeWithModesDir(dir, commit)
+}
+
+// ShowFile returns the contents of a single file at the given commit.
+func ShowFile(root, ref, commit, path string) ([]byte, error) {
+	dir := CacheDir(root, ref)
+	return ShowFileDir(dir, commit, path)
+}
+
+// ShowFileDir returns the contents of a single file at the given commit using a direct directory path.
+func ShowFileDir(dir, commit, path string) ([]byte, error) {
+	return outputBytes("git", "-C", dir, "show", commit+":"+path)
+}
+
+// ListTreeWithModesDir returns all file entries with their git modes, using a direct directory path.
+func ListTreeWithModesDir(dir, commit string) ([]TreeEntry, error) {
 	out, err := output("git", "-C", dir, "ls-tree", "-r", commit)
 	if err != nil {
 		return nil, err
@@ -110,7 +175,6 @@ func ListTreeWithModes(root, ref, commit string) ([]TreeEntry, error) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	entries := make([]TreeEntry, 0, len(lines))
 	for _, line := range lines {
-		// Format: <mode> <type> <hash>\t<path>
 		tabIdx := strings.IndexByte(line, '\t')
 		if tabIdx == -1 {
 			return nil, fmt.Errorf("git ls-tree: unexpected line format: %q", line)
@@ -126,31 +190,36 @@ func ListTreeWithModes(root, ref, commit string) ([]TreeEntry, error) {
 	return entries, nil
 }
 
-// ShowFile returns the contents of a single file at the given commit.
-func ShowFile(root, ref, commit, path string) ([]byte, error) {
-	dir := CacheDir(root, ref)
-	return outputBytes("git", "-C", dir, "show", commit+":"+path)
-}
-
-// run executes a git command, returning an error that includes stderr.
-func run(args ...string) error {
-	cmd := exec.Command(args[0], args[1:]...)
+// runAuth executes a git command with optional auth env vars.
+func runAuth(ac AuthCmd) error {
+	cmd := exec.Command(ac.Args[0], ac.Args[1:]...)
+	if len(ac.Env) > 0 {
+		cmd.Env = append(os.Environ(), ac.Env...)
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %w\n%s", strings.Join(args, " "), err, stderr.String())
+		return fmt.Errorf("%s: %w\n%s", strings.Join(ac.Args, " "), err, stderr.String())
 	}
 	return nil
 }
 
 // output executes a git command and returns stdout as a string.
 func output(args ...string) (string, error) {
-	cmd := exec.Command(args[0], args[1:]...)
+	return outputAuth(AuthCmd{Args: args})
+}
+
+// outputAuth executes a git command with optional auth env vars.
+func outputAuth(ac AuthCmd) (string, error) {
+	cmd := exec.Command(ac.Args[0], ac.Args[1:]...)
+	if len(ac.Env) > 0 {
+		cmd.Env = append(os.Environ(), ac.Env...)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%s: %w\n%s", strings.Join(args, " "), err, stderr.String())
+		return "", fmt.Errorf("%s: %w\n%s", strings.Join(ac.Args, " "), err, stderr.String())
 	}
 	return stdout.String(), nil
 }
@@ -251,40 +320,39 @@ func DiffNoIndex(a, b []byte, labelA, labelB string) (string, error) {
 	return stdout.String(), nil
 }
 
-// GitURL converts a ref like "github.com/org/repo" or "github.com/org/repo#label"
-// to a clone URL like "https://github.com/org/repo.git".
+// GitURL converts a ref to a clone-ready URL (without auth credentials).
+// Delegates to ResolveGitURL with empty configDir. For local/relative paths
+// or auth token support, use ResolveGitURL directly.
 func GitURL(ref string) string {
-	// Strip fragment label (e.g. #monitoring)
-	if i := strings.Index(ref, "#"); i != -1 {
-		ref = ref[:i]
-	}
-	// Strip version
-	if i := strings.Index(ref, "@"); i != -1 {
-		ref = ref[:i]
-	}
-	return "https://" + ref + ".git"
+	resolved := ResolveGitURL(ref, "")
+	return resolved.URL
 }
 
 // RefBase strips version and fragment from a ref, returning the bare repo ref.
-// e.g. "github.com/org/repo@v2.0" → "github.com/org/repo"
-// e.g. "github.com/org/repo#label" → "github.com/org/repo"
+// Local paths (starting with / or ./ or ../) are returned unchanged.
 func RefBase(ref string) string {
+	// Local paths may contain # or @ — return as-is
+	if strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "./") || strings.HasPrefix(ref, "../") {
+		return ref
+	}
 	if i := strings.Index(ref, "#"); i != -1 {
 		ref = ref[:i]
 	}
-	if i := strings.Index(ref, "@"); i != -1 {
+	if i := strings.LastIndex(ref, "@"); i > 0 && !IsSSHUserAt(ref, i) {
 		ref = ref[:i]
 	}
 	return ref
 }
 
 // RefLabel extracts the fragment label from a ref (after #).
-// Returns empty string if no label.
+// Returns empty string if no label. Local paths return empty (# is part of path).
 func RefLabel(ref string) string {
+	if isLocalPath(ref) {
+		return ""
+	}
 	if i := strings.Index(ref, "#"); i != -1 {
 		rest := ref[i+1:]
-		// Strip version if present after label
-		if j := strings.Index(rest, "@"); j != -1 {
+		if j := strings.LastIndex(rest, "@"); j != -1 {
 			return rest[:j]
 		}
 		return rest
@@ -292,11 +360,19 @@ func RefLabel(ref string) string {
 	return ""
 }
 
-// RefVersion extracts the version from a ref (after @).
-// Returns empty string if no version.
+// RefVersion extracts the version from a ref (after last @).
+// Returns empty string if no version. Skips SSH user@ prefix and local paths.
 func RefVersion(ref string) string {
-	if i := strings.Index(ref, "@"); i != -1 {
+	if isLocalPath(ref) {
+		return ""
+	}
+	if i := strings.LastIndex(ref, "@"); i > 0 && !IsSSHUserAt(ref, i) {
 		return ref[i+1:]
 	}
 	return ""
+}
+
+// isLocalPath returns true if the ref looks like a local filesystem path.
+func isLocalPath(ref string) bool {
+	return strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "./") || strings.HasPrefix(ref, "../")
 }

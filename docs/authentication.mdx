@@ -51,6 +51,31 @@ A Gitea token is required for private repositories on Gitea or Forgejo instances
 export GITEA_TOKEN="..."
 ```
 
+## SSH Authentication
+
+For private repos, you can also use SSH keys instead of tokens. SSH authentication uses your system's ssh-agent and works for both binaries and env sync:
+
+```yaml
+envs:
+  git@github.com:org/private-infra:
+    files:
+      manifests/**:
+        dest: manifests/
+```
+
+```bash
+# Ensure your SSH key is loaded
+ssh-add -l
+
+# If not, add it
+ssh-add ~/.ssh/id_ed25519
+
+# Then install/update as normal
+b update
+```
+
+SSH is often simpler than tokens for local development — no environment variables needed if your key is already in ssh-agent.
+
 ## CI/CD
 
 In CI/CD pipelines, use secrets or environment variables provided by your CI system:
