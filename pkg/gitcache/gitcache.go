@@ -41,7 +41,10 @@ func EnsureCloneAuth(root, ref, url, token string) error {
 		return fmt.Errorf("creating cache root %s: %w", root, err)
 	}
 	args := authArgs(token, "clone", "--bare", "--depth", "1", url, dir)
-	return run(args...)
+	if err := run(args...); err != nil {
+		return fmt.Errorf("%s", redactToken(err.Error(), token))
+	}
+	return nil
 }
 
 // Fetch fetches a specific commit or tag into the cache.
@@ -53,16 +56,10 @@ func Fetch(root, ref, commitOrTag string) error {
 func FetchAuth(root, ref, commitOrTag, token string) error {
 	dir := CacheDir(root, ref)
 	args := authArgs(token, "-C", dir, "fetch", "--depth", "1", "origin", commitOrTag)
-	return run(args...)
-}
-
-// authArgs prepends git auth header config when token is non-empty.
-func authArgs(token string, gitArgs ...string) []string {
-	if token != "" {
-		header := fmt.Sprintf("http.extraHeader=Authorization: Bearer %s", token)
-		return append([]string{"git", "-c", header}, gitArgs...)
+	if err := run(args...); err != nil {
+		return fmt.Errorf("%s", redactToken(err.Error(), token))
 	}
-	return append([]string{"git"}, gitArgs...)
+	return nil
 }
 
 // ResolveLocalRef resolves a version to a commit SHA for a local repo.
@@ -96,7 +93,7 @@ func ResolveRefAuth(url, version, token string) (string, error) {
 	args := authArgs(token, "ls-remote", url, version)
 	out, err := output(args...)
 	if err != nil {
-		return "", fmt.Errorf("git ls-remote %s %s: %w", url, version, err)
+		return "", fmt.Errorf("git ls-remote %s %s: %s", url, version, redactToken(err.Error(), token))
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	for _, line := range lines {

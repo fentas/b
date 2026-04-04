@@ -179,6 +179,63 @@ func TestDetectAuthToken_UnknownHost(t *testing.T) {
 	}
 }
 
+func TestDetectAuthToken_SpoofedHost(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_secret")
+	// github.evil.example should NOT match github.com
+	token := detectAuthToken("github.evil.example/org/repo")
+	if token != "" {
+		t.Errorf("spoofed host should not get token, got %q", token)
+	}
+}
+
+func TestDetectAuthToken_Subdomain(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_enterprise")
+	// enterprise.github.com is a subdomain of github.com — should match
+	token := detectAuthToken("enterprise.github.com/org/repo")
+	if token != "ghp_enterprise" {
+		t.Errorf("subdomain should match, got %q", token)
+	}
+}
+
+func TestMatchesTrustedHost(t *testing.T) {
+	tests := []struct {
+		host, domain string
+		want         bool
+	}{
+		{"github.com", "github.com", true},
+		{"enterprise.github.com", "github.com", true},
+		{"GITHUB.COM", "github.com", true},
+		{"github.evil.example", "github.com", false},
+		{"notgithub.com", "github.com", false},
+		{"gitlab.com", "gitlab.com", true},
+		{"codeberg.org", "codeberg.org", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.host+"→"+tt.domain, func(t *testing.T) {
+			if got := matchesTrustedHost(tt.host, tt.domain); got != tt.want {
+				t.Errorf("matchesTrustedHost(%q, %q) = %v, want %v", tt.host, tt.domain, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRedactToken(t *testing.T) {
+	got := redactToken("git clone https://host: Bearer ghp_secret123 failed", "ghp_secret123")
+	if strings.Contains(got, "ghp_secret123") {
+		t.Errorf("token should be redacted, got: %q", got)
+	}
+	if !strings.Contains(got, "***") {
+		t.Errorf("expected *** in redacted string, got: %q", got)
+	}
+}
+
+func TestRedactToken_Empty(t *testing.T) {
+	got := redactToken("some error", "")
+	if got != "some error" {
+		t.Errorf("empty token should not change string, got: %q", got)
+	}
+}
+
 func TestResolveGitURL_AuthToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_integrated")
 	r := ResolveGitURL("github.com/org/repo", "")

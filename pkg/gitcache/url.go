@@ -1,6 +1,7 @@
 package gitcache
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,7 +50,10 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 
 	// Handle relative paths (starts with . or ..)
 	if strings.HasPrefix(ref, ".") || strings.HasPrefix(ref, "..") {
-		abs, _ := filepath.Abs(filepath.Join(configDir, ref))
+		abs, err := filepath.Abs(filepath.Join(configDir, ref))
+		if err != nil {
+			return ResolvedRef{URL: filepath.Clean(filepath.Join(configDir, ref)), IsLocal: true}
+		}
 		return ResolvedRef{URL: abs, IsLocal: true}
 	}
 
@@ -68,7 +72,10 @@ func resolveRepo(repo, configDir string) ResolvedRef {
 
 	// Relative path (starts with . or ..)
 	if strings.HasPrefix(repo, ".") || strings.HasPrefix(repo, "..") {
-		abs, _ := filepath.Abs(filepath.Join(configDir, repo))
+		abs, err := filepath.Abs(filepath.Join(configDir, repo))
+		if err != nil {
+			return ResolvedRef{URL: filepath.Clean(filepath.Join(configDir, repo)), IsLocal: true}
+		}
 		return ResolvedRef{URL: abs, IsLocal: true}
 	}
 
@@ -78,20 +85,49 @@ func resolveRepo(repo, configDir string) ResolvedRef {
 	return ResolvedRef{URL: url, IsLocal: false, AuthToken: token}
 }
 
-// detectAuthToken returns the auth token for a given ref based on host matching.
+// matchesTrustedHost reports whether host exactly matches domain or is a subdomain.
+func matchesTrustedHost(host, domain string) bool {
+	host = strings.ToLower(host)
+	return host == domain || strings.HasSuffix(host, "."+domain)
+}
+
+// detectAuthToken returns the auth token for a given ref based on trusted host matching.
+// Only matches exact domains or subdomains to prevent token leakage to attacker-controlled hosts.
 func detectAuthToken(ref string) string {
 	host := ref
 	if i := strings.Index(host, "/"); i > 0 {
 		host = host[:i]
 	}
+	if i := strings.Index(host, ":"); i > 0 {
+		host = host[:i]
+	}
 
 	switch {
-	case strings.Contains(host, "github"):
+	case matchesTrustedHost(host, "github.com"):
 		return os.Getenv("GITHUB_TOKEN")
-	case strings.Contains(host, "gitlab"):
+	case matchesTrustedHost(host, "gitlab.com"):
 		return os.Getenv("GITLAB_TOKEN")
-	case strings.Contains(host, "gitea") || strings.Contains(host, "codeberg"):
+	case matchesTrustedHost(host, "gitea.com"), matchesTrustedHost(host, "codeberg.org"):
 		return os.Getenv("GITEA_TOKEN")
 	}
 	return ""
+}
+
+// redactToken removes auth tokens from strings (for safe error messages).
+func redactToken(s, token string) string {
+	if token == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, token, "***")
+}
+
+// authArgs prepends git auth header config when token is non-empty.
+// NOTE: Error messages from run()/output() will contain the token in argv.
+// Use redactToken() on any error before surfacing to users.
+func authArgs(token string, gitArgs ...string) []string {
+	if token != "" {
+		header := fmt.Sprintf("http.extraHeader=Authorization: Bearer %s", token)
+		return append([]string{"git", "-c", header}, gitArgs...)
+	}
+	return append([]string{"git"}, gitArgs...)
 }
