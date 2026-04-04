@@ -211,11 +211,20 @@ func (o *InstallOptions) Run() error {
 // installBinaries installs the specified binaries with progress tracking
 func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	// Pre-resolve ambiguous assets before starting progress bars.
-	// Only in force mode — non-forced installs may skip already-installed
-	// binaries via EnsureBinary, so eager resolution would cause unnecessary
-	// provider calls and prompts.
+	// In force mode, all binaries will download. In non-force mode,
+	// only resolve for missing binaries (the ones EnsureBinary will download).
 	if o.Force {
 		resolveAmbiguousAssets(binaries, o.Quiet, o.IO)
+	} else {
+		var missing []*binary.Binary
+		for _, b := range binaries {
+			if !b.BinaryExists() {
+				missing = append(missing, b)
+			}
+		}
+		if len(missing) > 0 {
+			resolveAmbiguousAssets(missing, o.Quiet, o.IO)
+		}
 	}
 
 	// Wire fallback selector for any remaining ambiguous cases
