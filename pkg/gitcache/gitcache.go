@@ -301,15 +301,6 @@ func DiffNoIndex(a, b []byte, labelA, labelB string) (string, error) {
 	return stdout.String(), nil
 }
 
-// isSSHUserAt checks if the @ at position i is an SSH user separator (git@host:...)
-// rather than a version separator (repo@v2.0).
-func isSSHUserAt(ref string, atIdx int) bool {
-	prefix := ref[:atIdx]
-	// SSH user prefix is "git" — the standard SSH user for git hosting services.
-	// Also handle ssh:// prefix: "ssh://git@..."
-	return prefix == "git" || prefix == "ssh://git"
-}
-
 // GitURL converts a ref to a clone-ready URL (without auth credentials).
 // Delegates to ResolveGitURL with empty configDir. For local/relative paths
 // or auth token support, use ResolveGitURL directly.
@@ -326,7 +317,7 @@ func RefBase(ref string) string {
 		ref = ref[:i]
 	}
 	// Use LastIndex to skip SSH user@ prefix (git@github.com:...)
-	if i := strings.LastIndex(ref, "@"); i > 0 && !isSSHUserAt(ref, i) {
+	if i := strings.LastIndex(ref, "@"); i > 0 && !IsSSHUserAt(ref, i) {
 		ref = ref[:i]
 	}
 	return ref
@@ -349,7 +340,7 @@ func RefLabel(ref string) string {
 // RefVersion extracts the version from a ref (after last @).
 // Returns empty string if no version. Skips SSH user@ prefix.
 func RefVersion(ref string) string {
-	if i := strings.LastIndex(ref, "@"); i > 0 && !isSSHUserAt(ref, i) {
+	if i := strings.LastIndex(ref, "@"); i > 0 && !IsSSHUserAt(ref, i) {
 		return ref[i+1:]
 	}
 	return ""

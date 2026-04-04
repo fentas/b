@@ -45,7 +45,7 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 		cleanRef = cleanRef[:i]
 	}
 	// Strip version (e.g. @v2.0) — careful not to strip git@ prefix
-	if i := strings.LastIndex(cleanRef, "@"); i > 0 && !isSSHUserPrefix(cleanRef, i) {
+	if i := strings.LastIndex(cleanRef, "@"); i > 0 && !IsSSHUserAt(cleanRef, i) {
 		cleanRef = cleanRef[:i]
 	}
 
@@ -116,11 +116,20 @@ func isSSHImplicit(ref string) bool {
 	return at >= 0 && colon > at
 }
 
-// isSSHUserPrefix checks if the @ at position i is part of a git@ user prefix
-// (e.g. "git@github.com:...") rather than a version separator (e.g. "repo@v2.0").
-func isSSHUserPrefix(ref string, atIdx int) bool {
+// IsSSHUserAt checks if the @ at position i is an SSH user separator
+// (e.g. "git@host:..." or "ssh://user@host/...") rather than a version separator.
+// Used by both ResolveGitURL and RefBase/RefVersion.
+func IsSSHUserAt(ref string, atIdx int) bool {
 	prefix := ref[:atIdx]
-	return prefix == "git" || prefix == "ssh://git"
+	// Common SSH user prefixes
+	if prefix == "git" || prefix == "ssh://git" {
+		return true
+	}
+	// General ssh:// with any user: ssh://user@host
+	if strings.HasPrefix(prefix, "ssh://") {
+		return true
+	}
+	return false
 }
 
 // IsSSHURL returns true if a URL uses SSH transport.
@@ -164,7 +173,9 @@ func redactToken(s, token string) string {
 }
 
 // authArgs prepends git auth header config when token is non-empty.
-// Skips Bearer header for SSH URLs (SSH uses ssh-agent, not HTTP headers).
+// Callers are responsible for passing empty token for SSH URLs
+// (SSH uses ssh-agent, not HTTP headers — ResolvedRef.AuthToken is
+// always empty for SSH refs).
 func authArgs(token string, gitArgs ...string) []string {
 	if token != "" {
 		header := fmt.Sprintf("http.extraHeader=Authorization: Bearer %s", token)

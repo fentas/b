@@ -105,7 +105,7 @@ func (g *Git) installFromRemote(repo, filePath, version, dest string) (string, e
 	}
 
 	// Fetch the specific ref if not already present
-	if err := gitcache.Fetch(cacheRoot, repo, commit); err != nil {
+	if err := gitcache.FetchAuth(cacheRoot, repo, commit, resolved.AuthToken); err != nil {
 		// Ignore fetch errors if the commit is already cached
 		_ = err
 	}
