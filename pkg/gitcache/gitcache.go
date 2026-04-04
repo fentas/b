@@ -182,11 +182,6 @@ func ListTreeWithModesDir(dir, commit string) ([]TreeEntry, error) {
 	return entries, nil
 }
 
-// run executes a git command, returning an error that includes stderr.
-func run(args ...string) error {
-	return runAuth(AuthCmd{Args: args})
-}
-
 // runAuth executes a git command with optional auth env vars.
 func runAuth(ac AuthCmd) error {
 	cmd := exec.Command(ac.Args[0], ac.Args[1:]...)
