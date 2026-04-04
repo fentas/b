@@ -302,3 +302,54 @@ func guardedAssetSelector(mu *sync.Mutex, bin *binary.Binary, quiet bool, io *st
 		return inner(candidates)
 	}
 }
+
+// resolveAmbiguousAssets pre-resolves asset selection for auto-detect binaries
+// that have multiple matching assets with the same score. This runs BEFORE the
+// progress writer starts, so interactive prompts are displayed cleanly without
+// being overwritten by progress bars.
+//
+// For each binary that needs selection, it fetches the release, scores assets,
+// and either prompts interactively or picks the best match (quiet/non-TTY).
+// The chosen asset is stored in b.ResolvedAsset so downloadViaProvider can
+// skip matching and use it directly.
+func resolveAmbiguousAssets(binaries []*binary.Binary, quiet bool, io *streams.IO) {
+	for _, b := range binaries {
+		if !b.AutoDetect || b.AssetFilter != "" {
+			continue // non-auto or has explicit filter — skip
+		}
+
+		p, err := provider.Detect(b.ProviderRef)
+		if err != nil {
+			continue // will fail later during download with a proper error
+		}
+
+		version := b.Version
+		if version == "" {
+			version, err = p.LatestVersion(b.ProviderRef)
+			if err != nil {
+				continue
+			}
+			b.Version = version // cache for later
+		}
+
+		release, err := p.FetchRelease(b.ProviderRef, version)
+		if err != nil {
+			continue
+		}
+
+		repoName := provider.BinaryName(b.ProviderRef)
+		candidates := provider.MatchAssets(release.Assets, repoName, b.AssetFilter)
+
+		if len(candidates) < 2 || candidates[0].Score != candidates[1].Score {
+			continue // no ambiguity
+		}
+
+		// Prompt for this specific binary
+		sel := defaultAssetSelector(b, quiet, io)
+		asset, err := sel(candidates)
+		if err != nil {
+			continue
+		}
+		b.ResolvedAsset = asset
+	}
+}

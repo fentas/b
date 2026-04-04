@@ -287,7 +287,7 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 
 		result, err := syncEnvFunc(cfg, projectRoot, "", lockEntry)
 		if err != nil {
-			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %v\n", entry.Key, err)
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
 			continue
 		}
 
@@ -467,8 +467,10 @@ func isTTY() bool {
 
 // updateBinaries updates the specified binaries with progress tracking
 func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
-	// Wire interactive asset selector with a shared mutex so that
-	// concurrent goroutines never interleave stdin prompts.
+	// Pre-resolve ambiguous assets before starting progress bars.
+	resolveAmbiguousAssets(binaries, o.Quiet, o.IO)
+
+	// Wire fallback selector for any remaining ambiguous cases
 	var promptMu sync.Mutex
 	for _, b := range binaries {
 		if b.AutoDetect && b.SelectAsset == nil {

@@ -210,8 +210,12 @@ func (o *InstallOptions) Run() error {
 
 // installBinaries installs the specified binaries with progress tracking
 func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
-	// Wire interactive asset selector with a shared mutex so that
-	// concurrent goroutines never interleave stdin prompts.
+	// Pre-resolve ambiguous assets before starting progress bars.
+	// This ensures interactive prompts are shown cleanly without
+	// being overwritten by the progress renderer.
+	resolveAmbiguousAssets(binaries, o.Quiet, o.IO)
+
+	// Wire fallback selector for any remaining ambiguous cases
 	var promptMu sync.Mutex
 	for _, b := range binaries {
 		if b.AutoDetect && b.SelectAsset == nil {
@@ -535,7 +539,7 @@ func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 		lockEntry := lk.FindEnv(ref, label)
 		result, err := env.SyncEnv(cfg, projectRoot, "", lockEntry)
 		if err != nil {
-			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %v\n", entry.Key, err)
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
 			continue
 		}
 
@@ -701,6 +705,15 @@ func (o *InstallOptions) discoverUpstreamConfig(ref string) string {
 		return ""
 	}
 	return strings.Join(lines, "\n")
+}
+
+// firstLine returns the first line of a string, trimming any trailing content.
+// Used to display clean single-line error messages from multi-line git errors.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i != -1 {
+		return s[:i]
+	}
+	return s
 }
 
 // shortCommit returns the first 7 characters of a commit hash, or "(new)" if empty.
