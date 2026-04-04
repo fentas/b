@@ -60,6 +60,20 @@ func ParseRef(ref string) (base, version string) {
 	return ref, ""
 }
 
+// IsReleaseProvider returns true if the provider uses FetchRelease for downloads
+// (i.e. GitHub, GitLab, Gitea). Returns false for go://, docker://, git://.
+func IsReleaseProvider(p Provider) bool {
+	if p == nil {
+		return false
+	}
+	switch p.(type) {
+	case *GoInstall, *Docker, *Git:
+		return false
+	default:
+		return true
+	}
+}
+
 // IsProviderRef returns true if the string looks like a provider ref
 // (contains a slash or a protocol prefix) rather than a preset name.
 func IsProviderRef(s string) bool {

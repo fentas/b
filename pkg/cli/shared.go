@@ -302,3 +302,74 @@ func guardedAssetSelector(mu *sync.Mutex, bin *binary.Binary, quiet bool, io *st
 		return inner(candidates)
 	}
 }
+
+// resolveAmbiguousAssets pre-resolves asset selection for auto-detect binaries
+// that have multiple matching assets with the same score. This runs BEFORE the
+// progress writer starts, so interactive prompts are displayed cleanly without
+// being overwritten by progress bars.
+//
+// Only runs for release-based providers (skips go://, docker://, git://).
+// The chosen asset is stored in b.ResolvedAsset so downloadViaProvider can
+// skip re-fetching and use it directly.
+func resolveAmbiguousAssets(binaries []*binary.Binary, quiet bool, io *streams.IO) {
+	for _, b := range binaries {
+		if !b.AutoDetect || b.ResolvedAsset != nil {
+			continue
+		}
+
+		p, err := provider.Detect(b.ProviderRef)
+		if err != nil {
+			continue
+		}
+
+		// Skip non-release providers (go://, docker://, git://)
+		// They don't use FetchRelease and can't have ambiguous assets.
+		if !provider.IsReleaseProvider(p) {
+			continue
+		}
+
+		version := b.Version
+		if version == "" {
+			version, err = p.LatestVersion(b.ProviderRef)
+			if err != nil {
+				continue
+			}
+			b.Version = version
+		}
+
+		release, err := p.FetchRelease(b.ProviderRef, version)
+		if err != nil {
+			continue
+		}
+
+		repoName := provider.BinaryName(b.ProviderRef)
+		candidates := provider.MatchAssets(release.Assets, repoName, b.AssetFilter)
+
+		if len(candidates) == 0 {
+			continue
+		}
+
+		// No ambiguity — cache the winner to avoid re-fetching during download
+		if len(candidates) < 2 || candidates[0].Score != candidates[1].Score {
+			b.ResolvedAsset = candidates[0].Asset
+			continue
+		}
+
+		// Ambiguous — prompt user (or auto-pick in quiet/non-TTY mode)
+		sel := defaultAssetSelector(b, quiet, io)
+		asset, err := sel(candidates)
+		if err != nil {
+			continue
+		}
+		b.ResolvedAsset = asset
+	}
+}
+
+// firstLine returns the first line of a string, trimming trailing CR/LF.
+// Used to display clean single-line error messages from multi-line git errors.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i != -1 {
+		return strings.TrimSuffix(s[:i], "\r")
+	}
+	return strings.TrimSuffix(s, "\r")
+}

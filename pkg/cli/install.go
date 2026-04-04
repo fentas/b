@@ -210,8 +210,24 @@ func (o *InstallOptions) Run() error {
 
 // installBinaries installs the specified binaries with progress tracking
 func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
-	// Wire interactive asset selector with a shared mutex so that
-	// concurrent goroutines never interleave stdin prompts.
+	// Pre-resolve ambiguous assets before starting progress bars.
+	// In force mode, all binaries will download. In non-force mode,
+	// only resolve for missing binaries (the ones EnsureBinary will download).
+	if o.Force {
+		resolveAmbiguousAssets(binaries, o.Quiet, o.IO)
+	} else {
+		var missing []*binary.Binary
+		for _, b := range binaries {
+			if !b.BinaryExists() {
+				missing = append(missing, b)
+			}
+		}
+		if len(missing) > 0 {
+			resolveAmbiguousAssets(missing, o.Quiet, o.IO)
+		}
+	}
+
+	// Wire fallback selector for any remaining ambiguous cases
 	var promptMu sync.Mutex
 	for _, b := range binaries {
 		if b.AutoDetect && b.SelectAsset == nil {
@@ -535,7 +551,7 @@ func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 		lockEntry := lk.FindEnv(ref, label)
 		result, err := env.SyncEnv(cfg, projectRoot, "", lockEntry)
 		if err != nil {
-			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %v\n", entry.Key, err)
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
 			continue
 		}
 
