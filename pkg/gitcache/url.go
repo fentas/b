@@ -121,14 +121,20 @@ func isSSHImplicit(ref string) bool {
 // Used by both ResolveGitURL and RefBase/RefVersion.
 func IsSSHUserAt(ref string, atIdx int) bool {
 	prefix := ref[:atIdx]
-	// Common SSH user prefixes
-	if prefix == "git" || prefix == "ssh://git" {
-		return true
-	}
-	// General ssh:// with any user: ssh://user@host
+	rest := ref[atIdx+1:]
+
+	// Explicit ssh:// with any user
 	if strings.HasPrefix(prefix, "ssh://") {
 		return true
 	}
+
+	// scp-style: user@host:path — the part after @ must contain a ':'
+	// indicating host:path format. Version separators (repo@v2.0) don't.
+	// Also the prefix must be a simple username (no slashes, no dots with TLD).
+	if strings.Contains(rest, ":") && !strings.Contains(prefix, "/") && !strings.Contains(prefix, ".") {
+		return true
+	}
+
 	return false
 }
 

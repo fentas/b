@@ -41,6 +41,8 @@ func TestResolveGitURL_AllVariants(t *testing.T) {
 		{"ssh explicit", "ssh://git@github.com/org/repo", "", "ssh://git@github.com/org/repo.git", false, true},
 		{"ssh explicit .git", "ssh://git@github.com/org/repo.git", "", "ssh://git@github.com/org/repo.git", false, true},
 		{"ssh custom port", "ssh://git@host:2222/org/repo", "", "ssh://git@host:2222/org/repo.git", false, true},
+		{"ssh non-git user implicit", "deploy@host:org/repo", "", "deploy@host:org/repo.git", false, true},
+		{"ssh non-git user explicit", "ssh://deploy@host/org/repo", "", "ssh://deploy@host/org/repo.git", false, true},
 
 		// git:// protocol (b's custom protocol)
 		{"git:// remote", "git://github.com/org/repo:scripts/tool", "", "https://github.com/org/repo.git", false, false},
@@ -340,6 +342,27 @@ func TestRefVersion_SSH_NoVersion(t *testing.T) {
 	got := RefVersion("git@github.com:org/repo")
 	if got != "" {
 		t.Errorf("RefVersion = %q, want empty", got)
+	}
+}
+
+func TestIsSSHUserAt_NonGitUser(t *testing.T) {
+	// deploy@host:path — should be SSH user
+	if !IsSSHUserAt("deploy@host:org/repo", 6) {
+		t.Error("deploy@host:path should be SSH user")
+	}
+}
+
+func TestIsSSHUserAt_VersionSeparator(t *testing.T) {
+	// github.com/org/repo@v2.0 — should NOT be SSH user
+	if IsSSHUserAt("github.com/org/repo@v2.0", 20) {
+		t.Error("repo@v2.0 should not be SSH user")
+	}
+}
+
+func TestRefBase_NonGitSSHUser(t *testing.T) {
+	got := RefBase("deploy@host:org/repo@v2.0")
+	if got != "deploy@host:org/repo" {
+		t.Errorf("RefBase = %q, should strip version but keep deploy@", got)
 	}
 }
 

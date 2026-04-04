@@ -130,10 +130,9 @@ func parseGitRef(ref string) (repo, filePath string, err error) {
 		return "", "", fmt.Errorf("empty git ref: %s", ref)
 	}
 
-	// Strip version suffix (@v1.0.0) before parsing — but preserve git@ SSH prefix
+	// Strip version suffix (@v1.0.0) before parsing — but preserve SSH user@ prefix
 	if i := strings.LastIndex(raw, "@"); i > 0 {
-		prefix := raw[:i]
-		if prefix != "git" && prefix != "ssh://git" {
+		if !gitcache.IsSSHUserAt(raw, i) {
 			raw = raw[:i] // strip version
 		}
 	}
