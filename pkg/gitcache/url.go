@@ -178,14 +178,29 @@ func redactToken(s, token string) string {
 	return strings.ReplaceAll(s, token, "***")
 }
 
-// authArgs prepends git auth header config when token is non-empty.
-// Callers are responsible for passing empty token for SSH URLs
-// (SSH uses ssh-agent, not HTTP headers — ResolvedRef.AuthToken is
-// always empty for SSH refs).
-func authArgs(token string, gitArgs ...string) []string {
-	if token != "" {
-		header := fmt.Sprintf("http.extraHeader=Authorization: Bearer %s", token)
-		return append([]string{"git", "-c", header}, gitArgs...)
+// AuthCmd holds git command args and optional auth environment variables.
+// Auth tokens are passed via environment variables (not argv) to avoid
+// exposure in process listings.
+type AuthCmd struct {
+	Args []string // git command arguments
+	Env  []string // extra environment variables (e.g. GIT_CONFIG_*)
+}
+
+// authCmd builds a git command with optional auth token.
+// The token is injected via GIT_CONFIG_* environment variables instead of
+// command-line args to prevent exposure in process listings.
+func authCmd(token string, gitArgs ...string) AuthCmd {
+	args := append([]string{"git"}, gitArgs...)
+	if token == "" {
+		return AuthCmd{Args: args}
 	}
-	return append([]string{"git"}, gitArgs...)
+	header := fmt.Sprintf("Authorization: Bearer %s", token)
+	return AuthCmd{
+		Args: args,
+		Env: []string{
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=http.extraHeader",
+			"GIT_CONFIG_VALUE_0=" + header,
+		},
+	}
 }

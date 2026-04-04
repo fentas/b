@@ -549,37 +549,53 @@ func TestResolveLocalRef_Integration(t *testing.T) {
 	}
 }
 
-// --- authArgs ---
+// --- authCmd ---
 
-func TestAuthArgs_NoToken(t *testing.T) {
-	args := authArgs("", "ls-remote", "https://github.com/org/repo.git", "HEAD")
-	if args[0] != "git" {
-		t.Errorf("args[0] = %q, want 'git'", args[0])
+func TestAuthCmd_NoToken(t *testing.T) {
+	ac := authCmd("", "ls-remote", "https://github.com/org/repo.git", "HEAD")
+	if ac.Args[0] != "git" {
+		t.Errorf("Args[0] = %q, want 'git'", ac.Args[0])
 	}
-	if args[1] != "ls-remote" {
-		t.Errorf("args[1] = %q, want 'ls-remote'", args[1])
+	if ac.Args[1] != "ls-remote" {
+		t.Errorf("Args[1] = %q, want 'ls-remote'", ac.Args[1])
 	}
-	// Should not have -c http.extraHeader
-	for _, a := range args {
-		if strings.Contains(a, "extraHeader") {
-			t.Error("should not have extraHeader without token")
-		}
+	if len(ac.Env) != 0 {
+		t.Errorf("Env should be empty without token, got %v", ac.Env)
 	}
 }
 
-func TestAuthArgs_WithToken(t *testing.T) {
-	args := authArgs("ghp_secret", "clone", "--bare", "https://github.com/org/repo.git")
-	if args[0] != "git" {
-		t.Errorf("args[0] = %q", args[0])
+func TestAuthCmd_WithToken(t *testing.T) {
+	ac := authCmd("ghp_secret", "clone", "--bare", "https://github.com/org/repo.git")
+	if ac.Args[0] != "git" {
+		t.Errorf("Args[0] = %q", ac.Args[0])
 	}
-	if args[1] != "-c" {
-		t.Errorf("args[1] = %q, want '-c'", args[1])
+	// Token should NOT be in argv
+	for _, a := range ac.Args {
+		if strings.Contains(a, "ghp_secret") {
+			t.Errorf("token should not appear in Args: %v", ac.Args)
+		}
 	}
-	if !strings.Contains(args[2], "Bearer ghp_secret") {
-		t.Errorf("args[2] = %q, should contain Bearer token", args[2])
+	// Token should be in Env
+	if len(ac.Env) == 0 {
+		t.Fatal("expected Env to contain auth config")
 	}
-	if args[3] != "clone" {
-		t.Errorf("args[3] = %q, want 'clone'", args[3])
+	foundHeader := false
+	for _, e := range ac.Env {
+		if strings.Contains(e, "Bearer ghp_secret") {
+			foundHeader = true
+		}
+	}
+	if !foundHeader {
+		t.Errorf("Env should contain Bearer token, got %v", ac.Env)
+	}
+}
+
+func TestAuthCmd_TokenNotInProcessArgs(t *testing.T) {
+	ac := authCmd("ghp_supersecret", "ls-remote", "https://github.com/org/repo.git")
+	// The whole point: token must not be in Args (visible in ps/top)
+	joined := strings.Join(ac.Args, " ")
+	if strings.Contains(joined, "ghp_supersecret") {
+		t.Errorf("token leaked into Args: %s", joined)
 	}
 }
 

@@ -40,8 +40,8 @@ func EnsureCloneAuth(root, ref, url, token string) error {
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return fmt.Errorf("creating cache root %s: %w", root, err)
 	}
-	args := authArgs(token, "clone", "--bare", "--depth", "1", url, dir)
-	if err := run(args...); err != nil {
+	ac := authCmd(token, "clone", "--bare", "--depth", "1", url, dir)
+	if err := runAuth(ac); err != nil {
 		return fmt.Errorf("%s", redactToken(err.Error(), token))
 	}
 	return nil
@@ -55,8 +55,8 @@ func Fetch(root, ref, commitOrTag string) error {
 // FetchAuth fetches with optional auth token.
 func FetchAuth(root, ref, commitOrTag, token string) error {
 	dir := CacheDir(root, ref)
-	args := authArgs(token, "-C", dir, "fetch", "--depth", "1", "origin", commitOrTag)
-	if err := run(args...); err != nil {
+	ac := authCmd(token, "-C", dir, "fetch", "--depth", "1", "origin", commitOrTag)
+	if err := runAuth(ac); err != nil {
 		return fmt.Errorf("%s", redactToken(err.Error(), token))
 	}
 	return nil
@@ -90,8 +90,8 @@ func ResolveRefAuth(url, version, token string) (string, error) {
 	if version == "" {
 		version = "HEAD"
 	}
-	args := authArgs(token, "ls-remote", url, version)
-	out, err := output(args...)
+	ac := authCmd(token, "ls-remote", url, version)
+	out, err := outputAuth(ac)
 	if err != nil {
 		return "", fmt.Errorf("git ls-remote %s %s: %s", url, version, redactToken(err.Error(), token))
 	}
@@ -105,8 +105,8 @@ func ResolveRefAuth(url, version, token string) (string, error) {
 	// If version is HEAD and ls-remote returned nothing useful, try refs/heads/main, master
 	if version == "HEAD" {
 		for _, branch := range []string{"refs/heads/main", "refs/heads/master"} {
-			fallbackArgs := authArgs(token, "ls-remote", url, branch)
-			out, err = output(fallbackArgs...)
+			fallbackAC := authCmd(token, "ls-remote", url, branch)
+			out, err = outputAuth(fallbackAC)
 			if err == nil {
 				parts := strings.Fields(strings.TrimSpace(out))
 				if len(parts) >= 2 {
@@ -184,23 +184,39 @@ func ListTreeWithModesDir(dir, commit string) ([]TreeEntry, error) {
 
 // run executes a git command, returning an error that includes stderr.
 func run(args ...string) error {
-	cmd := exec.Command(args[0], args[1:]...)
+	return runAuth(AuthCmd{Args: args})
+}
+
+// runAuth executes a git command with optional auth env vars.
+func runAuth(ac AuthCmd) error {
+	cmd := exec.Command(ac.Args[0], ac.Args[1:]...)
+	if len(ac.Env) > 0 {
+		cmd.Env = append(os.Environ(), ac.Env...)
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %w\n%s", strings.Join(args, " "), err, stderr.String())
+		return fmt.Errorf("%s: %w\n%s", strings.Join(ac.Args, " "), err, stderr.String())
 	}
 	return nil
 }
 
 // output executes a git command and returns stdout as a string.
 func output(args ...string) (string, error) {
-	cmd := exec.Command(args[0], args[1:]...)
+	return outputAuth(AuthCmd{Args: args})
+}
+
+// outputAuth executes a git command with optional auth env vars.
+func outputAuth(ac AuthCmd) (string, error) {
+	cmd := exec.Command(ac.Args[0], ac.Args[1:]...)
+	if len(ac.Env) > 0 {
+		cmd.Env = append(os.Environ(), ac.Env...)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%s: %w\n%s", strings.Join(args, " "), err, stderr.String())
+		return "", fmt.Errorf("%s: %w\n%s", strings.Join(ac.Args, " "), err, stderr.String())
 	}
 	return stdout.String(), nil
 }
