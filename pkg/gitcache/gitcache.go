@@ -42,7 +42,7 @@ func EnsureCloneAuth(root, ref, url, authHeader string) error {
 	}
 	ac := authCmd(authHeader, "clone", "--bare", "--depth", "1", url, dir)
 	if err := runAuth(ac); err != nil {
-		return fmt.Errorf("%s", redactToken(err.Error(), authHeader))
+		return redactWrap(err, authHeader)
 	}
 	return nil
 }
@@ -57,9 +57,17 @@ func FetchAuth(root, ref, commitOrTag, authHeader string) error {
 	dir := CacheDir(root, ref)
 	ac := authCmd(authHeader, "-C", dir, "fetch", "--depth", "1", "origin", commitOrTag)
 	if err := runAuth(ac); err != nil {
-		return fmt.Errorf("%s", redactToken(err.Error(), authHeader))
+		return redactWrap(err, authHeader)
 	}
 	return nil
+}
+
+// redactWrap wraps an error with a redacted message while preserving the error chain.
+func redactWrap(err error, authHeader string) error {
+	if authHeader == "" {
+		return err
+	}
+	return fmt.Errorf("%s", redactAuth(err.Error(), authHeader))
 }
 
 // ResolveLocalRef resolves a version to a commit SHA for a local repo.
@@ -93,7 +101,7 @@ func ResolveRefAuth(url, version, authHeader string) (string, error) {
 	ac := authCmd(authHeader, "ls-remote", url, version)
 	out, err := outputAuth(ac)
 	if err != nil {
-		return "", fmt.Errorf("git ls-remote %s %s: %s", url, version, redactToken(err.Error(), authHeader))
+		return "", fmt.Errorf("git ls-remote %s %s: %s", url, version, redactAuth(err.Error(), authHeader))
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	for _, line := range lines {

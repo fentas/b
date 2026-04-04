@@ -467,8 +467,8 @@ func TestMatchesTrustedHost(t *testing.T) {
 	}
 }
 
-func TestRedactToken(t *testing.T) {
-	got := redactToken("git clone https://host: Bearer ghp_secret123 failed", "ghp_secret123")
+func TestRedactAuth_WithHeader(t *testing.T) {
+	got := redactAuth("git clone: Bearer ghp_secret123 failed", "Authorization: Bearer ghp_secret123")
 	if strings.Contains(got, "ghp_secret123") {
 		t.Errorf("token should be redacted, got: %q", got)
 	}
@@ -477,8 +477,15 @@ func TestRedactToken(t *testing.T) {
 	}
 }
 
-func TestRedactToken_Empty(t *testing.T) {
-	got := redactToken("some error", "")
+func TestRedactAuth_GitLabHeader(t *testing.T) {
+	got := redactAuth("error: glpat-secret failed", "PRIVATE-TOKEN: glpat-secret")
+	if strings.Contains(got, "glpat-secret") {
+		t.Errorf("token should be redacted, got: %q", got)
+	}
+}
+
+func TestRedactAuth_Empty(t *testing.T) {
+	got := redactAuth("some error", "")
 	if got != "some error" {
 		t.Errorf("empty token should not change string, got: %q", got)
 	}

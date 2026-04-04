@@ -186,12 +186,24 @@ func detectAuth(ref string) authInfo {
 	return authInfo{}
 }
 
-// redactToken removes auth tokens from strings (for safe error messages).
-func redactToken(s, token string) string {
-	if token == "" {
+// redactAuth removes auth secrets from strings (for safe error messages).
+// Accepts either a raw token or a full auth header — extracts and redacts
+// the secret part in both cases.
+func redactAuth(s, authHeader string) string {
+	if authHeader == "" {
 		return s
 	}
-	return strings.ReplaceAll(s, token, "***")
+	// Extract the raw token from common header formats
+	for _, prefix := range []string{"Authorization: Bearer ", "Authorization: token ", "PRIVATE-TOKEN: "} {
+		if strings.HasPrefix(authHeader, prefix) {
+			token := strings.TrimPrefix(authHeader, prefix)
+			if token != "" {
+				return strings.ReplaceAll(s, token, "***")
+			}
+		}
+	}
+	// Fallback: redact the whole header value
+	return strings.ReplaceAll(s, authHeader, "***")
 }
 
 // AuthCmd holds git command args and optional auth environment variables.
