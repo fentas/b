@@ -152,9 +152,9 @@ type fakeProvider struct {
 	assets []provider.Asset
 }
 
-func (f *fakeProvider) Name() string                                       { return "fake" }
-func (f *fakeProvider) Match(ref string) bool                              { return strings.HasPrefix(ref, "fake://") }
-func (f *fakeProvider) LatestVersion(ref string) (string, error)           { return "v1.0.0", nil }
+func (f *fakeProvider) Name() string                             { return "fake" }
+func (f *fakeProvider) Match(ref string) bool                    { return strings.HasPrefix(ref, "fake://") }
+func (f *fakeProvider) LatestVersion(ref string) (string, error) { return "v1.0.0", nil }
 func (f *fakeProvider) FetchRelease(ref, version string) (*provider.Release, error) {
 	return &provider.Release{Version: version, Assets: f.assets}, nil
 }
@@ -192,9 +192,9 @@ func TestResolveAmbiguousAssets_NonAmbiguous_SetsResolvedAsset(t *testing.T) {
 // fakeEmptyProvider returns a release with no assets.
 type fakeEmptyProvider struct{}
 
-func (f *fakeEmptyProvider) Name() string                                       { return "fakeempty" }
-func (f *fakeEmptyProvider) Match(ref string) bool                              { return strings.HasPrefix(ref, "fakeempty://") }
-func (f *fakeEmptyProvider) LatestVersion(ref string) (string, error)           { return "v1.0.0", nil }
+func (f *fakeEmptyProvider) Name() string                             { return "fakeempty" }
+func (f *fakeEmptyProvider) Match(ref string) bool                    { return strings.HasPrefix(ref, "fakeempty://") }
+func (f *fakeEmptyProvider) LatestVersion(ref string) (string, error) { return "v1.0.0", nil }
 func (f *fakeEmptyProvider) FetchRelease(ref, version string) (*provider.Release, error) {
 	return &provider.Release{Version: version, Assets: []provider.Asset{}}, nil
 }
@@ -215,6 +215,50 @@ func TestResolveAmbiguousAssets_NoMatchingAssets_NilResolvedAsset(t *testing.T) 
 
 	if b.ResolvedAsset != nil {
 		t.Errorf("expected nil ResolvedAsset when no assets match, got %q", b.ResolvedAsset.Name)
+	}
+}
+
+// fakeTiedProvider returns a release with two assets that tie on score.
+type fakeTiedProvider struct{}
+
+func (f *fakeTiedProvider) Name() string                             { return "faketied" }
+func (f *fakeTiedProvider) Match(ref string) bool                    { return strings.HasPrefix(ref, "faketied://") }
+func (f *fakeTiedProvider) LatestVersion(ref string) (string, error) { return "v1.0.0", nil }
+func (f *fakeTiedProvider) FetchRelease(ref, version string) (*provider.Release, error) {
+	// Two assets with identical OS/arch naming — they will tie in scoring
+	name1 := fmt.Sprintf("tool-%s-%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	name2 := fmt.Sprintf("tool-%s-%s.zip", runtime.GOOS, runtime.GOARCH)
+	return &provider.Release{
+		Version: version,
+		Assets: []provider.Asset{
+			{Name: name1, URL: "https://example.com/" + name1, Size: 1024},
+			{Name: name2, URL: "https://example.com/" + name2, Size: 2048},
+		},
+	}, nil
+}
+
+func init() {
+	provider.Register(&fakeTiedProvider{})
+}
+
+func TestResolveAmbiguousAssets_TiedScore_QuietPicksFirst(t *testing.T) {
+	b := &binary.Binary{
+		Name:        "tool",
+		AutoDetect:  true,
+		ProviderRef: "faketied://org/tool",
+		Version:     "v1.0.0",
+	}
+	out := &streams.IO{Out: &discardWriter{}, ErrOut: &discardWriter{}}
+	// quiet=true → auto-picks first (highest score) without prompting
+	resolveAmbiguousAssets([]*binary.Binary{b}, true, out)
+
+	if b.ResolvedAsset == nil {
+		t.Fatal("expected ResolvedAsset to be set for tied score (quiet auto-pick)")
+	}
+	// Should pick one of the two tied assets
+	wantPrefix := fmt.Sprintf("tool-%s-%s", runtime.GOOS, runtime.GOARCH)
+	if !strings.HasPrefix(b.ResolvedAsset.Name, wantPrefix) {
+		t.Errorf("ResolvedAsset.Name = %q, want prefix %q", b.ResolvedAsset.Name, wantPrefix)
 	}
 }
 
