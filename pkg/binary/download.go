@@ -181,18 +181,18 @@ func (b *Binary) downloadViaProvider() error {
 		return nil
 	}
 
+	// If asset was pre-resolved (e.g. via interactive prompt before download),
+	// skip all provider API calls entirely.
+	if b.ResolvedAsset != nil {
+		return b.downloadAsset(b.ResolvedAsset)
+	}
+
 	// Release-based providers (GitHub, GitLab, Gitea)
 	if b.Version == "" {
 		b.Version, err = p.LatestVersion(b.ProviderRef)
 		if err != nil {
 			return err
 		}
-	}
-
-	// If asset was pre-resolved (e.g. via interactive prompt before download),
-	// skip release fetching and matching entirely.
-	if b.ResolvedAsset != nil {
-		return b.downloadAsset(b.ResolvedAsset)
 	}
 
 	release, err := p.FetchRelease(b.ProviderRef, b.Version)

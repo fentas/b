@@ -707,15 +707,6 @@ func (o *InstallOptions) discoverUpstreamConfig(ref string) string {
 	return strings.Join(lines, "\n")
 }
 
-// firstLine returns the first line of a string, trimming any trailing content.
-// Used to display clean single-line error messages from multi-line git errors.
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i != -1 {
-		return s[:i]
-	}
-	return s
-}
-
 // shortCommit returns the first 7 characters of a commit hash, or "(new)" if empty.
 func shortCommit(commit string) string {
 	if commit == "" {
