@@ -109,7 +109,7 @@ func TestFilterContent_InvalidJSON(t *testing.T) {
 	}
 }
 
-// --- ProjectRoot tests ---
+// --- Nested lookup/set helpers ---
 
 func TestLookupNested(t *testing.T) {
 	data := map[string]interface{}{

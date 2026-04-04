@@ -23,16 +23,28 @@ func TestProjectRoot_PathBase(t *testing.T) {
 func TestProjectRoot_FallsBackToCWD(t *testing.T) {
 	t.Setenv("PATH_BASE", "")
 
+	// Chdir to a temp dir without .git so git root detection fails
+	originalWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() failed: %v", err)
+	}
+	tempDir := t.TempDir()
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("Chdir(%q) failed: %v", tempDir, err)
+	}
+	defer func() {
+		if err := os.Chdir(originalWD); err != nil {
+			t.Fatalf("restoring working directory failed: %v", err)
+		}
+	}()
+
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
 	shared := NewSharedOptions(io, nil)
 
 	got := shared.ProjectRoot()
-	cwd, _ := os.Getwd()
-	// Should be git root or CWD — both are valid
-	if got == "" {
-		t.Error("ProjectRoot() should not be empty")
+	if got != tempDir {
+		t.Errorf("ProjectRoot() = %q, want %q (CWD fallback)", got, tempDir)
 	}
-	_ = cwd // used for context
 }
 
 func TestProjectRoot_NotLockDir(t *testing.T) {
