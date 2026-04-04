@@ -468,7 +468,10 @@ func isTTY() bool {
 // updateBinaries updates the specified binaries with progress tracking
 func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	// Pre-resolve ambiguous assets before starting progress bars.
-	resolveAmbiguousAssets(binaries, o.Quiet, o.IO)
+	// Only in force mode — normal updates may skip current binaries.
+	if o.Force {
+		resolveAmbiguousAssets(binaries, o.Quiet, o.IO)
+	}
 
 	// Wire fallback selector for any remaining ambiguous cases
 	var promptMu sync.Mutex

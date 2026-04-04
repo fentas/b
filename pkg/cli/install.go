@@ -211,9 +211,12 @@ func (o *InstallOptions) Run() error {
 // installBinaries installs the specified binaries with progress tracking
 func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	// Pre-resolve ambiguous assets before starting progress bars.
-	// This ensures interactive prompts are shown cleanly without
-	// being overwritten by the progress renderer.
-	resolveAmbiguousAssets(binaries, o.Quiet, o.IO)
+	// Only in force mode — non-forced installs may skip already-installed
+	// binaries via EnsureBinary, so eager resolution would cause unnecessary
+	// provider calls and prompts.
+	if o.Force {
+		resolveAmbiguousAssets(binaries, o.Quiet, o.IO)
+	}
 
 	// Wire fallback selector for any remaining ambiguous cases
 	var promptMu sync.Mutex
