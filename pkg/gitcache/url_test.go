@@ -8,6 +8,88 @@ import (
 	"testing"
 )
 
+// --- Comprehensive resolution table ---
+
+func TestResolveGitURL_AllVariants(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GITLAB_TOKEN", "")
+	t.Setenv("GITEA_TOKEN", "")
+
+	tests := []struct {
+		name      string
+		ref       string
+		configDir string
+		wantURL   string
+		isLocal   bool
+		isSSH     bool
+	}{
+		// Remote HTTPS
+		{"remote github", "github.com/org/repo", "", "https://github.com/org/repo.git", false, false},
+		{"remote with label", "github.com/org/repo#monitoring", "", "https://github.com/org/repo.git", false, false},
+		{"remote with version", "github.com/org/repo@v2.0", "", "https://github.com/org/repo.git", false, false},
+		{"remote with version+label", "github.com/org/repo@v2.0#label", "", "https://github.com/org/repo.git", false, false},
+		{"remote gitlab", "gitlab.com/group/project", "", "https://gitlab.com/group/project.git", false, false},
+
+		// SSH implicit (git@host:path)
+		{"ssh implicit", "git@github.com:org/repo", "", "git@github.com:org/repo.git", false, true},
+		{"ssh implicit .git", "git@github.com:org/repo.git", "", "git@github.com:org/repo.git", false, true},
+		{"ssh implicit with label", "git@github.com:org/repo#monitoring", "", "git@github.com:org/repo.git", false, true},
+		{"ssh implicit with version", "git@github.com:org/repo@v2.0", "", "git@github.com:org/repo.git", false, true},
+		{"ssh implicit gitlab", "git@gitlab.com:group/project", "", "git@gitlab.com:group/project.git", false, true},
+
+		// SSH explicit (ssh://git@host/path)
+		{"ssh explicit", "ssh://git@github.com/org/repo", "", "ssh://git@github.com/org/repo.git", false, true},
+		{"ssh explicit .git", "ssh://git@github.com/org/repo.git", "", "ssh://git@github.com/org/repo.git", false, true},
+		{"ssh custom port", "ssh://git@host:2222/org/repo", "", "ssh://git@host:2222/org/repo.git", false, true},
+
+		// git:// protocol (b's custom protocol)
+		{"git:// remote", "git://github.com/org/repo:scripts/tool", "", "https://github.com/org/repo.git", false, false},
+		{"git:// local relative", "git://../../lok8s", "/home/user/project/.bin", "/home/user/lok8s", true, false},
+		{"git:// local relative with label", "git://../../lok8s#local-dev", "/home/user/project/.bin", "/home/user/lok8s", true, false},
+		{"git:// local absolute", "git:///home/user/repo:file", "", "/home/user/repo", true, false},
+
+		// Local absolute paths (no stripping of # or @)
+		{"local absolute", "/home/user/repo", "", "/home/user/repo", true, false},
+		{"local absolute with @", "/home/user/repo@work", "", "/home/user/repo@work", true, false},
+		{"local absolute with #", "/home/user/repo#branch", "", "/home/user/repo#branch", true, false},
+
+		// Local relative paths
+		{"relative dot", "./subdir/repo", "/home/user/.bin", "/home/user/.bin/subdir/repo", true, false},
+		{"relative dotdot", "../my-repo", "/home/user/project/.bin", "/home/user/project/my-repo", true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := ResolveGitURL(tt.ref, tt.configDir)
+
+			// For relative paths, compare with cleaned absolute
+			wantURL := tt.wantURL
+			if tt.isLocal && !filepath.IsAbs(tt.wantURL) {
+				wantURL, _ = filepath.Abs(tt.wantURL)
+			}
+			// Clean expected paths for comparison
+			if tt.isLocal {
+				wantURL = filepath.Clean(wantURL)
+				r.URL = filepath.Clean(r.URL)
+			}
+
+			if r.URL != wantURL {
+				t.Errorf("URL = %q, want %q", r.URL, wantURL)
+			}
+			if r.IsLocal != tt.isLocal {
+				t.Errorf("IsLocal = %v, want %v", r.IsLocal, tt.isLocal)
+			}
+			if r.IsSSH != tt.isSSH {
+				t.Errorf("IsSSH = %v, want %v", r.IsSSH, tt.isSSH)
+			}
+			// SSH and local should never have auth tokens
+			if (tt.isSSH || tt.isLocal) && r.AuthToken != "" {
+				t.Errorf("AuthToken should be empty for SSH/local, got %q", r.AuthToken)
+			}
+		})
+	}
+}
+
 func TestResolveGitURL_RemoteRef(t *testing.T) {
 	r := ResolveGitURL("github.com/org/repo", "")
 	if r.IsLocal {
