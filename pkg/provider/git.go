@@ -39,7 +39,7 @@ func (g *Git) LatestVersion(ref string) (string, error) {
 	}
 
 	resolved := gitcache.ResolveGitURL(repo, "")
-	return gitcache.ResolveRefAuth(resolved.URL, "HEAD", resolved.AuthToken)
+	return gitcache.ResolveRefAuth(resolved.URL, "HEAD", resolved.AuthHeader)
 }
 
 // FetchRelease is not used for git — use Install instead.
@@ -91,21 +91,21 @@ func (g *Git) installFromRemote(repo, filePath, version, dest string) (string, e
 	cacheRoot := gitcache.DefaultCacheRoot()
 	resolved := gitcache.ResolveGitURL(repo, "")
 
-	if err := gitcache.EnsureCloneAuth(cacheRoot, repo, resolved.URL, resolved.AuthToken); err != nil {
+	if err := gitcache.EnsureCloneAuth(cacheRoot, repo, resolved.URL, resolved.AuthHeader); err != nil {
 		return "", fmt.Errorf("cloning %s: %w", resolved.URL, err)
 	}
 
 	commit := version
 	if commit == "" {
 		var err error
-		commit, err = gitcache.ResolveRefAuth(resolved.URL, "HEAD", resolved.AuthToken)
+		commit, err = gitcache.ResolveRefAuth(resolved.URL, "HEAD", resolved.AuthHeader)
 		if err != nil {
 			return "", err
 		}
 	}
 
 	// Fetch the specific ref if not already present
-	if err := gitcache.FetchAuth(cacheRoot, repo, commit, resolved.AuthToken); err != nil {
+	if err := gitcache.FetchAuth(cacheRoot, repo, commit, resolved.AuthHeader); err != nil {
 		// Ignore fetch errors if the commit is already cached
 		_ = err
 	}

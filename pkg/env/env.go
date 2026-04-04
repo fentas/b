@@ -93,7 +93,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			return nil, fmt.Errorf("resolving %s@%s: %w", cfg.Ref, cfg.Version, err)
 		}
 	} else {
-		commit, err = gitcache.ResolveRefAuth(resolved.URL, cfg.Version, resolved.AuthToken)
+		commit, err = gitcache.ResolveRefAuth(resolved.URL, cfg.Version, resolved.AuthHeader)
 		if err != nil {
 			return nil, fmt.Errorf("resolving %s@%s: %w", cfg.Ref, cfg.Version, err)
 		}
@@ -123,10 +123,10 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 	if resolved.IsLocal {
 		repoDir = resolved.URL
 	} else {
-		if err := gitcache.EnsureCloneAuth(cacheRoot, baseRef, resolved.URL, resolved.AuthToken); err != nil {
+		if err := gitcache.EnsureCloneAuth(cacheRoot, baseRef, resolved.URL, resolved.AuthHeader); err != nil {
 			return nil, fmt.Errorf("cloning %s: %w", resolved.URL, err)
 		}
-		if err := gitcache.FetchAuth(cacheRoot, baseRef, commit, resolved.AuthToken); err != nil {
+		if err := gitcache.FetchAuth(cacheRoot, baseRef, commit, resolved.AuthHeader); err != nil {
 			return nil, fmt.Errorf("fetching %s: %w", commit, err)
 		}
 		repoDir = gitcache.CacheDir(cacheRoot, baseRef)
@@ -156,7 +156,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 	if lockEntry != nil {
 		previousCommit = lockEntry.Commit
 		if strategy == StrategyMerge && previousCommit != "" && !resolved.IsLocal {
-			if err := gitcache.FetchAuth(cacheRoot, baseRef, previousCommit, resolved.AuthToken); err != nil {
+			if err := gitcache.FetchAuth(cacheRoot, baseRef, previousCommit, resolved.AuthHeader); err != nil {
 				// Non-fatal: if we can't fetch the old commit, fall back to replace
 				previousCommit = ""
 			}

@@ -1,7 +1,6 @@
 package gitcache
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,10 +8,11 @@ import (
 
 // ResolvedRef holds a parsed and resolved git reference.
 type ResolvedRef struct {
-	URL       string // clone URL (https://, ssh://, git@host:repo, or local path)
-	IsLocal   bool   // true for local filesystem repos
-	IsSSH     bool   // true for SSH URLs (git@ or ssh://)
-	AuthToken string // auth token for HTTPS operations (empty for SSH/local)
+	URL        string // clone URL (https://, ssh://, git@host:repo, or local path)
+	IsLocal    bool   // true for local filesystem repos
+	IsSSH      bool   // true for SSH URLs (git@ or ssh://)
+	AuthToken  string // auth token for HTTPS operations (empty for SSH/local)
+	AuthHeader string // pre-formatted auth header (e.g. "Authorization: Bearer ...", "PRIVATE-TOKEN: ...")
 }
 
 // ResolveGitURL converts a ref to a clone-ready URL or local path.
@@ -24,7 +24,7 @@ type ResolvedRef struct {
 //   - Local paths: "/abs/path" or "../../rel" → resolved to absolute
 //
 // SSH URLs use the system's SSH agent (SSH_AUTH_SOCK) for authentication.
-// HTTPS URLs use AuthToken with git -c http.extraHeader.
+// HTTPS URLs use AuthToken injected via GIT_CONFIG_* environment variables.
 func ResolveGitURL(ref, configDir string) ResolvedRef {
 	// Detect absolute/relative local paths BEFORE stripping #/@ to avoid
 	// truncating paths containing those characters (e.g. /home/me/repo@work).
@@ -83,8 +83,8 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 
 	// Remote ref: "github.com/org/repo" → "https://github.com/org/repo.git"
 	url := "https://" + cleanRef + ".git"
-	token := detectAuthToken(cleanRef)
-	return ResolvedRef{URL: url, IsLocal: false, AuthToken: token}
+	auth := detectAuth(cleanRef)
+	return ResolvedRef{URL: url, IsLocal: false, AuthToken: auth.token, AuthHeader: auth.header}
 }
 
 // resolveRepo determines if a repo path is local or remote.
@@ -101,8 +101,8 @@ func resolveRepo(repo, configDir string) ResolvedRef {
 	}
 	// Remote
 	url := "https://" + repo + ".git"
-	token := detectAuthToken(repo)
-	return ResolvedRef{URL: url, IsLocal: false, AuthToken: token}
+	auth := detectAuth(repo)
+	return ResolvedRef{URL: url, IsLocal: false, AuthToken: auth.token, AuthHeader: auth.header}
 }
 
 // isSSHImplicit detects the "git@host:path" SSH URL format.
@@ -149,8 +149,14 @@ func matchesTrustedHost(host, domain string) bool {
 	return host == domain || strings.HasSuffix(host, "."+domain)
 }
 
-// detectAuthToken returns the auth token for a given ref based on trusted host matching.
-func detectAuthToken(ref string) string {
+// authInfo holds token and header format for a provider.
+type authInfo struct {
+	token  string
+	header string // pre-formatted header value
+}
+
+// detectAuth returns the auth token and formatted header for a given ref.
+func detectAuth(ref string) authInfo {
 	host := ref
 	if i := strings.Index(host, "/"); i > 0 {
 		host = host[:i]
@@ -159,15 +165,25 @@ func detectAuthToken(ref string) string {
 		host = host[:i]
 	}
 
+	var token string
 	switch {
 	case matchesTrustedHost(host, "github.com"):
-		return os.Getenv("GITHUB_TOKEN")
+		token = os.Getenv("GITHUB_TOKEN")
+		if token != "" {
+			return authInfo{token: token, header: "Authorization: Bearer " + token}
+		}
 	case matchesTrustedHost(host, "gitlab.com"):
-		return os.Getenv("GITLAB_TOKEN")
+		token = os.Getenv("GITLAB_TOKEN")
+		if token != "" {
+			return authInfo{token: token, header: "PRIVATE-TOKEN: " + token}
+		}
 	case matchesTrustedHost(host, "gitea.com"), matchesTrustedHost(host, "codeberg.org"):
-		return os.Getenv("GITEA_TOKEN")
+		token = os.Getenv("GITEA_TOKEN")
+		if token != "" {
+			return authInfo{token: token, header: "Authorization: token " + token}
+		}
 	}
-	return ""
+	return authInfo{}
 }
 
 // redactToken removes auth tokens from strings (for safe error messages).
@@ -186,15 +202,15 @@ type AuthCmd struct {
 	Env  []string // extra environment variables (e.g. GIT_CONFIG_*)
 }
 
-// authCmd builds a git command with optional auth token.
-// The token is injected via GIT_CONFIG_* environment variables instead of
+// authCmd builds a git command with optional auth header.
+// The header is injected via GIT_CONFIG_* environment variables instead of
 // command-line args to prevent exposure in process listings.
-func authCmd(token string, gitArgs ...string) AuthCmd {
+// Pass header from ResolvedRef.AuthHeader (provider-specific format).
+func authCmd(header string, gitArgs ...string) AuthCmd {
 	args := append([]string{"git"}, gitArgs...)
-	if token == "" {
+	if header == "" {
 		return AuthCmd{Args: args}
 	}
-	header := fmt.Sprintf("Authorization: Bearer %s", token)
 	return AuthCmd{
 		Args: args,
 		Env: []string{

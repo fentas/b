@@ -32,7 +32,7 @@ func EnsureClone(root, ref, url string) error {
 }
 
 // EnsureCloneAuth creates a shallow bare clone with optional auth token.
-func EnsureCloneAuth(root, ref, url, token string) error {
+func EnsureCloneAuth(root, ref, url, authHeader string) error {
 	dir := CacheDir(root, ref)
 	if _, err := os.Stat(dir); err == nil {
 		return nil // already cached
@@ -40,9 +40,9 @@ func EnsureCloneAuth(root, ref, url, token string) error {
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return fmt.Errorf("creating cache root %s: %w", root, err)
 	}
-	ac := authCmd(token, "clone", "--bare", "--depth", "1", url, dir)
+	ac := authCmd(authHeader, "clone", "--bare", "--depth", "1", url, dir)
 	if err := runAuth(ac); err != nil {
-		return fmt.Errorf("%s", redactToken(err.Error(), token))
+		return fmt.Errorf("%s", redactToken(err.Error(), authHeader))
 	}
 	return nil
 }
@@ -53,11 +53,11 @@ func Fetch(root, ref, commitOrTag string) error {
 }
 
 // FetchAuth fetches with optional auth token.
-func FetchAuth(root, ref, commitOrTag, token string) error {
+func FetchAuth(root, ref, commitOrTag, authHeader string) error {
 	dir := CacheDir(root, ref)
-	ac := authCmd(token, "-C", dir, "fetch", "--depth", "1", "origin", commitOrTag)
+	ac := authCmd(authHeader, "-C", dir, "fetch", "--depth", "1", "origin", commitOrTag)
 	if err := runAuth(ac); err != nil {
-		return fmt.Errorf("%s", redactToken(err.Error(), token))
+		return fmt.Errorf("%s", redactToken(err.Error(), authHeader))
 	}
 	return nil
 }
@@ -86,14 +86,14 @@ func ResolveRef(url, version string) (string, error) {
 }
 
 // ResolveRefAuth resolves with optional auth token.
-func ResolveRefAuth(url, version, token string) (string, error) {
+func ResolveRefAuth(url, version, authHeader string) (string, error) {
 	if version == "" {
 		version = "HEAD"
 	}
-	ac := authCmd(token, "ls-remote", url, version)
+	ac := authCmd(authHeader, "ls-remote", url, version)
 	out, err := outputAuth(ac)
 	if err != nil {
-		return "", fmt.Errorf("git ls-remote %s %s: %s", url, version, redactToken(err.Error(), token))
+		return "", fmt.Errorf("git ls-remote %s %s: %s", url, version, redactToken(err.Error(), authHeader))
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	for _, line := range lines {
@@ -105,7 +105,7 @@ func ResolveRefAuth(url, version, token string) (string, error) {
 	// If version is HEAD and ls-remote returned nothing useful, try refs/heads/main, master
 	if version == "HEAD" {
 		for _, branch := range []string{"refs/heads/main", "refs/heads/master"} {
-			fallbackAC := authCmd(token, "ls-remote", url, branch)
+			fallbackAC := authCmd(authHeader, "ls-remote", url, branch)
 			out, err = outputAuth(fallbackAC)
 			if err == nil {
 				parts := strings.Fields(strings.TrimSpace(out))
@@ -337,11 +337,13 @@ func RefBase(ref string) string {
 }
 
 // RefLabel extracts the fragment label from a ref (after #).
-// Returns empty string if no label.
+// Returns empty string if no label. Local paths return empty (# is part of path).
 func RefLabel(ref string) string {
+	if isLocalPath(ref) {
+		return ""
+	}
 	if i := strings.Index(ref, "#"); i != -1 {
 		rest := ref[i+1:]
-		// Strip version if present after label
 		if j := strings.LastIndex(rest, "@"); j != -1 {
 			return rest[:j]
 		}
@@ -351,10 +353,18 @@ func RefLabel(ref string) string {
 }
 
 // RefVersion extracts the version from a ref (after last @).
-// Returns empty string if no version. Skips SSH user@ prefix.
+// Returns empty string if no version. Skips SSH user@ prefix and local paths.
 func RefVersion(ref string) string {
+	if isLocalPath(ref) {
+		return ""
+	}
 	if i := strings.LastIndex(ref, "@"); i > 0 && !IsSSHUserAt(ref, i) {
 		return ref[i+1:]
 	}
 	return ""
+}
+
+// isLocalPath returns true if the ref looks like a local filesystem path.
+func isLocalPath(ref string) bool {
+	return strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "./") || strings.HasPrefix(ref, "../")
 }
