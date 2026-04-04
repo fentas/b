@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -158,10 +160,12 @@ func (f *fakeProvider) FetchRelease(ref, version string) (*provider.Release, err
 }
 
 func init() {
-	// Register fake provider for tests — uses "fake://" prefix so no collision
+	// Register fake provider for tests — uses "fake://" prefix so no collision.
+	// Asset name uses runtime OS/arch for platform-independent matching.
+	assetName := fmt.Sprintf("tool-%s-%s", runtime.GOOS, runtime.GOARCH)
 	provider.Register(&fakeProvider{
 		assets: []provider.Asset{
-			{Name: "tool-linux-amd64", URL: "https://example.com/tool-linux-amd64", Size: 1024},
+			{Name: assetName, URL: "https://example.com/" + assetName, Size: 1024},
 		},
 	})
 }
@@ -179,8 +183,9 @@ func TestResolveAmbiguousAssets_NonAmbiguous_SetsResolvedAsset(t *testing.T) {
 	if b.ResolvedAsset == nil {
 		t.Fatal("expected ResolvedAsset to be set for non-ambiguous match")
 	}
-	if b.ResolvedAsset.Name != "tool-linux-amd64" {
-		t.Errorf("ResolvedAsset.Name = %q, want tool-linux-amd64", b.ResolvedAsset.Name)
+	wantName := fmt.Sprintf("tool-%s-%s", runtime.GOOS, runtime.GOARCH)
+	if b.ResolvedAsset.Name != wantName {
+		t.Errorf("ResolvedAsset.Name = %q, want %q", b.ResolvedAsset.Name, wantName)
 	}
 }
 
