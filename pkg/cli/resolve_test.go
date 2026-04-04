@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/fentas/b/pkg/binary"
@@ -139,6 +140,76 @@ func TestFirstLine_GitErrorFormat(t *testing.T) {
 	got := firstLine("git ls-remote https://github.com/org/repo.git HEAD: exit status 128\nfatal: unable to access")
 	if got != "git ls-remote https://github.com/org/repo.git HEAD: exit status 128" {
 		t.Errorf("firstLine = %q", got)
+	}
+}
+
+// --- Core resolution path tests with fake provider ---
+
+// fakeProvider is a test provider that returns deterministic releases.
+type fakeProvider struct {
+	assets []provider.Asset
+}
+
+func (f *fakeProvider) Name() string                                       { return "fake" }
+func (f *fakeProvider) Match(ref string) bool                              { return strings.HasPrefix(ref, "fake://") }
+func (f *fakeProvider) LatestVersion(ref string) (string, error)           { return "v1.0.0", nil }
+func (f *fakeProvider) FetchRelease(ref, version string) (*provider.Release, error) {
+	return &provider.Release{Version: version, Assets: f.assets}, nil
+}
+
+func init() {
+	// Register fake provider for tests — uses "fake://" prefix so no collision
+	provider.Register(&fakeProvider{
+		assets: []provider.Asset{
+			{Name: "tool-linux-amd64", URL: "https://example.com/tool-linux-amd64", Size: 1024},
+		},
+	})
+}
+
+func TestResolveAmbiguousAssets_NonAmbiguous_SetsResolvedAsset(t *testing.T) {
+	b := &binary.Binary{
+		Name:        "tool",
+		AutoDetect:  true,
+		ProviderRef: "fake://org/tool",
+		Version:     "v1.0.0",
+	}
+	out := &streams.IO{Out: &discardWriter{}, ErrOut: &discardWriter{}}
+	resolveAmbiguousAssets([]*binary.Binary{b}, true, out)
+
+	if b.ResolvedAsset == nil {
+		t.Fatal("expected ResolvedAsset to be set for non-ambiguous match")
+	}
+	if b.ResolvedAsset.Name != "tool-linux-amd64" {
+		t.Errorf("ResolvedAsset.Name = %q, want tool-linux-amd64", b.ResolvedAsset.Name)
+	}
+}
+
+// fakeEmptyProvider returns a release with no assets.
+type fakeEmptyProvider struct{}
+
+func (f *fakeEmptyProvider) Name() string                                       { return "fakeempty" }
+func (f *fakeEmptyProvider) Match(ref string) bool                              { return strings.HasPrefix(ref, "fakeempty://") }
+func (f *fakeEmptyProvider) LatestVersion(ref string) (string, error)           { return "v1.0.0", nil }
+func (f *fakeEmptyProvider) FetchRelease(ref, version string) (*provider.Release, error) {
+	return &provider.Release{Version: version, Assets: []provider.Asset{}}, nil
+}
+
+func init() {
+	provider.Register(&fakeEmptyProvider{})
+}
+
+func TestResolveAmbiguousAssets_NoMatchingAssets_NilResolvedAsset(t *testing.T) {
+	b := &binary.Binary{
+		Name:        "tool",
+		AutoDetect:  true,
+		ProviderRef: "fakeempty://org/tool",
+		Version:     "v1.0.0",
+	}
+	out := &streams.IO{Out: &discardWriter{}, ErrOut: &discardWriter{}}
+	resolveAmbiguousAssets([]*binary.Binary{b}, true, out)
+
+	if b.ResolvedAsset != nil {
+		t.Errorf("expected nil ResolvedAsset when no assets match, got %q", b.ResolvedAsset.Name)
 	}
 }
 
