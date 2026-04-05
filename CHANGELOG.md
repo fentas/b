@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.11.0](https://github.com/fentas/b/compare/v4.10.0...v4.11.0) (2026-04-05)
+
+
+### Features
+
+* env files at project root + YAML/JSON select filtering ([#118](https://github.com/fentas/b/issues/118)) ([2abc672](https://github.com/fentas/b/commit/2abc672096dd17419991d63bbf5f01266bdecc55))
+
 ## [4.10.0](https://github.com/fentas/b/compare/v4.9.0...v4.10.0) (2026-04-04)
 
 
