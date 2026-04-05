@@ -99,7 +99,9 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		}
 	}
 
-	// Check if up-to-date (skip when forcing a specific commit)
+	// Check if up-to-date (skip when forcing a specific commit).
+	// NOTE: This skips when the commit hasn't changed. If only the local config
+	// changed (e.g. select filters), use --force to re-sync.
 	if cfg.ForceCommit == "" && lockEntry != nil && lockEntry.Commit == commit {
 		return &SyncResult{
 			Ref:     baseRef,
@@ -184,6 +186,14 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		content, err := gitcache.ShowFileDir(repoDir, commit, m.SourcePath)
 		if err != nil {
 			return nil, fmt.Errorf("reading %s from %s@%s: %w", m.SourcePath, cfg.Ref, safeShort(commit), err)
+		}
+
+		// Apply select filter for YAML/JSON files
+		if len(m.Select) > 0 {
+			content, err = filterContent(content, m.Select, m.SourcePath)
+			if err != nil {
+				return nil, fmt.Errorf("filtering %s: %w", m.SourcePath, err)
+			}
 		}
 
 		upstreamHash := fmt.Sprintf("%x", sha256.Sum256(content))

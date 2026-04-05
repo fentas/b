@@ -3,6 +3,7 @@ package state
 import (
 	"testing"
 
+	"github.com/fentas/b/pkg/envmatch"
 	"gopkg.in/yaml.v2"
 )
 
@@ -351,5 +352,83 @@ github.com/org/infra:
 	}
 	if e2.OnPreSync != "echo starting" {
 		t.Errorf("roundtrip OnPreSync = %q", e2.OnPreSync)
+	}
+}
+
+// --- Select field parsing ---
+
+func TestParseFilesMap_WithSelect(t *testing.T) {
+	yamlData := `
+github.com/org/repo:
+  files:
+    .bin/b.yaml:
+      select:
+        - .binaries
+        - .envs
+    manifests/**:
+`
+	var list EnvList
+	if err := yaml.Unmarshal([]byte(yamlData), &list); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	if len(list) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(list))
+	}
+
+	files := list[0].Files
+	gc, ok := files[".bin/b.yaml"]
+	if !ok {
+		t.Fatal("expected .bin/b.yaml in files")
+	}
+	if len(gc.Select) != 2 {
+		t.Fatalf("expected 2 selectors, got %d", len(gc.Select))
+	}
+	if gc.Select[0] != ".binaries" || gc.Select[1] != ".envs" {
+		t.Errorf("Select = %v", gc.Select)
+	}
+
+	// manifests/** should have no select
+	gc2, ok := files["manifests/**"]
+	if !ok {
+		t.Fatal("expected manifests/** in files")
+	}
+	if len(gc2.Select) != 0 {
+		t.Errorf("manifests should have no select, got %v", gc2.Select)
+	}
+}
+
+func TestMarshalYAML_WithSelect(t *testing.T) {
+	list := EnvList{
+		{
+			Key: "github.com/org/repo",
+			Files: map[string]envmatch.GlobConfig{
+				".bin/b.yaml":  {Select: []string{".binaries"}},
+				"manifests/**": {},
+			},
+		},
+	}
+
+	data, err := yaml.Marshal(&list)
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	// Unmarshal back and verify
+	var list2 EnvList
+	if err := yaml.Unmarshal(data, &list2); err != nil {
+		t.Fatalf("Unmarshal error: %v", err)
+	}
+
+	files := list2[0].Files
+	gc := files[".bin/b.yaml"]
+	if len(gc.Select) != 1 || gc.Select[0] != ".binaries" {
+		t.Errorf("roundtrip Select = %v", gc.Select)
+	}
+
+	// manifests/** should be bare key (nil → no select)
+	gc2 := files["manifests/**"]
+	if len(gc2.Select) != 0 {
+		t.Errorf("bare key should have no select after roundtrip, got %v", gc2.Select)
 	}
 }

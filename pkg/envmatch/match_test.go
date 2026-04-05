@@ -166,3 +166,29 @@ func TestIsIgnored(t *testing.T) {
 		}
 	}
 }
+
+func TestMatchGlobs_PropagatesSelect(t *testing.T) {
+	tree := []string{"config.yaml", "data.json", "readme.md"}
+	globs := map[string]GlobConfig{
+		"config.yaml": {Select: []string{".database", ".logging"}},
+		"data.json":   {},
+	}
+
+	matched := MatchGlobs(tree, globs, nil)
+
+	for _, m := range matched {
+		if m.SourcePath == "config.yaml" {
+			if len(m.Select) != 2 {
+				t.Errorf("config.yaml Select = %v, want 2 selectors", m.Select)
+			}
+			if m.Select[0] != ".database" || m.Select[1] != ".logging" {
+				t.Errorf("config.yaml Select = %v", m.Select)
+			}
+		}
+		if m.SourcePath == "data.json" {
+			if len(m.Select) != 0 {
+				t.Errorf("data.json should have no select, got %v", m.Select)
+			}
+		}
+	}
+}

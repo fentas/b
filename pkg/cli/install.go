@@ -446,7 +446,7 @@ func parseSCPArg(arg string, remaining []string) (envInstall, int, bool) {
 // runEnvInstalls handles SCP-style and config-ref env installs.
 func (o *InstallOptions) runEnvInstalls() error {
 	lockDir := o.LockDir()
-	projectRoot := lockDir // dest paths are relative to where b.yaml lives
+	projectRoot := o.ProjectRoot()
 	lk, err := lock.ReadLock(lockDir)
 	if err != nil {
 		return err
@@ -516,7 +516,7 @@ func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 	}
 
 	lockDir := o.LockDir()
-	projectRoot := lockDir
+	projectRoot := o.ProjectRoot()
 	lk, err := lock.ReadLock(lockDir)
 	if err != nil {
 		return err

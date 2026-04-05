@@ -221,7 +221,7 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 	o.checkEnvConflicts(refs, o.Group)
 
 	lockDir := o.LockDir()
-	projectRoot := lockDir
+	projectRoot := o.ProjectRoot()
 	lk, err := lock.ReadLock(lockDir)
 	if err != nil {
 		return err
