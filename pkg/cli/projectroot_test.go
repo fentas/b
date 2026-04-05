@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/fentas/goodies/streams"
@@ -42,7 +43,10 @@ func TestProjectRoot_FallsBackToCWD(t *testing.T) {
 	shared := NewSharedOptions(io, nil)
 
 	got := shared.ProjectRoot()
-	if got != tempDir {
+	// Resolve symlinks for comparison (macOS /var → /private/var)
+	wantDir, _ := filepath.EvalSymlinks(tempDir)
+	gotResolved, _ := filepath.EvalSymlinks(got)
+	if gotResolved != wantDir {
 		t.Errorf("ProjectRoot() = %q, want %q (CWD fallback)", got, tempDir)
 	}
 }
