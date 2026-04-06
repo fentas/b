@@ -90,7 +90,7 @@ func filterYAML(content []byte, selectors []string) ([]byte, error) {
 		if key == "" {
 			continue
 		}
-		if strings.ContainsAny(key, "#|@[]\\") {
+		if strings.ContainsAny(key, "[]\\") {
 			return nil, fmt.Errorf("YAML select only supports simple dot-paths, got %q", sel)
 		}
 		// Validate no empty segments (e.g. "a..b")
@@ -292,10 +292,6 @@ func filterJSON(content []byte, selectors []string) ([]byte, error) {
 		key := strings.TrimPrefix(sel, ".")
 		if key == "" {
 			continue
-		}
-		// Reject gjson operators that can't be round-tripped via sjson
-		if strings.ContainsAny(key, "#|@") {
-			return nil, fmt.Errorf("JSON select only supports simple dot-paths, got %q", sel)
 		}
 
 		val := gjson.GetBytes(content, key)
