@@ -90,13 +90,19 @@ func filterYAML(content []byte, selectors []string) ([]byte, error) {
 		if key == "" {
 			continue
 		}
-		if strings.ContainsAny(key, "#|@[]") {
+		if strings.ContainsAny(key, "#|@[]\\") {
 			return nil, fmt.Errorf("YAML select only supports simple dot-paths, got %q", sel)
 		}
-		if !strings.Contains(key, ".") {
+		// Validate no empty segments (e.g. "a..b")
+		parts := strings.Split(key, ".")
+		for _, part := range parts {
+			if part == "" {
+				return nil, fmt.Errorf("YAML select only supports simple dot-paths, got %q", sel)
+			}
+		}
+		if len(parts) == 1 {
 			topLevelKeys[key] = true
 		} else {
-			parts := strings.Split(key, ".")
 			topKey := parts[0]
 			nestedByTop[topKey] = append(nestedByTop[topKey], key)
 		}

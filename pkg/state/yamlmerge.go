@@ -78,7 +78,7 @@ func mergeMappings(dst, src *yaml.Node) {
 				// If both are mappings, recurse
 				if dstVal.Kind == yaml.MappingNode && srcVal.Kind == yaml.MappingNode {
 					mergeMappings(dstVal, srcVal)
-				} else if dstVal.Kind != srcVal.Kind || dstVal.Value != srcVal.Value || dstVal.Tag != srcVal.Tag {
+				} else if !nodesEqual(dstVal, srcVal) {
 					// Only replace if value actually changed — preserves formatting/style
 					keyHead := dstKey.HeadComment
 					keyLine := dstKey.LineComment
@@ -128,4 +128,20 @@ func mergeMappings(dst, src *yaml.Node) {
 		}
 	}
 	dst.Content = newContent
+}
+
+// nodesEqual compares two YAML nodes for semantic equality.
+func nodesEqual(a, b *yaml.Node) bool {
+	if a.Kind != b.Kind || a.Tag != b.Tag || a.Value != b.Value {
+		return false
+	}
+	if len(a.Content) != len(b.Content) {
+		return false
+	}
+	for i := range a.Content {
+		if !nodesEqual(a.Content[i], b.Content[i]) {
+			return false
+		}
+	}
+	return true
 }
