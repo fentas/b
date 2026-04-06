@@ -65,8 +65,13 @@ func filterYAML(content []byte, selectors []string) ([]byte, error) {
 	}
 	if needsJSON {
 		var data interface{}
-		if err := root.Decode(&data); err == nil {
-			jsonCache, _ = json.Marshal(data)
+		if err := root.Decode(&data); err != nil {
+			return nil, fmt.Errorf("decoding YAML for nested select: %w", err)
+		}
+		var jsonErr error
+		jsonCache, jsonErr = json.Marshal(data)
+		if jsonErr != nil {
+			return nil, fmt.Errorf("encoding YAML as JSON for nested select: %w", jsonErr)
 		}
 	}
 
@@ -97,7 +102,11 @@ func filterYAML(content []byte, selectors []string) ([]byte, error) {
 			continue
 		}
 
-		// Nested key — use gjson with cached JSON, then build YAML nodes
+		// Nested key — only simple dot-paths are supported for YAML
+		// (no gjson array/query selectors like items.#.name)
+		if strings.ContainsAny(key, "#|@[]") {
+			return nil, fmt.Errorf("YAML select only supports simple dot-paths, got %q", sel)
+		}
 		if jsonCache != nil {
 			val := gjson.GetBytes(jsonCache, key)
 			if !val.Exists() {
@@ -128,17 +137,22 @@ func filterYAML(content []byte, selectors []string) ([]byte, error) {
 	return out, nil
 }
 
-// deduplicateSelectors removes selectors that are children of other selectors.
+// deduplicateSelectors removes exact duplicates and selectors covered by a parent.
 // e.g. if ".a" and ".a.b" are both present, only ".a" is kept.
 func deduplicateSelectors(selectors []string) []string {
+	seen := make(map[string]bool)
 	var result []string
 	for _, sel := range selectors {
+		if seen[sel] {
+			continue // exact duplicate
+		}
+		seen[sel] = true
+
 		covered := false
 		for _, other := range selectors {
 			if other == sel {
 				continue
 			}
-			// Check if sel is a child of other
 			otherKey := strings.TrimPrefix(other, ".")
 			selKey := strings.TrimPrefix(sel, ".")
 			if strings.HasPrefix(selKey, otherKey+".") {

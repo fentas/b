@@ -67,11 +67,8 @@ func SaveConfig(config *State, configPath string) error {
 }
 
 // saveConfigClean does a plain marshal+write without preserving comments.
+// Assumes parent directory already exists (caller ensures this).
 func saveConfigClean(config *State, configPath string) error {
-	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		return err

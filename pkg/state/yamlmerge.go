@@ -79,12 +79,26 @@ func mergeMappings(dst, src *yaml.Node) {
 				if dstVal.Kind == yaml.MappingNode && srcVal.Kind == yaml.MappingNode {
 					mergeMappings(dstVal, srcVal)
 				} else {
-					// Replace value but preserve the key's comments
-					keyComment := dstKey.HeadComment
-					keyLineComment := dstKey.LineComment
+					// Replace value but preserve comments on both key and value
+					keyHead := dstKey.HeadComment
+					keyLine := dstKey.LineComment
+					keyFoot := dstKey.FootComment
+					valHead := dstVal.HeadComment
+					valLine := dstVal.LineComment
+					valFoot := dstVal.FootComment
 					*dstVal = *srcVal
-					dstKey.HeadComment = keyComment
-					dstKey.LineComment = keyLineComment
+					dstKey.HeadComment = keyHead
+					dstKey.LineComment = keyLine
+					dstKey.FootComment = keyFoot
+					if valHead != "" {
+						dstVal.HeadComment = valHead
+					}
+					if valLine != "" {
+						dstVal.LineComment = valLine
+					}
+					if valFoot != "" {
+						dstVal.FootComment = valFoot
+					}
 				}
 				break
 			}
