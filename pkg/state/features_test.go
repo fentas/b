@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/fentas/b/pkg/envmatch"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // --- Feature 4: EnvList.Remove ---

@@ -33,8 +33,7 @@ type EnvEntry struct {
 type EnvList []*EnvEntry
 
 func (list *EnvList) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	// yaml.v2 gives map[interface{}]interface{} for nested maps,
-	// so we parse as a typed map first and convert to a slice.
+	// Parse as a typed map and convert to a slice.
 	var raw map[string]*envEntryRaw
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -167,7 +166,7 @@ func parseFilesMap(raw map[string]interface{}) map[string]envmatch.GlobConfig {
 			result[glob] = envmatch.GlobConfig{}
 		case string:
 			result[glob] = envmatch.GlobConfig{Dest: val}
-		case map[interface{}]interface{}:
+		case map[string]interface{}:
 			gc := envmatch.GlobConfig{}
 			if d, ok := val["dest"]; ok {
 				gc.Dest = fmt.Sprintf("%v", d)

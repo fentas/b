@@ -21,7 +21,7 @@ import (
 	"github.com/fentas/b/pkg/provider"
 	"github.com/fentas/b/pkg/state"
 
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // envInstall holds a parsed SCP-style env install request.
