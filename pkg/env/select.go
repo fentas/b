@@ -281,6 +281,7 @@ func mergeYAMLMappings(dst, src *yaml.Node) {
 }
 
 // filterJSON extracts selected keys from JSON content using gjson/sjson.
+// Only supports simple dot-paths and array indices that sjson can set back.
 func filterJSON(content []byte, selectors []string) ([]byte, error) {
 	if !gjson.ValidBytes(content) {
 		return nil, fmt.Errorf("parsing JSON for select: invalid JSON")
@@ -291,6 +292,10 @@ func filterJSON(content []byte, selectors []string) ([]byte, error) {
 		key := strings.TrimPrefix(sel, ".")
 		if key == "" {
 			continue
+		}
+		// Reject gjson operators that can't be round-tripped via sjson
+		if strings.ContainsAny(key, "#|@") {
+			return nil, fmt.Errorf("JSON select only supports simple dot-paths, got %q", sel)
 		}
 
 		val := gjson.GetBytes(content, key)
