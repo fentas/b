@@ -97,7 +97,11 @@ files:
 
 Selectors use dot-path notation (e.g. `.binaries`, `.database.host`). Only the selected keys are written to the destination file. This is useful when an upstream file contains sections you don't want (like profiles or env definitions).
 
+For YAML files, selecting whole top-level keys preserves their comments, ordering, and formatting faithfully. Nested dot-path selections (e.g. `.database.host`) are reconstructed and may not preserve comments or exact formatting for those nested paths. JSON files use [gjson](https://github.com/tidwall/gjson) paths for extraction.
+
 Supported file extensions: `.yaml`, `.yml`, `.json`.
+
+> **Note**: When `b` writes to your `b.yaml` (e.g. `b install --add`, `b env add`), existing comments and formatting are preserved.
 
 ### Glob patterns
 

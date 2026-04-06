@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 func TestEnvConfigUnmarshal(t *testing.T) {
@@ -495,9 +495,9 @@ github.com/org/bare:
 
 func TestParseFilesMap_AllForms(t *testing.T) {
 	raw := map[string]interface{}{
-		"dir/**": nil,                                             // null
-		"file/*": "output/",                                       // string
-		"cfg/**": map[interface{}]interface{}{"dest": "configs/"}, // map with dest
+		"dir/**": nil,                                        // null
+		"file/*": "output/",                                  // string
+		"cfg/**": map[string]interface{}{"dest": "configs/"}, // map with dest
 	}
 
 	result := parseFilesMap(raw)
@@ -524,7 +524,7 @@ func TestParseFilesMap_Nil(t *testing.T) {
 
 func TestParseFilesMap_WithIgnore(t *testing.T) {
 	raw := map[string]interface{}{
-		"src/**": map[interface{}]interface{}{
+		"src/**": map[string]interface{}{
 			"dest":   "out/",
 			"ignore": []interface{}{"*.bak", "*.tmp"},
 		},

@@ -6,7 +6,7 @@ import (
 
 	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/path"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // LoadConfigFromPath loads configuration from a specific path
@@ -50,19 +50,29 @@ func LoadConfig() (*State, error) {
 	return LoadConfigFromPath(configPath)
 }
 
-// SaveConfig saves the configuration to the specified path
+// SaveConfig saves the configuration to the specified path.
+// If the file already exists, preserves comments and formatting.
 func SaveConfig(config *State, configPath string) error {
-	// Ensure directory exists
 	dir := filepath.Dir(configPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
+	// Try comment-preserving save if file exists
+	if _, err := os.Stat(configPath); err == nil {
+		return SaveConfigPreserving(config, configPath)
+	}
+
+	return saveConfigClean(config, configPath)
+}
+
+// saveConfigClean does a plain marshal+write without preserving comments.
+// Assumes parent directory already exists (caller ensures this).
+func saveConfigClean(config *State, configPath string) error {
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		return err
 	}
-
 	return os.WriteFile(configPath, data, 0644)
 }
 
