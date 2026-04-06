@@ -51,10 +51,8 @@ func LoadConfig() (*State, error) {
 }
 
 // SaveConfig saves the configuration to the specified path.
-// If the file already exists, preserves comments and formatting
-// from the existing file using yaml.v3 Node API.
+// If the file already exists, preserves comments and formatting.
 func SaveConfig(config *State, configPath string) error {
-	// Ensure directory exists
 	dir := filepath.Dir(configPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
@@ -65,12 +63,19 @@ func SaveConfig(config *State, configPath string) error {
 		return SaveConfigPreserving(config, configPath)
 	}
 
-	// New file — clean marshal
+	return saveConfigClean(config, configPath)
+}
+
+// saveConfigClean does a plain marshal+write without preserving comments.
+func saveConfigClean(config *State, configPath string) error {
+	dir := filepath.Dir(configPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
 	data, err := yaml.Marshal(config)
 	if err != nil {
 		return err
 	}
-
 	return os.WriteFile(configPath, data, 0644)
 }
 

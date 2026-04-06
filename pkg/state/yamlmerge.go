@@ -7,28 +7,26 @@ import (
 )
 
 // SaveConfigPreserving saves the configuration while preserving comments
-// and formatting from the existing file. If the file doesn't exist,
-// falls back to a clean marshal.
+// and formatting from the existing file. Falls back to clean marshal
+// on any read/parse error (without re-entering SaveConfig).
 func SaveConfigPreserving(config *State, configPath string) error {
 	existing, err := os.ReadFile(configPath)
 	if err != nil {
-		// File doesn't exist — do a clean write
-		return SaveConfig(config, configPath)
+		return saveConfigClean(config, configPath)
 	}
 
 	// Parse existing file as Node tree
 	var doc yaml.Node
 	if err := yaml.Unmarshal(existing, &doc); err != nil {
-		// Can't parse existing — overwrite
-		return SaveConfig(config, configPath)
+		return saveConfigClean(config, configPath)
 	}
 
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
-		return SaveConfig(config, configPath)
+		return saveConfigClean(config, configPath)
 	}
 	root := doc.Content[0]
 	if root.Kind != yaml.MappingNode {
-		return SaveConfig(config, configPath)
+		return saveConfigClean(config, configPath)
 	}
 
 	// Marshal the new config to get the updated data
@@ -56,10 +54,10 @@ func SaveConfigPreserving(config *State, configPath string) error {
 	return os.WriteFile(configPath, out, 0644)
 }
 
-// mergeMappings merges src mapping into dst mapping.
-// Existing keys in dst are updated with values from src.
-// New keys in src are appended to dst.
-// Comments on existing keys in dst are preserved.
+// mergeMappings synchronizes dst to match src for mapping nodes.
+// Existing keys in dst are updated with values from src, new keys are appended.
+// Keys in dst not present in src are removed. Nested mappings are merged recursively.
+// Comments on retained existing keys are preserved.
 func mergeMappings(dst, src *yaml.Node) {
 	if dst.Kind != yaml.MappingNode || src.Kind != yaml.MappingNode {
 		return
