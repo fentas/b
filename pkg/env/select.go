@@ -32,9 +32,9 @@ func filterContent(content []byte, selectors []string, filePath string) ([]byte,
 }
 
 // filterYAML extracts selected keys from YAML content using yaml.v3 Node API.
-// Preserves comments, key ordering, and block/flow style of selected sections.
-// For top-level keys, extracts directly from AST. For nested keys, uses gjson
-// with a cached JSON conversion.
+// For whole top-level keys, extracts directly from the AST — preserving comments,
+// key ordering, and block/flow style. Nested dot-path selectors use gjson with a
+// cached JSON conversion and may not preserve YAML comments or exact formatting.
 func filterYAML(content []byte, selectors []string) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(content, &doc); err != nil {
@@ -116,7 +116,7 @@ func filterYAML(content []byte, selectors []string) ([]byte, error) {
 			// Build nested YAML structure
 			parts := strings.Split(key, ".")
 			if err := addNestedToResult(result, parts, val.Raw, added); err != nil {
-				continue
+				return nil, fmt.Errorf("adding nested YAML selection %q: %w", sel, err)
 			}
 		}
 	}
@@ -204,12 +204,11 @@ func addNestedToResult(result *yaml.Node, parts []string, jsonRaw string, added 
 		current = wrapper
 	}
 
-	// If top-level key already exists in result, merge into it
+	// If top-level key already exists in result, merge recursively
 	if added[topKey] {
 		if _, existing := findMappingKey(result, topKey); existing != nil {
 			if existing.Kind == yaml.MappingNode && current.Kind == yaml.MappingNode {
-				// Append the new key-value pairs to the existing mapping
-				existing.Content = append(existing.Content, current.Content...)
+				mergeYAMLMappings(existing, current)
 				return nil
 			}
 		}
@@ -222,6 +221,31 @@ func addNestedToResult(result *yaml.Node, parts []string, jsonRaw string, added 
 	)
 	added[topKey] = true
 	return nil
+}
+
+// mergeYAMLMappings merges src into dst by key, recursing into nested mappings.
+func mergeYAMLMappings(dst, src *yaml.Node) {
+	if dst.Kind != yaml.MappingNode || src.Kind != yaml.MappingNode {
+		return
+	}
+	for i := 0; i < len(src.Content)-1; i += 2 {
+		srcKey := src.Content[i]
+		srcVal := src.Content[i+1]
+
+		found := false
+		for j := 0; j < len(dst.Content)-1; j += 2 {
+			if dst.Content[j].Value == srcKey.Value {
+				found = true
+				if dst.Content[j+1].Kind == yaml.MappingNode && srcVal.Kind == yaml.MappingNode {
+					mergeYAMLMappings(dst.Content[j+1], srcVal)
+				}
+				break
+			}
+		}
+		if !found {
+			dst.Content = append(dst.Content, srcKey, srcVal)
+		}
+	}
 }
 
 // filterJSON extracts selected keys from JSON content using gjson/sjson.
