@@ -137,19 +137,25 @@ func filterYAML(content []byte, selectors []string) ([]byte, error) {
 	return out, nil
 }
 
-// deduplicateSelectors removes exact duplicates and selectors covered by a parent.
-// e.g. if ".a" and ".a.b" are both present, only ".a" is kept.
+// deduplicateSelectors normalizes, removes exact duplicates, and removes selectors
+// covered by a parent. e.g. if ".a" and ".a.b" are both present, only ".a" is kept.
 func deduplicateSelectors(selectors []string) []string {
+	// Normalize: ensure all selectors have leading dot stripped consistently
+	normalized := make([]string, len(selectors))
+	for i, sel := range selectors {
+		normalized[i] = "." + strings.TrimPrefix(sel, ".")
+	}
+
 	seen := make(map[string]bool)
 	var result []string
-	for _, sel := range selectors {
+	for _, sel := range normalized {
 		if seen[sel] {
-			continue // exact duplicate
+			continue
 		}
 		seen[sel] = true
 
 		covered := false
-		for _, other := range selectors {
+		for _, other := range normalized {
 			if other == sel {
 				continue
 			}
@@ -199,7 +205,7 @@ func addNestedToResult(result *yaml.Node, parts []string, jsonRaw string, added 
 	current := &valueNode
 	for i := len(parts) - 1; i >= 1; i-- {
 		wrapper := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: parts[i]}
+		keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: parts[i]}
 		wrapper.Content = append(wrapper.Content, keyNode, current)
 		current = wrapper
 	}
@@ -216,7 +222,7 @@ func addNestedToResult(result *yaml.Node, parts []string, jsonRaw string, added 
 	}
 
 	result.Content = append(result.Content,
-		&yaml.Node{Kind: yaml.ScalarNode, Value: topKey},
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: topKey},
 		current,
 	)
 	added[topKey] = true
