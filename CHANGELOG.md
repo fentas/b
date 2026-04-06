@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.12.0](https://github.com/fentas/b/compare/v4.11.0...v4.12.0) (2026-04-06)
+
+
+### Features
+
+* yaml.v3 migration, gjson/sjson select, comment-preserving saves ([#120](https://github.com/fentas/b/issues/120)) ([4233752](https://github.com/fentas/b/commit/4233752f397f12724d09dc258f4b7320a0d93b7e))
+
 ## [4.11.0](https://github.com/fentas/b/compare/v4.10.0...v4.11.0) (2026-04-05)
 
 
