@@ -72,6 +72,23 @@ func TestFilterYAML_NestedKey(t *testing.T) {
 	}
 }
 
+func TestFilterYAML_MultipleNestedSameParent(t *testing.T) {
+	content := []byte("database:\n  host: localhost\n  port: 5432\n  name: mydb\n")
+	out, err := filterContent(content, []string{".database.host", ".database.port"}, "config.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "host") {
+		t.Error("should contain host")
+	}
+	if !strings.Contains(string(out), "port") {
+		t.Error("should contain port")
+	}
+	if strings.Contains(string(out), "name") {
+		t.Error("should NOT contain name")
+	}
+}
+
 func TestFilterYAML_MissingKey(t *testing.T) {
 	content := []byte("a: 1\n")
 	out, err := filterContent(content, []string{".nonexistent"}, "test.yaml")

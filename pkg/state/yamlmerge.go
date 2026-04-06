@@ -40,7 +40,7 @@ func SaveConfigPreserving(config *State, configPath string) error {
 		return err
 	}
 	if newDoc.Kind != yaml.DocumentNode || len(newDoc.Content) == 0 {
-		return SaveConfig(config, configPath)
+		return saveConfigClean(config, configPath)
 	}
 	newRoot := newDoc.Content[0]
 

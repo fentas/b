@@ -85,17 +85,11 @@ func filterYAML(content []byte, selectors []string) ([]byte, error) {
 			continue
 		}
 
-		topKey := key
-		if i := strings.Index(topKey, "."); i >= 0 {
-			topKey = topKey[:i]
-		}
-
-		if added[topKey] {
-			continue // already added this top-level key
-		}
-
 		// Simple top-level key — extract directly from AST (preserves comments)
 		if !strings.Contains(key, ".") {
+			if added[key] {
+				continue
+			}
 			if keyNode, valNode := findMappingKey(root, key); keyNode != nil {
 				result.Content = append(result.Content, keyNode, valNode)
 				added[key] = true
@@ -170,17 +164,15 @@ func findMappingKey(mapping *yaml.Node, key string) (*yaml.Node, *yaml.Node) {
 }
 
 // addNestedToResult adds a nested path value to the result mapping.
+// If the top-level key already exists, merges the nested value into it.
 func addNestedToResult(result *yaml.Node, parts []string, jsonRaw string, added map[string]bool) error {
 	if len(parts) == 0 {
 		return nil
 	}
 
 	topKey := parts[0]
-	if added[topKey] {
-		return nil // already have this top-level key
-	}
 
-	// For nested paths, create the full nested structure
+	// Parse the value
 	var valueNode yaml.Node
 	if err := yaml.Unmarshal([]byte(jsonRaw), &valueNode); err != nil {
 		return err
@@ -189,13 +181,25 @@ func addNestedToResult(result *yaml.Node, parts []string, jsonRaw string, added 
 		valueNode = *valueNode.Content[0]
 	}
 
-	// Build from deepest to shallowest
+	// Build nested structure from deepest to shallowest
 	current := &valueNode
 	for i := len(parts) - 1; i >= 1; i-- {
 		wrapper := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		keyNode := &yaml.Node{Kind: yaml.ScalarNode, Value: parts[i]}
 		wrapper.Content = append(wrapper.Content, keyNode, current)
 		current = wrapper
+	}
+
+	// If top-level key already exists in result, merge into it
+	if added[topKey] {
+		if _, existing := findMappingKey(result, topKey); existing != nil {
+			if existing.Kind == yaml.MappingNode && current.Kind == yaml.MappingNode {
+				// Append the new key-value pairs to the existing mapping
+				existing.Content = append(existing.Content, current.Content...)
+				return nil
+			}
+		}
+		return nil // can't merge non-mappings
 	}
 
 	result.Content = append(result.Content,
