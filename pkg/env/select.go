@@ -116,8 +116,13 @@ func filterYAML(content []byte, selectors []string) ([]byte, error) {
 		}
 	}
 
-	// Process nested selectors (these may not appear in source order for nested paths)
-	for topKey, paths := range nestedByTop {
+	// Process nested selectors in source key order for deterministic output
+	for i := 0; i < len(root.Content)-1; i += 2 {
+		topKey := root.Content[i].Value
+		paths, ok := nestedByTop[topKey]
+		if !ok {
+			continue
+		}
 		if added[topKey] {
 			continue // whole key already selected
 		}
