@@ -81,42 +81,57 @@ func filterYAML(content []byte, selectors []string) ([]byte, error) {
 		Tag:  "!!map",
 	}
 
-	// Track which top-level keys are already in result to avoid duplicates
-	added := make(map[string]bool)
+	// Build set of wanted keys and categorize selectors
+	topLevelKeys := make(map[string]bool)    // simple top-level selections
+	nestedByTop := make(map[string][]string) // top-level key → nested selectors
 
 	for _, sel := range selectors {
 		key := strings.TrimPrefix(sel, ".")
 		if key == "" {
 			continue
 		}
-
-		// Simple top-level key — extract directly from AST (preserves comments)
-		if !strings.Contains(key, ".") {
-			if added[key] {
-				continue
-			}
-			if keyNode, valNode := findMappingKey(root, key); keyNode != nil {
-				result.Content = append(result.Content, keyNode, valNode)
-				added[key] = true
-			}
-			continue
-		}
-
-		// Nested key — only simple dot-paths are supported for YAML
-		// (no gjson array/query selectors like items.#.name)
 		if strings.ContainsAny(key, "#|@[]") {
 			return nil, fmt.Errorf("YAML select only supports simple dot-paths, got %q", sel)
 		}
-		if jsonCache != nil {
-			val := gjson.GetBytes(jsonCache, key)
+		if !strings.Contains(key, ".") {
+			topLevelKeys[key] = true
+		} else {
+			parts := strings.Split(key, ".")
+			topKey := parts[0]
+			nestedByTop[topKey] = append(nestedByTop[topKey], key)
+		}
+	}
+
+	added := make(map[string]bool)
+
+	// Iterate root in source order — preserves key ordering
+	for i := 0; i < len(root.Content)-1; i += 2 {
+		keyNode := root.Content[i]
+		valNode := root.Content[i+1]
+		k := keyNode.Value
+
+		if topLevelKeys[k] {
+			result.Content = append(result.Content, keyNode, valNode)
+			added[k] = true
+		}
+	}
+
+	// Process nested selectors (these may not appear in source order for nested paths)
+	for topKey, paths := range nestedByTop {
+		if added[topKey] {
+			continue // whole key already selected
+		}
+		for _, path := range paths {
+			if jsonCache == nil {
+				continue
+			}
+			val := gjson.GetBytes(jsonCache, path)
 			if !val.Exists() {
 				continue
 			}
-
-			// Build nested YAML structure
-			parts := strings.Split(key, ".")
+			parts := strings.Split(path, ".")
 			if err := addNestedToResult(result, parts, val.Raw, added); err != nil {
-				return nil, fmt.Errorf("adding nested YAML selection %q: %w", sel, err)
+				return nil, fmt.Errorf("adding nested YAML selection %q: %w", path, err)
 			}
 		}
 	}
