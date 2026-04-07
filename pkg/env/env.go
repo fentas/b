@@ -549,7 +549,33 @@ func doMerge(
 		}
 	}
 
-	return gitcache.Merge3Way(local, base, upstream)
+	return mergeWithStructuralFallback(local, base, upstream, destPath)
+}
+
+// mergeWithStructuralFallback runs the text 3-way merge first and only
+// falls back to the structural map-walking merge when the text merge
+// reports conflicts. This keeps clean merges byte-for-byte (preserving
+// local key order, comments, and whitespace) while still resolving
+// the "both sides added adjacent map entries" case that git merge-file
+// mistakes for a conflict. If the structural merge also fails to
+// resolve cleanly, the text merge's conflicted output is returned so
+// the user gets the familiar git-marker form they can resolve
+// manually.
+//
+// Pulled out of doMerge so it's directly testable without a real
+// git repo or filesystem fixture.
+func mergeWithStructuralFallback(local, base, upstream []byte, destPath string) ([]byte, bool, error) {
+	merged, hasConflict, mergeErr := gitcache.Merge3Way(local, base, upstream)
+	if mergeErr != nil {
+		return nil, false, mergeErr
+	}
+	if !hasConflict {
+		return merged, false, nil
+	}
+	if structMerged, structConflict, structErr := Merge3WayStructural(local, base, upstream, destPath); structErr == nil && !structConflict {
+		return structMerged, false, nil
+	}
+	return merged, hasConflict, nil
 }
 
 // writeFile ensures the dest directory exists and writes content with the given mode.
