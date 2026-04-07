@@ -188,12 +188,111 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			return nil, fmt.Errorf("reading %s from %s@%s: %w", m.SourcePath, cfg.Ref, safeShort(commit), err)
 		}
 
-		// Apply select filter for YAML/JSON files
+		// Build a reusable filter closure for this file's select spec. The
+		// closure is applied to upstream here, and passed to doMerge below so
+		// base and local get filtered symmetrically. When no select is set,
+		// the closure is nil and doMerge skips filtering.
+		var filterFn func([]byte) ([]byte, error)
+		// allTopLevelSelectors decides whether the splice path is
+		// safe. The splice operates at top-level key granularity, so
+		// a nested selector like `database.host` would, when spliced,
+		// replace the entire `database` top-level node with the
+		// truncated `{host: ...}` view and silently drop siblings
+		// like `database.port`.
+		//
+		// When all selectors are top-level, splice is correct and we
+		// use it. When any selector is nested, splice is unsafe — for
+		// `merge` we error out (the merge result is unrecoverable
+		// without the splice), and for `replace` we fall back to the
+		// pre-#126 behavior of writing the filtered content directly
+		// (legacy `select` semantics: extract a subset, overwrite the
+		// destination — out-of-scope content is intentionally
+		// dropped because the user opted into it via `select`).
+		allTopLevelSelectors := true
 		if len(m.Select) > 0 {
-			content, err = filterContent(content, m.Select, m.SourcePath)
+			for _, sel := range m.Select {
+				key := strings.TrimPrefix(sel, ".")
+				if strings.Contains(key, ".") {
+					allTopLevelSelectors = false
+					break
+				}
+			}
+			if !allTopLevelSelectors && strategy == StrategyMerge {
+				// Tailor the suggestion to the file type. JSON files
+				// can't recover from this with a top-level selector
+				// either, because spliceSelectedScope rejects scoped
+				// JSON entirely (the splice is YAML-only). For JSON,
+				// the only path forward is to drop the select filter
+				// or move the data to YAML.
+				ext := strings.ToLower(filepath.Ext(m.SourcePath))
+				suggestion := "use a top-level selector or strategy: replace"
+				if ext == ".json" {
+					suggestion = "JSON splicing is not implemented, drop the select filter or move the data to YAML"
+				}
+				return nil, fmt.Errorf(
+					"nested selector on %s is not supported with strategy: merge — %s",
+					m.SourcePath, suggestion)
+			}
+			sel := m.Select
+			src := m.SourcePath
+			filterFn = func(raw []byte) ([]byte, error) {
+				return filterContent(raw, sel, src)
+			}
+		}
+
+		// Apply select filter to upstream content. After this point,
+		// `content` is the *filtered* upstream view — i.e. only the
+		// selected scope. Writing it directly to a destination that
+		// holds a full file would wipe out-of-scope content; the
+		// strategy branches below handle that by splicing.
+		if filterFn != nil {
+			content, err = filterFn(content)
 			if err != nil {
 				return nil, fmt.Errorf("filtering %s: %w", m.SourcePath, err)
 			}
+		}
+
+		// computeTargetBytes returns the exact bytes that should land on
+		// disk for this file under a non-merge strategy. When there is no
+		// select filter, that's just the (filtered or full) upstream
+		// content. When a select is in play, we splice the filtered
+		// upstream into the consumer's full local file so that
+		// out-of-scope content (other top-level keys, envs:, profiles:)
+		// is preserved across syncs.
+		//
+		// This is the fix for the #126 review comment: previously, the
+		// no-local-changes branch and the StrategyReplace branch wrote
+		// `content` directly, which silently dropped out-of-scope local
+		// content on every sync after a merge had run.
+		computeTargetBytes := func() ([]byte, error) {
+			if filterFn == nil {
+				return content, nil
+			}
+			// Nested selectors with non-merge strategies skip the
+			// splice entirely and write the filtered content
+			// directly. This preserves the legacy `select` semantics
+			// (extract a subset, overwrite the destination) for
+			// callers that explicitly opted into per-key extraction.
+			if !allTopLevelSelectors {
+				return content, nil
+			}
+			localFull, readErr := os.ReadFile(destPath)
+			if readErr != nil && !os.IsNotExist(readErr) {
+				return nil, fmt.Errorf("reading local for splice: %w", readErr)
+			}
+			// localFull is nil for not-exist; pass it through to
+			// spliceSelectedScope so YAML still gets the empty-doc
+			// fast path AND JSON errors consistently regardless of
+			// whether the local file exists yet. Skipping the splice
+			// for new files would silently bypass the
+			// JSON-not-supported error: the first sync would succeed
+			// and the second would fail when the on-disk file came
+			// into existence.
+			spliced, spliceErr := spliceSelectedScope(localFull, content, m.Select, m.SourcePath)
+			if spliceErr != nil {
+				return nil, fmt.Errorf("splicing %s: %w", m.SourcePath, spliceErr)
+			}
+			return spliced, nil
 		}
 
 		upstreamHash := fmt.Sprintf("%x", sha256.Sum256(content))
@@ -208,8 +307,15 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			if oldFile := findLockFile(lockEntry, m.SourcePath); oldFile != nil {
 				localHash, hashErr := lock.SHA256File(destPath)
 				if hashErr == nil {
-					// Fast-path: treat as unchanged only when local file matches upstream content
-					if localHash == upstreamHash {
+					// Fast-path: treat as unchanged only when local file
+					// matches upstream content. The comparison is meaningful
+					// only when there's no select filter — when filterFn is
+					// set, `content` is just the scoped slice and the
+					// on-disk file is the full document, so the two hashes
+					// will never match. In that case we fall through to
+					// drift detection, which compares against the lock's
+					// recorded hash for the spliced-target view.
+					if filterFn == nil && localHash == upstreamHash {
 						// Ensure file permissions match upstream even when content is identical
 						if !cfg.DryRun {
 							if info, statErr := os.Stat(destPath); statErr == nil {
@@ -252,12 +358,21 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		finalHash := upstreamHash
 
 		if !localChanged {
-			// No local changes — always safe to replace
+			// No local changes — safe to write upstream. With a select
+			// filter we MUST splice rather than write the filtered slice
+			// directly, otherwise the consumer's out-of-scope content gets
+			// silently dropped on every sync. computeTargetBytes returns
+			// the right thing for both filtered and unfiltered cases.
+			target, err := computeTargetBytes()
+			if err != nil {
+				return nil, err
+			}
 			if !cfg.DryRun {
-				if err := writeFile(destPath, content, fileMode); err != nil {
+				if err := writeFile(destPath, target, fileMode); err != nil {
 					return nil, err
 				}
 			}
+			finalHash = fmt.Sprintf("%x", sha256.Sum256(target))
 		} else {
 			switch fileStrategy {
 			case StrategyClient:
@@ -273,41 +388,72 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 				}
 
 			case StrategyMerge:
-				merged, hasConflict, mergeErr := doMerge(repoDir, previousCommit, m.SourcePath, destPath, content)
+				merged, hasConflict, mergeErr := doMerge(repoDir, previousCommit, m.SourcePath, destPath, content, filterFn)
 				if mergeErr != nil {
-					// Merge failed, fall back to replace with warning
+					// Merge failed (e.g. no previous commit). Fall back to
+					// the same splice path the no-local-changes branch
+					// uses, so we never overwrite out-of-scope content
+					// even when degrading to replace.
+					target, tErr := computeTargetBytes()
+					if tErr != nil {
+						return nil, tErr
+					}
 					status = "replaced (merge failed: " + mergeErr.Error() + ")"
 					if !cfg.DryRun {
-						if err := writeFile(destPath, content, fileMode); err != nil {
+						if err := writeFile(destPath, target, fileMode); err != nil {
 							return nil, err
 						}
 					}
-				} else if hasConflict {
-					status = "conflict"
-					conflicts++
-					if !cfg.DryRun {
-						if err := writeFile(destPath, merged, fileMode); err != nil {
-							return nil, err
-						}
-					}
-					finalHash = fmt.Sprintf("%x", sha256.Sum256(merged))
+					finalHash = fmt.Sprintf("%x", sha256.Sum256(target))
 				} else {
-					status = "merged"
+					// Splice the merged (filtered) scope back into the
+					// consumer's full local file so that out-of-scope
+					// content (other top-level keys, comments on
+					// non-replaced keys, trailing layout) is preserved.
+					// When no select is set, splice is a no-op pass-through.
+					spliced := merged
+					if filterFn != nil {
+						localFull, readErr := os.ReadFile(destPath)
+						if readErr != nil {
+							return nil, fmt.Errorf("reading local for splice: %w", readErr)
+						}
+						spliceOut, spliceErr := spliceSelectedScope(localFull, merged, m.Select, m.SourcePath)
+						if spliceErr != nil {
+							return nil, fmt.Errorf("splicing merged %s: %w", m.SourcePath, spliceErr)
+						}
+						spliced = spliceOut
+					}
+					if hasConflict {
+						status = "conflict"
+						conflicts++
+					} else {
+						status = "merged"
+					}
 					if !cfg.DryRun {
-						if err := writeFile(destPath, merged, fileMode); err != nil {
+						if err := writeFile(destPath, spliced, fileMode); err != nil {
 							return nil, err
 						}
 					}
-					finalHash = fmt.Sprintf("%x", sha256.Sum256(merged))
+					finalHash = fmt.Sprintf("%x", sha256.Sum256(spliced))
 				}
 
 			default: // StrategyReplace
+				// Replace with select also goes through the splice so the
+				// consumer's out-of-scope content is preserved. The status
+				// label still says "local changes overwritten" because the
+				// IN-scope local edits will be lost — only the out-of-scope
+				// portion is preserved.
+				target, err := computeTargetBytes()
+				if err != nil {
+					return nil, err
+				}
 				status = "replaced (local changes overwritten)"
 				if !cfg.DryRun {
-					if err := writeFile(destPath, content, fileMode); err != nil {
+					if err := writeFile(destPath, target, fileMode); err != nil {
 						return nil, err
 					}
 				}
+				finalHash = fmt.Sprintf("%x", sha256.Sum256(target))
 			}
 		}
 
@@ -351,25 +497,56 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 }
 
 // doMerge performs a three-way merge for a single file.
-// base = file at previousCommit, local = current file on disk, upstream = new content.
-func doMerge(repoDir, previousCommit, sourcePath, destPath string, upstream []byte) ([]byte, bool, error) {
-	// Read local file
-	local, err := os.ReadFile(destPath)
+//
+// The three sides (local, base, upstream) are all passed through filterFn
+// before being fed to the text-based 3-way merge. This is essential when a
+// select filter is in play: the upstream content was already filtered in
+// SyncEnv, so base and local MUST be filtered by the same selector or the
+// merge will see the difference between "whole file" and "filtered subset"
+// as deletions and clobber the consumer's out-of-scope content (envs,
+// profiles, comments, etc). See issue #122.
+//
+//   - repoDir:        git repo directory (bare or local work tree)
+//   - previousCommit: commit from the lock entry (required, caller checks)
+//   - sourcePath:     file path inside the repo
+//   - destPath:       local file on disk (the consumer's copy)
+//   - upstream:       already-filtered upstream content
+//   - filterFn:       applied to base and local to match upstream's shape;
+//     may be nil when no select is configured
+func doMerge(
+	repoDir, previousCommit, sourcePath, destPath string,
+	upstream []byte,
+	filterFn func(content []byte) ([]byte, error),
+) ([]byte, bool, error) {
+	// Read local file (full, unfiltered)
+	localFull, err := os.ReadFile(destPath)
 	if err != nil {
 		return nil, false, fmt.Errorf("reading local %s: %w", destPath, err)
 	}
 
-	// Get base version (file at previous commit)
-	var base []byte
-	if previousCommit != "" {
-		base, err = gitcache.ShowFileDir(repoDir, previousCommit, sourcePath)
-		if err != nil {
-			// Can't get base — treat as new file, fall back
-			return nil, false, fmt.Errorf("reading base version: %w", err)
-		}
-	} else {
-		// No previous commit — can't do three-way merge
+	// Read base version (file at previous commit, full, unfiltered)
+	if previousCommit == "" {
 		return nil, false, fmt.Errorf("no previous commit for three-way merge base")
+	}
+	baseFull, err := gitcache.ShowFileDir(repoDir, previousCommit, sourcePath)
+	if err != nil {
+		return nil, false, fmt.Errorf("reading base version: %w", err)
+	}
+
+	// Apply the same filter to base and local that was applied to upstream.
+	// Without this step, git merge-file would diff "filtered upstream" against
+	// "whole base/local" and flag every out-of-scope byte as a deletion.
+	local := localFull
+	base := baseFull
+	if filterFn != nil {
+		local, err = filterFn(localFull)
+		if err != nil {
+			return nil, false, fmt.Errorf("filtering local for merge: %w", err)
+		}
+		base, err = filterFn(baseFull)
+		if err != nil {
+			return nil, false, fmt.Errorf("filtering base for merge: %w", err)
+		}
 	}
 
 	return gitcache.Merge3Way(local, base, upstream)

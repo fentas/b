@@ -253,6 +253,37 @@ upstream-value: true
 
 Falls back to replace when the base version is unavailable.
 
+#### `merge` + `select`
+
+When a file has a `select:` filter and `strategy: merge`, all three merge
+inputs (base, local, upstream) are filtered through the **same** selector
+before being passed to the 3-way merge. Without symmetric filtering, the
+merge would see "upstream = filtered subset" vs "base/local = whole file"
+and treat everything outside the selected scope as a giant deletion —
+silently wiping consumer-owned content like other top-level keys,
+comments, and custom sections.
+
+After merging, the result is **spliced back** into the consumer's full
+local file:
+
+- In-scope top-level keys are replaced with the merged values
+- Out-of-scope keys (other `envs:`, `profiles:`, etc.) are preserved
+- Comments on out-of-scope keys stay attached to their original nodes
+- Even when the merge produces conflict markers, the splice preserves
+  out-of-scope content byte-for-byte, so conflict resolution only
+  happens inside the scoped region
+
+Example: consumer uses `select: [binaries]` to sync only the upstream's
+`binaries:` section into its own `.bin/b.yaml`. The consumer's `envs:`
+block is untouched on every sync, and only the `binaries:` section
+participates in the merge.
+
+**Known limitations:**
+
+1. The underlying 3-way merge is line-based (`git merge-file`), so concurrent *adjacent* additions inside the scoped region — e.g. local adds `argsh`, upstream adds `tilt` — can produce a spurious conflict marker even though the changes are semantically independent. The data-loss bug (losing out-of-scope content) is fixed; the cosmetic spurious-conflict issue is tracked as a follow-up.
+
+2. **JSON files are not supported in `select` + non-trivial sync.** The splice that puts a (filtered or merged) scope back into the consumer's full file is implemented for YAML only. If you have a JSON file with a `select:` filter, `b` will error out at sync time — including the very first sync to a non-existent destination, so you can't accidentally end up with a half-written file. Either drop the `select:`, move the data to YAML, or wait for JSON splice support. Tracked as a follow-up.
+
 ---
 
 ## Managing envs
