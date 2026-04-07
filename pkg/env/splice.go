@@ -65,15 +65,7 @@ func spliceSelectedScope(local, merged []byte, selectors []string, filePath stri
 	case ".yaml", ".yml":
 		return spliceYAML(local, merged, selectors)
 	case ".json":
-		// JSON scope selection is supported by filterContent, but
-		// splicing the scoped result back into the full local document
-		// is not implemented yet. Returning `merged` here would
-		// overwrite the on-disk file with only the selected scope and
-		// drop out-of-scope content — the #122 data-loss bug. Fail fast
-		// until JSON splice support exists. The wording mentions
-		// "select" rather than "merge" because spliceSelectedScope is
-		// also called from the non-merge replace path.
-		return nil, fmt.Errorf("scoped select/splicing is not supported for JSON files yet (%s) — remove the select filter or move the data to YAML", filePath)
+		return spliceJSON(local, merged, selectors)
 	default:
 		// Unknown extension: select isn't supported on these in
 		// filterContent either, so this branch only fires from internal
