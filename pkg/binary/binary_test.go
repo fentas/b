@@ -19,6 +19,65 @@ import (
 	"github.com/fentas/b/pkg/provider"
 )
 
+// --- test helpers ---
+
+// makeTarGz builds a gzip+tar archive in memory from the given (name, mode,
+// content) tuples. All I/O errors are checked via t.Fatalf so bad fixtures
+// fail fast with actionable errors.
+type tarEntry struct {
+	name    string
+	mode    int64
+	content []byte
+}
+
+func makeTarGz(t *testing.T, entries ...tarEntry) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for _, e := range entries {
+		hdr := &tar.Header{
+			Name:     e.name,
+			Mode:     e.mode,
+			Size:     int64(len(e.content)),
+			Typeflag: tar.TypeReg,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("tar WriteHeader %q: %v", e.name, err)
+		}
+		if _, err := tw.Write(e.content); err != nil {
+			t.Fatalf("tar Write %q: %v", e.name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("tar Close: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("gzip Close: %v", err)
+	}
+	return &buf
+}
+
+// makeZip builds a zip archive in memory from (name, content) tuples.
+func makeZip(t *testing.T, entries map[string][]byte) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range entries {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("zip Create %q: %v", name, err)
+		}
+		if _, err := w.Write(content); err != nil {
+			t.Fatalf("zip Write %q: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip Close: %v", err)
+	}
+	return &buf
+}
+
 // --- helper.go ---
 
 func TestGetFileExtensionFromURL(t *testing.T) {
@@ -339,16 +398,8 @@ func TestDownloadPreset_IsDynamicUnknown(t *testing.T) {
 
 func TestDownloadPreset_IsTarGz(t *testing.T) {
 	tmp := t.TempDir()
-	// Create a tar.gz containing a file named "foo"
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
 	content := []byte("binary-data")
-	hdr := &tar.Header{Name: "foo", Mode: 0755, Size: int64(len(content)), Typeflag: tar.TypeReg}
-	_ = tw.WriteHeader(hdr)
-	_, _ = tw.Write(content)
-	_ = tw.Close()
-	_ = gz.Close()
+	buf := makeTarGz(t, tarEntry{name: "foo", mode: 0755, content: content})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(buf.Bytes())
@@ -373,11 +424,7 @@ func TestDownloadPreset_IsTarGz(t *testing.T) {
 
 func TestDownloadPreset_IsZip(t *testing.T) {
 	tmp := t.TempDir()
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	w, _ := zw.Create("foo")
-	_, _ = w.Write([]byte("zip-data"))
-	_ = zw.Close()
+	buf := makeZip(t, map[string][]byte{"foo": []byte("zip-data")})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(buf.Bytes())
@@ -411,77 +458,57 @@ func TestExtractSingleFileFromTar_BadGzip(t *testing.T) {
 }
 
 func TestExtractSingleFileFromTar_FileNotFound(t *testing.T) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	_ = tw.WriteHeader(&tar.Header{Name: "other", Mode: 0755, Size: 1, Typeflag: tar.TypeReg})
-	_, _ = tw.Write([]byte("x"))
-	_ = tw.Close()
-	_ = gz.Close()
+	buf := makeTarGz(t, tarEntry{name: "other", mode: 0755, content: []byte("x")})
 
 	tmp := t.TempDir()
 	b := &Binary{Name: "foo", File: filepath.Join(tmp, "foo")}
-	err := b.extractSingleFileFromTar(&buf, "gz")
+	err := b.extractSingleFileFromTar(buf, "gz")
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("err = %v", err)
 	}
 }
 
 func TestExtractFromTarAuto_NameMatch(t *testing.T) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	_ = tw.WriteHeader(&tar.Header{Name: "foo", Mode: 0755, Size: 3, Typeflag: tar.TypeReg})
-	_, _ = tw.Write([]byte("bin"))
-	_ = tw.Close()
-	_ = gz.Close()
+	buf := makeTarGz(t, tarEntry{name: "foo", mode: 0755, content: []byte("bin")})
 
 	tmp := t.TempDir()
 	b := &Binary{Name: "foo", File: filepath.Join(tmp, "foo")}
-	if err := b.extractFromTarAuto(&buf, "gz"); err != nil {
+	if err := b.extractFromTarAuto(buf, "gz"); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := os.ReadFile(b.File)
+	data, err := os.ReadFile(b.File)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
 	if string(data) != "bin" {
 		t.Errorf("got %q", data)
 	}
 }
 
 func TestExtractFromTarAuto_NoExecutables(t *testing.T) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	_ = tw.WriteHeader(&tar.Header{Name: "readme", Mode: 0644, Size: 1, Typeflag: tar.TypeReg})
-	_, _ = tw.Write([]byte("x"))
-	_ = tw.Close()
-	_ = gz.Close()
+	buf := makeTarGz(t, tarEntry{name: "readme", mode: 0644, content: []byte("x")})
 
 	tmp := t.TempDir()
 	b := &Binary{Name: "foo", File: filepath.Join(tmp, "foo")}
-	if err := b.extractFromTarAuto(&buf, "gz"); err == nil {
+	if err := b.extractFromTarAuto(buf, "gz"); err == nil {
 		t.Error("expected error")
 	}
 }
 
 func TestExtractFromTarAuto_PicksLargest(t *testing.T) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	for _, f := range []struct {
-		n string
-		s string
-	}{{"a", "xx"}, {"b", "xxxxxxxx"}} {
-		_ = tw.WriteHeader(&tar.Header{Name: f.n, Mode: 0755, Size: int64(len(f.s)), Typeflag: tar.TypeReg})
-		_, _ = tw.Write([]byte(f.s))
-	}
-	_ = tw.Close()
-	_ = gz.Close()
+	buf := makeTarGz(t,
+		tarEntry{name: "a", mode: 0755, content: []byte("xx")},
+		tarEntry{name: "b", mode: 0755, content: []byte("xxxxxxxx")},
+	)
 	tmp := t.TempDir()
 	b := &Binary{Name: "foo", File: filepath.Join(tmp, "foo")}
-	if err := b.extractFromTarAuto(&buf, "gz"); err != nil {
+	if err := b.extractFromTarAuto(buf, "gz"); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := os.ReadFile(b.File)
+	data, err := os.ReadFile(b.File)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
 	if string(data) != "xxxxxxxx" {
 		t.Errorf("got %q", data)
 	}
@@ -495,17 +522,16 @@ func TestExtractFromTarAuto_BadComp(t *testing.T) {
 }
 
 func TestExtractFromZipAuto_NameMatch(t *testing.T) {
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	w, _ := zw.Create("foo")
-	_, _ = w.Write([]byte("bin"))
-	_ = zw.Close()
+	buf := makeZip(t, map[string][]byte{"foo": []byte("bin")})
 	tmp := t.TempDir()
 	b := &Binary{Name: "foo", File: filepath.Join(tmp, "foo")}
-	if err := b.extractFromZipAuto(&buf); err != nil {
+	if err := b.extractFromZipAuto(buf); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := os.ReadFile(b.File)
+	data, err := os.ReadFile(b.File)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
 	if string(data) != "bin" {
 		t.Errorf("got %q", data)
 	}
@@ -519,18 +545,10 @@ func TestExtractFromZipAuto_BadZip(t *testing.T) {
 }
 
 func TestExtractFromZipAuto_PicksLargest(t *testing.T) {
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	for _, f := range []struct {
-		n, d string
-	}{{"a", "xx"}, {"b", "xxxxxxxx"}} {
-		w, _ := zw.Create(f.n)
-		_, _ = w.Write([]byte(f.d))
-	}
-	_ = zw.Close()
+	buf := makeZip(t, map[string][]byte{"a": []byte("xx"), "b": []byte("xxxxxxxx")})
 	tmp := t.TempDir()
 	b := &Binary{Name: "none", File: filepath.Join(tmp, "out")}
-	if err := b.extractFromZipAuto(&buf); err != nil {
+	if err := b.extractFromZipAuto(buf); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -566,13 +584,7 @@ func TestDownloadAsset_PlainBinary(t *testing.T) {
 }
 
 func TestDownloadAsset_TarGz(t *testing.T) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	_ = tw.WriteHeader(&tar.Header{Name: "foo", Mode: 0755, Size: 3, Typeflag: tar.TypeReg})
-	_, _ = tw.Write([]byte("bin"))
-	_ = tw.Close()
-	_ = gz.Close()
+	buf := makeTarGz(t, tarEntry{name: "foo", mode: 0755, content: []byte("bin")})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(buf.Bytes())
 	}))
@@ -607,38 +619,43 @@ func TestExtractSingleFileFromTar_SuccessMatch(t *testing.T) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-	// Include a non-reg entry (directory) to test skip
-	_ = tw.WriteHeader(&tar.Header{Name: "dir/", Mode: 0755, Typeflag: tar.TypeDir})
+	// Include a non-reg entry (directory) to exercise the skip branch.
+	if err := tw.WriteHeader(&tar.Header{Name: "dir/", Mode: 0755, Typeflag: tar.TypeDir}); err != nil {
+		t.Fatalf("WriteHeader dir: %v", err)
+	}
 	// Include match on b.Name
-	_ = tw.WriteHeader(&tar.Header{Name: "foo", Mode: 0755, Size: 3, Typeflag: tar.TypeReg})
-	_, _ = tw.Write([]byte("bin"))
-	_ = tw.Close()
-	_ = gz.Close()
+	if err := tw.WriteHeader(&tar.Header{Name: "foo", Mode: 0755, Size: 3, Typeflag: tar.TypeReg}); err != nil {
+		t.Fatalf("WriteHeader foo: %v", err)
+	}
+	if _, err := tw.Write([]byte("bin")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("tar Close: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("gzip Close: %v", err)
+	}
 
 	tmp := t.TempDir()
 	b := &Binary{Name: "foo", File: filepath.Join(tmp, "foo")}
 	if err := b.extractSingleFileFromTar(&buf, "gz"); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := os.ReadFile(b.File)
+	data, err := os.ReadFile(b.File)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
 	if string(data) != "bin" {
 		t.Errorf("got %q", data)
 	}
 }
 
 func TestExtractSingleFileFromTar_GitHubFileStripExt(t *testing.T) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	// Name matching the first part of GitHubFile (before dot)
-	_ = tw.WriteHeader(&tar.Header{Name: "mytool-linux", Mode: 0755, Size: 2, Typeflag: tar.TypeReg})
-	_, _ = tw.Write([]byte("xy"))
-	_ = tw.Close()
-	_ = gz.Close()
-
+	buf := makeTarGz(t, tarEntry{name: "mytool-linux", mode: 0755, content: []byte("xy")})
 	tmp := t.TempDir()
 	b := &Binary{Name: "other", GitHubFile: "mytool-linux.tar.gz", File: filepath.Join(tmp, "out")}
-	if err := b.extractSingleFileFromTar(&buf, "gz"); err != nil {
+	if err := b.extractSingleFileFromTar(buf, "gz"); err != nil {
 		t.Fatal(err)
 	}
 }

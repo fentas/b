@@ -458,7 +458,9 @@ func TestInstallOptions_Run_NoBinariesNoEnvs(t *testing.T) {
 	mustWrite(t, cfgPath, []byte("binaries: {}\n"))
 	shared := NewSharedOptions(mkIO(), mkBinaries())
 	shared.ConfigPath = cfgPath
-	_ = shared.LoadConfig()
+	if err := shared.LoadConfig(); err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
 	o := &InstallOptions{SharedOptions: shared}
 	if err := o.Complete(nil); err != nil {
 		t.Fatal(err)
@@ -475,7 +477,9 @@ func TestInstallOptions_AddEnvToConfig(t *testing.T) {
 	mustWrite(t, cfgYaml, []byte("envs: {}\n"))
 	shared := NewSharedOptions(mkIO(), nil)
 	shared.ConfigPath = cfgYaml
-	_ = shared.LoadConfig()
+	if err := shared.LoadConfig(); err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
 	o := &InstallOptions{SharedOptions: shared}
 	ei := envInstall{
 		ref:     "github.com/org/repo",
