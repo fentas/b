@@ -29,7 +29,7 @@ import (
 //     rewrite the local Node tree in place (replace scoped key values,
 //     append new scoped keys, remove vanished scoped keys). Out-of-scope
 //     comments and layout are preserved because their Nodes are untouched.
-//     Note: yaml.Marshal re-emits the whole document, so the output won't
+//     Note: the yaml.v3 encoder re-emits the whole document, so the output won't
 //     be byte-identical to the input even for unchanged keys — this is a
 //     limitation of yaml.v3 that the structural splice cannot work around
 //     here. A format-preserving emitter is tracked as a separate
@@ -138,7 +138,7 @@ func containsConflictMarkers(b []byte) bool {
 //  2. Structural splice (fallback for YAML quirks): when the byte-level
 //     path can't be used (rare — e.g. an unrecognised local-file
 //     shape), fall back to the Node-tree merge that round-trips the
-//     whole document through yaml.Marshal. Out-of-scope keys keep
+//     whole document through the yaml.v3 encoder. Out-of-scope keys keep
 //     their content but lose exact whitespace.
 //
 //  3. Text splice (conflict path): when `merged` contains
@@ -150,7 +150,7 @@ func containsConflictMarkers(b []byte) bool {
 //
 // (1) was added as the format-preserving emitter follow-up to PR #126.
 // Before it, every successful merge sync produced a noisy git diff
-// because yaml.Marshal would re-emit the entire document with its own
+// because the yaml.v3 encoder would re-emit the entire document with its own
 // preferred whitespace and quoting style — even for keys the splice
 // didn't touch.
 func spliceYAML(local, merged []byte, selectors []string) ([]byte, error) {
@@ -165,7 +165,7 @@ func spliceYAML(local, merged []byte, selectors []string) ([]byte, error) {
 			return out, nil
 		}
 		// Path 2: structural splice. Same parseability requirements
-		// but rebuilds the whole document via yaml.Marshal. Used when
+		// but rebuilds the whole document via the yaml.v3 encoder. Used when
 		// the byte-level splice can't handle the local shape (e.g.
 		// flow-style mapping where Line metadata isn't reliable).
 		out, err = spliceYAMLStructural(local, merged, scope)
