@@ -22,9 +22,14 @@ import (
 //     contain JMESPath grammar characters (brackets, parens, braces,
 //     pipe, star, ampersand, comma, quotes, comparison ops, backtick,
 //     backslash, question mark, whitespace) and does not contain
-//     empty path segments. This matches the legacy `filterYAML`
-//     validator's behavior, so plain top-level keys with characters
-//     like `/`, `+`, `@`, `#` continue to work without quoting.
+//     empty path segments. The classifier is intentionally STRICTER
+//     than the legacy `filterYAML` validator (which only rejects
+//     `[]`/`\` and empty segments), but the empty-segment rule is
+//     shared so the classification stays consistent with downstream
+//     YAML validation. The end result is that plain top-level keys
+//     with characters like `/`, `+`, `@`, `#` keep using the
+//     comment-preserving path without quoting (backward-compat for
+//     pre-#124 callers).
 //
 //   - Complex expressions — filter predicates, projections, functions,
 //     multi-select hashes, array indexing — are routed to the JMESPath
