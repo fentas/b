@@ -115,13 +115,15 @@ func containsConflictMarkers(b []byte) bool {
 // fidelity:
 //
 //  1. Byte-level splice (best fidelity): when `merged` is valid YAML
-//     AND the local file parses cleanly into a top-level mapping, copy
-//     out-of-scope byte ranges from `local` verbatim and only re-emit
-//     the in-scope keys' values via yaml.Marshal. This preserves
-//     whitespace, quoting style, and comment formatting on every
-//     unchanged byte. Out-of-scope content is byte-identical to the
-//     input — no spurious git-diff churn from yaml.v3 emitter
-//     normalization.
+//     AND the local file parses cleanly into a top-level mapping,
+//     copy out-of-scope byte ranges from `local` verbatim and re-emit
+//     each in-scope top-level `key: value` pair via yaml.Marshal.
+//     Bytes outside the scoped ranges are preserved exactly, but
+//     formatting WITHIN those ranges can change because yaml.v3
+//     re-encodes the whole entry — including key quoting/style and
+//     any key-line comments. Out-of-scope content is byte-identical
+//     to the input — no spurious git-diff churn from yaml.v3 emitter
+//     normalization outside the replaced ranges.
 //
 //  2. Structural splice (fallback for YAML quirks): when the byte-level
 //     path can't be used (rare — e.g. an unrecognised local-file

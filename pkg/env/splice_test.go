@@ -1,6 +1,7 @@
 package env
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -125,22 +126,24 @@ envs:
 		t.Errorf("merged tilt missing, got:\n%s", outStr)
 	}
 
-	// 2) Out-of-scope envs section preserved BYTE-FOR-BYTE. Each of
-	// these would normally be reformatted by yaml.v3:
-	//   - 4-space indent → 2-space indent
-	//   - double-quoted keys → unquoted
-	//   - inline comment dropped
-	//   - "trailing comment inside envs" dropped
-	expectations := []string{
-		`"github.com/keep/me":     # an inline comment`,
-		`        files:`,
-		`            "a.yaml":  "docs/a.yaml"`,
-		`        # trailing comment inside envs`,
+	// 2) Out-of-scope envs section preserved BYTE-FOR-BYTE. The
+	// check is intentionally an exact slice comparison: we cut the
+	// `envs:` block out of both the original local input and the
+	// spliced output and compare them directly. A reformatter that
+	// changed any whitespace, quoting, or comment placement inside
+	// this region would fail the comparison even if the surrounding
+	// lines still matched. The local input was crafted to use
+	// 4-space indent, double-quoted keys, an inline comment, and
+	// a trailing comment — every one of which the yaml.v3 emitter
+	// would normally rewrite.
+	localEnvsStart := bytes.Index(local, []byte("envs:"))
+	outEnvsStart := bytes.Index(out, []byte("envs:"))
+	if localEnvsStart < 0 || outEnvsStart < 0 {
+		t.Fatalf("envs: marker missing — local=%d out=%d\n%s", localEnvsStart, outEnvsStart, outStr)
 	}
-	for _, exp := range expectations {
-		if !strings.Contains(outStr, exp) {
-			t.Errorf("byte-preservation lost line %q in output:\n%s", exp, outStr)
-		}
+	if !bytes.Equal(local[localEnvsStart:], out[outEnvsStart:]) {
+		t.Errorf("envs section not byte-identical:\nwant:\n%q\ngot:\n%q",
+			local[localEnvsStart:], out[outEnvsStart:])
 	}
 
 	// 3) Top-of-file comment preserved.
