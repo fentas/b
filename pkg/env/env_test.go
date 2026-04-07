@@ -80,7 +80,7 @@ func TestSyncMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := syncMessage(tt.files, tt.conflicts)
+			got := syncMessage(tt.files, nil, tt.conflicts)
 			if got != tt.want {
 				t.Errorf("syncMessage() = %q, want %q", got, tt.want)
 			}

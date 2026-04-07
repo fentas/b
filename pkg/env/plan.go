@@ -217,10 +217,11 @@ func planRowFromLockFile(f lock.LockFile, prevPaths map[string]bool) PlanRow {
 //	'!' overwrite path/to/file
 //	'⊕' merge     path/to/file
 //	'✗' conflict  path/to/file
+//	'-' delete    path/to/file
 //
 // A summary line is printed at the end with non-zero counts only:
 //
-//	→ 12 add, 3 update, 1 conflict
+//	→ 12 add, 3 update, 1 conflict, 1 delete
 func RenderPlanText(w io.Writer, p *Plan) {
 	if p == nil || len(p.Rows) == 0 {
 		fmt.Fprintln(w, "  (no files)")

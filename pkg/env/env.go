@@ -523,10 +523,18 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			// If the consumer has modified the file relative to the
 			// recorded lock SHA, surface that as `delete-skipped`
 			// instead of `deleted` so the plan reflects the safer
-			// outcome. The CLI's gateApply layer can use this to
-			// drop the row from "actually delete" candidates while
-			// still warning the user.
-			if localHash, _ := lock.SHA256File(absDest); localHash != "" && localHash != prev.SHA256 {
+			// outcome. Distinguish a missing file (already gone, no
+			// problem) from a real read failure (permission denied,
+			// transient I/O) — the latter must NOT silently fall
+			// back to a destructive `deleted` row.
+			localHash, hashErr := lock.SHA256File(absDest)
+			switch {
+			case hashErr != nil && os.IsNotExist(hashErr):
+				// File already missing on disk → keep the default
+				// deleted status; nothing destructive to do.
+			case hashErr != nil:
+				deleteStatus = "delete-skipped (unreadable)"
+			case localHash != "" && localHash != prev.SHA256:
 				deleteStatus = "delete-skipped (local modified)"
 			}
 			deletedFiles = append(deletedFiles, lock.LockFile{
@@ -554,7 +562,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		PreviousCommit: previousCommit,
 		Files:          lockFiles,
 		Deleted:        deletedFiles,
-		Message:        syncMessage(lockFiles, conflicts),
+		Message:        syncMessage(lockFiles, deletedFiles, conflicts),
 		Conflicts:      conflicts,
 	}, nil
 }
@@ -765,7 +773,12 @@ func fileModeToString(mode os.FileMode) string {
 }
 
 // syncMessage builds a human-readable sync message from file results.
-func syncMessage(files []lock.LockFile, conflicts int) string {
+// Orphan delete rows are passed in separately because they live on
+// SyncResult.Deleted (not Files) so the lock writer never persists
+// them — but the user-facing message must still account for them or
+// "upstream removed all files" syncs would misleadingly read as
+// "0 files synced".
+func syncMessage(files []lock.LockFile, deleted []lock.LockFile, conflicts int) string {
 	replaced, kept, merged, unchanged := 0, 0, 0, 0
 	for _, f := range files {
 		// Strip dry-run suffix for counting
@@ -783,13 +796,25 @@ func syncMessage(files []lock.LockFile, conflicts int) string {
 			// conflicts are reported separately via the conflicts argument
 		}
 	}
+	deletes, deleteSkips := 0, 0
+	for _, f := range deleted {
+		status := strings.TrimSuffix(f.Status, " (dry-run)")
+		if strings.HasPrefix(status, "delete-skipped") {
+			deleteSkips++
+		} else {
+			deletes++
+		}
+	}
 
 	parts := []string{}
 	total := len(files)
-	if replaced == total {
+	if total == 0 && deletes == 0 && deleteSkips == 0 {
+		return "0 file(s) synced"
+	}
+	if replaced == total && deletes == 0 && deleteSkips == 0 {
 		return fmt.Sprintf("%d file(s) synced", total)
 	}
-	if unchanged == total {
+	if unchanged == total && deletes == 0 && deleteSkips == 0 {
 		return fmt.Sprintf("%d file(s) unchanged", total)
 	}
 	if replaced > 0 {
@@ -806,6 +831,12 @@ func syncMessage(files []lock.LockFile, conflicts int) string {
 	}
 	if unchanged > 0 {
 		parts = append(parts, fmt.Sprintf("%d unchanged", unchanged))
+	}
+	if deletes > 0 {
+		parts = append(parts, fmt.Sprintf("%d deleted", deletes))
+	}
+	if deleteSkips > 0 {
+		parts = append(parts, fmt.Sprintf("%d delete(s) skipped", deleteSkips))
 	}
 	return strings.Join(parts, ", ")
 }

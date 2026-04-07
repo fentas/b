@@ -21,7 +21,7 @@ func TestSyncMessage_WithUnchanged(t *testing.T) {
 		{Status: "unchanged"},
 		{Status: "unchanged"},
 	}
-	got := syncMessage(files, 0)
+	got := syncMessage(files, nil, 0)
 	if got == "" {
 		t.Error("expected non-empty message")
 	}
@@ -36,7 +36,7 @@ func TestSyncMessage_AllUnchanged(t *testing.T) {
 		{Status: "unchanged"},
 		{Status: "unchanged"},
 	}
-	got := syncMessage(files, 0)
+	got := syncMessage(files, nil, 0)
 	if got != "2 file(s) unchanged" {
 		t.Errorf("syncMessage() = %q, want %q", got, "2 file(s) unchanged")
 	}
@@ -189,7 +189,7 @@ func TestSyncMessage_DryRunSuffix(t *testing.T) {
 		{Status: "replaced (dry-run)"},
 		{Status: "replaced (dry-run)"},
 	}
-	got := syncMessage(files, 0)
+	got := syncMessage(files, nil, 0)
 	if got != "2 file(s) synced" {
 		t.Errorf("syncMessage() with dry-run = %q, want %q", got, "2 file(s) synced")
 	}
@@ -199,7 +199,7 @@ func TestSyncMessage_UnchangedDryRun(t *testing.T) {
 	files := []lock.LockFile{
 		{Status: "unchanged (dry-run)"},
 	}
-	got := syncMessage(files, 0)
+	got := syncMessage(files, nil, 0)
 	// Should strip dry-run and count as unchanged
 	if got != "1 file(s) unchanged" {
 		t.Errorf("syncMessage() = %q, want %q", got, "1 file(s) unchanged")
