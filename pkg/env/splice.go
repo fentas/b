@@ -61,9 +61,11 @@ func spliceSelectedScope(local, merged []byte, selectors []string, filePath stri
 		// splicing the scoped result back into the full local document
 		// is not implemented yet. Returning `merged` here would
 		// overwrite the on-disk file with only the selected scope and
-		// drop out-of-scope content — exactly the bug #122 is fixing.
-		// Fail fast until JSON splice support exists.
-		return nil, fmt.Errorf("scoped merge is not supported for JSON files yet (%s) — remove the select filter or move the data to YAML", filePath)
+		// drop out-of-scope content — the #122 data-loss bug. Fail fast
+		// until JSON splice support exists. The wording mentions
+		// "select" rather than "merge" because spliceSelectedScope is
+		// also called from the non-merge replace path.
+		return nil, fmt.Errorf("scoped select/splicing is not supported for JSON files yet (%s) — remove the select filter or move the data to YAML", filePath)
 	default:
 		// Unknown extension: select isn't supported on these in
 		// filterContent either, so this branch only fires from internal
@@ -349,13 +351,23 @@ func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error)
 	}
 
 	// Build per-key ranges from merged via the heuristic scanner.
-	mergedByKey := scanTopLevelKeyRanges(merged)
+	// scanTopLevelKeyRanges also returns a deterministic key order
+	// (source order in `merged`) so trailing additions can be
+	// appended in the same order the merge produced them.
+	mergedByKey, mergedOrder := scanTopLevelKeyRangesOrdered(merged)
 
-	// Walk local byte-by-byte, replacing each scoped range with the
-	// corresponding per-key slice from merged. Out-of-scope ranges
-	// (anything outside `scoped`) are copied verbatim.
+	// Walk local byte-by-byte. For each scoped range:
+	//   - if the key exists in merged: emit merged's slice for that key
+	//     (which may carry conflict markers)
+	//   - if the key does NOT exist in merged: skip it (treat as deletion
+	//     — the merge result decided this key should not exist)
+	// Track which merged keys we've consumed so we can append the rest
+	// (additions: keys present in merged but absent from local) after
+	// the loop. This matches the structural splice's add/remove
+	// semantics. Per copilot review on PR #126 round 3.
 	var out bytes.Buffer
 	cursor := 0
+	consumed := make(map[string]bool, len(scoped))
 	for _, r := range scoped {
 		if r.startByte > cursor {
 			out.Write(local[cursor:r.startByte])
@@ -365,19 +377,34 @@ func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error)
 			if len(mergedSlice) > 0 && mergedSlice[len(mergedSlice)-1] != '\n' {
 				out.WriteByte('\n')
 			}
-		} else {
-			// Couldn't find this key in merged. Defensive fallback:
-			// drop the entire merged blob into THIS range. Better
-			// than losing the merge result entirely.
-			out.Write(merged)
-			if len(merged) > 0 && merged[len(merged)-1] != '\n' {
-				out.WriteByte('\n')
-			}
+			consumed[r.key] = true
 		}
+		// If not in merged, emit nothing — the merge decided this
+		// scoped key should be removed.
 		cursor = r.endByte
 	}
 	if cursor < len(local) {
 		out.Write(local[cursor:])
+	}
+
+	// Additions: append any merged keys that weren't already in local.
+	// They go at the end of the file in merged-source order. Ensure a
+	// trailing newline before appending so we don't fuse with the
+	// previous line.
+	if out.Len() > 0 {
+		if buf := out.Bytes(); buf[len(buf)-1] != '\n' {
+			out.WriteByte('\n')
+		}
+	}
+	for _, k := range mergedOrder {
+		if consumed[k] || !scope[k] {
+			continue
+		}
+		slice := mergedByKey[k]
+		out.Write(slice)
+		if len(slice) > 0 && slice[len(slice)-1] != '\n' {
+			out.WriteByte('\n')
+		}
 	}
 	return out.Bytes(), nil
 }
@@ -403,9 +430,19 @@ func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error)
 //     into the first scoped range as a fallback" — not data loss.
 //   - Doesn't handle YAML documents starting with `---` directives.
 func scanTopLevelKeyRanges(src []byte) map[string][]byte {
+	m, _ := scanTopLevelKeyRangesOrdered(src)
+	return m
+}
+
+// scanTopLevelKeyRangesOrdered is like scanTopLevelKeyRanges but also
+// returns the keys in source order. The order lets the text splice
+// append "addition" keys (present in merged, absent in local) in the
+// same order the merge produced them.
+func scanTopLevelKeyRangesOrdered(src []byte) (map[string][]byte, []string) {
 	out := make(map[string][]byte)
+	var order []string
 	if len(src) == 0 {
-		return out
+		return out, order
 	}
 	type keyStart struct {
 		name  string
@@ -438,8 +475,9 @@ func scanTopLevelKeyRanges(src []byte) map[string][]byte {
 			end = keys[i+1].start
 		}
 		out[k.name] = src[start:end]
+		order = append(order, k.name)
 	}
-	return out
+	return out, order
 }
 
 // tryParseTopLevelKey returns the key name if `line` is a valid

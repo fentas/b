@@ -267,6 +267,83 @@ func TestSpliceSelectedScope_JSONErrors(t *testing.T) {
 	}
 }
 
+// TestSpliceYAMLText_AddsScopedKeyMissingInLocal verifies the text
+// splice's "additions" path: a scoped key present in `merged` but
+// absent from `local` must be appended to the output (not silently
+// dropped). Per copilot review on PR #126 round 3.
+func TestSpliceYAMLText_AddsScopedKeyMissingInLocal(t *testing.T) {
+	local := []byte(`binaries:
+  a: {}
+envs:
+  github.com/keep/me: {}
+`)
+	// merged contains BOTH binaries (in local) AND extras (NOT in
+	// local) — extras must end up in the output.
+	merged := []byte(`binaries:
+<<<<<<< local
+  a: {}
+=======
+  a: {}
+  b: {}
+>>>>>>> upstream
+extras:
+  shiny: {}
+`)
+	out, err := spliceSelectedScope(local, merged, []string{"binaries", "extras"}, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	outStr := string(out)
+	// envs preserved
+	if !strings.Contains(outStr, "github.com/keep/me") {
+		t.Errorf("envs dropped, got:\n%s", outStr)
+	}
+	// extras (addition) appended
+	if !strings.Contains(outStr, "extras:") || !strings.Contains(outStr, "shiny:") {
+		t.Errorf("extras addition missing, got:\n%s", outStr)
+	}
+}
+
+// TestSpliceYAMLText_RemovesScopedKeyAbsentInMerge verifies the text
+// splice's "deletions" path: a scoped key present in `local` but
+// absent from `merged` must be removed from the output. Per copilot
+// review on PR #126 round 3.
+func TestSpliceYAMLText_RemovesScopedKeyAbsentInMerge(t *testing.T) {
+	local := []byte(`binaries:
+  old: {}
+envs:
+  github.com/keep/me: {}
+extras:
+  legacy: {}
+`)
+	// merged only has binaries (with conflict markers); the merge
+	// decided extras should not exist anymore. The text splice
+	// should drop the extras range from local.
+	merged := []byte(`binaries:
+<<<<<<< local
+  old: {}
+=======
+  new: {}
+>>>>>>> upstream
+`)
+	out, err := spliceSelectedScope(local, merged, []string{"binaries", "extras"}, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	outStr := string(out)
+	// envs preserved
+	if !strings.Contains(outStr, "github.com/keep/me") {
+		t.Errorf("envs dropped, got:\n%s", outStr)
+	}
+	// extras removed (no `legacy` reference)
+	if strings.Contains(outStr, "legacy") {
+		t.Errorf("extras should have been deleted, got:\n%s", outStr)
+	}
+	if strings.Contains(outStr, "extras:") {
+		t.Errorf("extras key should have been deleted, got:\n%s", outStr)
+	}
+}
+
 // TestScanTopLevelKeyRanges_PreservesPrefix verifies that header
 // comments and other content above the first top-level key are kept
 // in the first key's range. Per copilot review on PR #126 round 2:
