@@ -114,13 +114,41 @@ func (list *EnvList) MarshalYAML() (interface{}, error) {
 		if e.Strategy != "" && e.Strategy != "replace" {
 			cfg["strategy"] = e.Strategy
 		}
-		// Omit safety when it normalizes to the default ("prompt") or
-		// is empty so b.yaml stays terse for the common case. Compare
-		// against the normalized value so non-canonical inputs like
-		// `Prompt`, ` auto `, etc. round-trip cleanly. Per copilot
-		// review on PR #128 round 3.
-		if e.Safety != "" && NormalizeSafety(e.Safety) != SafetyPrompt {
-			cfg["safety"] = NormalizeSafety(e.Safety)
+		// Safety serialization rules (per copilot reviews on PR #128
+		// rounds 3 and 7):
+		//
+		//   - Empty value: omit so the user's b.yaml stays terse.
+		//   - Canonical default (lowercased trimmed value == "prompt"):
+		//     omit (default behavior).
+		//   - Known non-default values (`auto`, `strict`): emit the
+		//     normalized form so non-canonical inputs like `Auto` or
+		//     ` STRICT ` round-trip cleanly.
+		//   - Unknown non-empty values: emit the trimmed/lowercased
+		//     original instead of dropping it. Without this, a future
+		//     `b` version with a new safety mode written to b.yaml
+		//     would have its safety silently erased the next time an
+		//     older `b` rewrote the file. Forward-compat: preserve
+		//     what we don't understand.
+		if rawSafety := strings.ToLower(strings.TrimSpace(e.Safety)); rawSafety != "" {
+			// Distinguish "known" from "unknown" by direct comparison
+			// to the canonical values, NOT by going through
+			// NormalizeSafety. NormalizeSafety folds unknown values
+			// to "prompt" for runtime safety, but for serialization
+			// we need to know whether the raw value was actually
+			// recognized so we can decide between (a) emitting the
+			// normalized form, (b) omitting as default, or
+			// (c) preserving an unknown value verbatim.
+			switch rawSafety {
+			case SafetyPrompt:
+				// canonical default → omit
+			case SafetyAuto, SafetyStrict:
+				cfg["safety"] = rawSafety
+			default:
+				// Unknown non-empty value: preserve verbatim
+				// (lowercased + trimmed) so SaveConfig doesn't
+				// erase a forward-compat safety mode.
+				cfg["safety"] = rawSafety
+			}
 		}
 		if e.Group != "" {
 			cfg["group"] = e.Group

@@ -218,7 +218,16 @@ func (o *UpdateOptions) runAll() error {
 // runSpecified updates only the specified binaries/envs.
 func (o *UpdateOptions) runSpecified() error {
 	if len(o.specifiedBinaries) > 0 {
-		if err := o.callUpdateBinaries(o.specifiedBinaries); err != nil {
+		// Same as runAll: in plan-json mode binary progress would
+		// corrupt stdout. Skip binaries entirely; if the user
+		// explicitly listed binaries, warn on stderr so they know
+		// the binaries weren't touched. Per copilot review on
+		// PR #128 round 7.
+		if o.PlanJSON {
+			fmt.Fprintf(o.IO.ErrOut,
+				"  warning: --plan-json suppresses binary updates; %d binary arg(s) ignored\n",
+				len(o.specifiedBinaries))
+		} else if err := o.callUpdateBinaries(o.specifiedBinaries); err != nil {
 			return err
 		}
 	}

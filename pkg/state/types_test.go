@@ -107,6 +107,47 @@ func TestEnvConfigMarshal(t *testing.T) {
 	}
 }
 
+// TestEnvConfigMarshal_PreservesUnknownSafety verifies that
+// MarshalYAML doesn't silently drop a safety value it doesn't
+// recognize. Forward-compat: a future b version with a new safety
+// mode written to b.yaml must round-trip cleanly through an older
+// b that rewrites the file. Per copilot review on PR #128 round 7.
+func TestEnvConfigMarshal_PreservesUnknownSafety(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  string
+		wantIn bool   // expect "safety:" line in output
+		want   string // expected normalized value (when wantIn is true)
+	}{
+		{"empty omitted", "", false, ""},
+		{"prompt omitted", "prompt", false, ""},
+		{"Prompt omitted (case)", "Prompt", false, ""},
+		{"auto preserved normalized", "Auto", true, "auto"},
+		{"strict preserved normalized", " STRICT ", true, "strict"},
+		{"unknown preserved verbatim (lowercased)", "FutureMode", true, "futuremode"},
+		{"unknown with whitespace trimmed", " QUARANTINE ", true, "quarantine"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &State{Envs: EnvList{{Key: "github.com/org/repo", Safety: c.input}}}
+			data, err := yaml.Marshal(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := string(data)
+			if c.wantIn {
+				if !contains(out, "safety: "+c.want) {
+					t.Errorf("missing 'safety: %s' in output, got:\n%s", c.want, out)
+				}
+			} else {
+				if contains(out, "safety:") {
+					t.Errorf("unexpected safety line in output, got:\n%s", out)
+				}
+			}
+		})
+	}
+}
+
 func TestEnvListGet(t *testing.T) {
 	list := EnvList{
 		{Key: "github.com/org/a"},
