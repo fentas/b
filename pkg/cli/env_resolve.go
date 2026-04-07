@@ -103,6 +103,13 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 	projectRoot := o.ProjectRoot()
 	var totalConflicts, totalResolved int
 	lockChanged := false
+	// Collect per-file errors instead of returning early. Bulk
+	// resolve mutates files on disk and the lock in memory; bailing
+	// halfway through would leave the working tree partially
+	// resolved while the lock still pointed at stale SHAs. Walk the
+	// whole list, persist the lock once at the end, then surface
+	// the aggregate error.
+	var resolveErrors []string
 	for ei := range lk.Envs {
 		entry := &lk.Envs[ei]
 		key := envKey(entry.Ref)
@@ -124,16 +131,18 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 			// `b env resolve` read or write files outside the
 			// project root.
 			if err := env.ValidatePathUnderRoot(projectRoot, absDest); err != nil {
-				return fmt.Errorf("path traversal rejected for %s: %w", f.Dest, err)
+				resolveErrors = append(resolveErrors, fmt.Sprintf("path traversal rejected for %s: %v", f.Dest, err))
+				continue
 			}
 			data, err := os.ReadFile(absDest)
 			if err != nil {
 				if os.IsNotExist(err) {
 					continue
 				}
-				return fmt.Errorf("reading %s: %w", f.Dest, err)
+				resolveErrors = append(resolveErrors, fmt.Sprintf("reading %s: %v", f.Dest, err))
+				continue
 			}
-			if !hasConflictMarkers(data) {
+			if !hasResolvableConflictMarkers(data) {
 				continue
 			}
 
@@ -152,7 +161,8 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 			}
 			resolved, n, rerr := resolveConflictMarkers(data, o.Ours)
 			if rerr != nil {
-				return fmt.Errorf("resolving %s: %w", f.Dest, rerr)
+				resolveErrors = append(resolveErrors, fmt.Sprintf("resolving %s: %v", f.Dest, rerr))
+				continue
 			}
 			if n == 0 {
 				continue
@@ -160,7 +170,8 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 			totalConflicts++
 			fmt.Fprintf(o.IO.Out, "  %s → %s\n", key, f.Dest)
 			if err := os.WriteFile(absDest, resolved, 0644); err != nil {
-				return fmt.Errorf("writing %s: %w", f.Dest, err)
+				resolveErrors = append(resolveErrors, fmt.Sprintf("writing %s: %v", f.Dest, err))
+				continue
 			}
 			// Update the lock entry's SHA so the next sync /
 			// `b verify` doesn't treat the resolved file as
@@ -169,10 +180,12 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 			// flagged the file as locally modified.
 			newHash, hashErr := lock.SHA256File(absDest)
 			if hashErr != nil {
-				return fmt.Errorf("rehashing %s after resolve: %w", f.Dest, hashErr)
+				resolveErrors = append(resolveErrors, fmt.Sprintf("rehashing %s: %v", f.Dest, hashErr))
+				continue
 			}
 			if newHash == "" {
-				return fmt.Errorf("rehashing %s after resolve: empty digest", f.Dest)
+				resolveErrors = append(resolveErrors, fmt.Sprintf("rehashing %s: empty digest", f.Dest))
+				continue
 			}
 			f.SHA256 = newHash
 			lockChanged = true
@@ -185,10 +198,18 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 		}
 	}
 
+	// Persist the lock BEFORE returning any error. If we got
+	// halfway through a bulk resolve and then hit a write failure,
+	// the working tree already has resolved files; the lock must
+	// reflect that to avoid leaving stale SHAs that would make
+	// every future status check report drift.
 	if lockChanged {
 		if err := lock.WriteLock(lockDir, lk, o.bVersion); err != nil {
-			return fmt.Errorf("updating b.lock after resolve: %w", err)
+			resolveErrors = append(resolveErrors, fmt.Sprintf("updating b.lock: %v", err))
 		}
+	}
+	if len(resolveErrors) > 0 {
+		return fmt.Errorf("env resolve: %d error(s):\n  - %s", len(resolveErrors), strings.Join(resolveErrors, "\n  - "))
 	}
 
 	if totalConflicts == 0 {
@@ -211,22 +232,27 @@ func envKey(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// hasConflictMarkers reports whether the byte slice contains a git
-// merge-file conflict region. The check is line-anchored (and
-// tolerates a trailing CR for CRLF files) so a marker substring
-// inside a YAML string literal or a markdown rule like `=======`
-// can't trigger a false positive — Run() would otherwise rewrite
-// a file that has no real conflicts.
+// hasResolvableConflictMarkers reports whether the byte slice
+// contains a git merge-file conflict region that env resolve can
+// rewrite. The check is line-anchored (and tolerates trailing CR for
+// CRLF files) so a marker substring inside a YAML string literal or
+// a markdown rule like `=======` can't trigger a false positive —
+// Run() would otherwise rewrite a file that has no real conflicts.
 //
-// Implementation note: a tiny state machine instead of bufio.Scanner.
-// Scanner has a max-token-size cap that would silently fail on very
-// long lines (SOPS blobs, minified JSON, lockfiles). The state
-// machine bounds per-line state at conflictPendingMax bytes — the
-// markers we care about are at most 16 bytes — so a degenerate
-// single long line is harmless regardless of file size.
-const conflictPendingMax = 64
-
-func hasConflictMarkers(b []byte) bool {
+// This is intentionally distinct from env.go's hasConflictMarkers,
+// which is the strict env-status detector. env resolve needs a
+// looser detector that:
+//   - matches bare `<<<<<<<` / `>>>>>>>` lines (no label suffix)
+//     because resolveConflictMarkers' parser uses the same loose
+//     prefix
+//   - reports an unterminated region (start marker but no closing
+//     line) as conflicted, so the cleanup command surfaces files
+//     left in a half-merged state by a partial manual edit
+//
+// env status uses the strict variant so partial files (e.g. a
+// document that legitimately starts with a `<<<<<<<` literal in a
+// YAML string) don't show up as drifted.
+func hasResolvableConflictMarkers(b []byte) bool {
 	var hasStart, hasSep, hasEnd bool
 	pending := make([]byte, 0, conflictPendingMax)
 	consume := func() {

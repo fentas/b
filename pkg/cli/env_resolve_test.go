@@ -166,7 +166,7 @@ func TestEnvResolveRun_RewritesFileAndUpdatesLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hasConflictMarkers(got) {
+	if hasResolvableConflictMarkers(got) {
 		t.Errorf("conflict markers not stripped:\n%s", got)
 	}
 	if !strings.Contains(string(got), "ther") {
@@ -224,24 +224,24 @@ func TestEnvResolveRun_PathTraversalRejected(t *testing.T) {
 // MUST be reported so `b env resolve` surfaces files left in a
 // half-merged state by a partial manual edit.
 func TestHasConflictMarkers(t *testing.T) {
-	if hasConflictMarkers([]byte("=======\n")) {
+	if hasResolvableConflictMarkers([]byte("=======\n")) {
 		t.Error("=======-only should not be a conflict")
 	}
-	if !hasConflictMarkers([]byte("<<<<<<< local\nx\n=======\ny\n>>>>>>> upstream\n")) {
+	if !hasResolvableConflictMarkers([]byte("<<<<<<< local\nx\n=======\ny\n>>>>>>> upstream\n")) {
 		t.Error("full conflict not detected")
 	}
 	// Unterminated region: start marker, no closing >>>>>>>.
-	if !hasConflictMarkers([]byte("<<<<<<< local\nleft over\n")) {
+	if !hasResolvableConflictMarkers([]byte("<<<<<<< local\nleft over\n")) {
 		t.Error("unterminated conflict region should be detected")
 	}
 	// Stray >>>>>>> with no opening should NOT trip the detector.
-	if hasConflictMarkers([]byte(">>>>>>> stray\n")) {
+	if hasResolvableConflictMarkers([]byte(">>>>>>> stray\n")) {
 		t.Error("stray closing marker should not be a conflict")
 	}
 	// Bare markers without a label suffix (hand-edited form)
 	// MUST be detected — resolveConflictMarkers uses the same
 	// loose prefix and will happily rewrite them.
-	if !hasConflictMarkers([]byte("<<<<<<<\nx\n=======\ny\n>>>>>>>\n")) {
+	if !hasResolvableConflictMarkers([]byte("<<<<<<<\nx\n=======\ny\n>>>>>>>\n")) {
 		t.Error("bare-marker conflict (no label suffix) should be detected")
 	}
 }

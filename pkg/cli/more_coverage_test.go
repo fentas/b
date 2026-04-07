@@ -587,7 +587,7 @@ func TestInstallOptions_RunEnvInstalls_Local(t *testing.T) {
 
 func TestNewEnvCmd_Subcommands(t *testing.T) {
 	c := NewEnvCmd(NewSharedOptions(mkIO(), nil))
-	for _, sub := range []string{"status", "remove", "match", "profiles", "add"} {
+	for _, sub := range []string{"status", "remove", "match", "profiles", "add", "resolve"} {
 		c.SetArgs([]string{sub, "--help"})
 		if err := c.Execute(); err != nil {
 			t.Errorf("Execute: %v", err)
