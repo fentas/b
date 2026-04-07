@@ -50,6 +50,11 @@ const PinAnnotation = "b.pin"
 // exist in pending (because upstream deleted them) are reinserted
 // from local.
 //
+// A `b.pin: true` at the document root is the "pin the whole
+// document" instruction — equivalent to setting `strategy: client`
+// for that one file. applyPinsYAML returns local verbatim when it
+// sees a root pin, so the splice's bytes are preserved exactly.
+//
 // Formatting caveat: when pin restoration actually substitutes a
 // subtree, the file is round-tripped through the yaml.v3 encoder,
 // so comments and whitespace on the affected file are NOT
@@ -88,6 +93,16 @@ func applyPinsYAML(local, pending []byte, filePath string) ([]byte, error) {
 	pinned := collectPinnedPaths(&localDoc, nil)
 	if len(pinned) == 0 {
 		return pending, nil
+	}
+	// A root-level pin (empty path) is the "pin the whole
+	// document" instruction: keep local verbatim and ignore
+	// upstream entirely. Equivalent to strategy: client at the
+	// per-file level. Detect first so we don't waste a parse on
+	// pending.
+	for _, p := range pinned {
+		if len(p.path) == 0 {
+			return local, nil
+		}
 	}
 
 	// Pending may be empty (a brand-new file) or header-only (no
@@ -232,11 +247,15 @@ func collectPinnedPaths(n *yaml.Node, prefix []string) []pinnedPath {
 		return nil
 	}
 	var out []pinnedPath
-	// First pass: is THIS map pinned?
+	// First pass: is THIS map pinned? An empty prefix means we're
+	// looking at the document root — that's a "pin the whole
+	// document" instruction, recorded as a pinnedPath with an empty
+	// path. applyPinsYAML special-cases that and returns local
+	// verbatim.
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k := n.Content[i]
 		v := n.Content[i+1]
-		if k.Value == PinAnnotation && isTrueScalar(v) && len(prefix) > 0 {
+		if k.Value == PinAnnotation && isTrueScalar(v) {
 			cp := make([]string, len(prefix))
 			copy(cp, prefix)
 			out = append(out, pinnedPath{path: cp})

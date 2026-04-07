@@ -212,6 +212,31 @@ func TestApplyPinsYAML_TruthyValueVariants(t *testing.T) {
 	}
 }
 
+// TestApplyPinsYAML_RootPinPreservesLocalVerbatim covers the
+// document-root pin case: `b.pin: true` at the top level pins the
+// entire file, and the function must return local bytes verbatim
+// (equivalent to strategy: client for that one file).
+func TestApplyPinsYAML_RootPinPreservesLocalVerbatim(t *testing.T) {
+	local := []byte(`b.pin: true
+binaries:
+  kubectl:
+    version: v1.30.0
+  helm:
+    version: v3.14.0
+`)
+	pending := []byte(`binaries:
+  kubectl:
+    version: v1.99.0
+`)
+	out, err := applyPinsYAML(local, pending, "b.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(local) {
+		t.Errorf("root pin should return local verbatim, got:\n%s", out)
+	}
+}
+
 // TestApplyPinsYAML_PinFalseIsNotAPin documents that only true-ish
 // values (true/yes/on) trigger the pin. `false` is treated as "no
 // pin set" so the upstream value can flow through.
