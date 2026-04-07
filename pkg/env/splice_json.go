@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 )
 
 // spliceJSON is the JSON sibling of spliceYAML. It replaces the values
@@ -140,8 +141,16 @@ func decodeOrderedJSONObject(data []byte) (orderedJSONObject, error) {
 	if d, ok := closing.(json.Delim); !ok || d != '}' {
 		return out, fmt.Errorf("expected '}' at end of object, got %v", closing)
 	}
-	if dec.More() {
-		return out, fmt.Errorf("unexpected trailing content after JSON object")
+	// dec.More() is scoped to the current array/object and would
+	// miss things like a stray `}` or `]` after the document. Read
+	// one more token and require io.EOF — the json tokenizer skips
+	// whitespace itself, so any non-whitespace bytes after the
+	// closing brace produce a non-EOF token here and get rejected.
+	if extra, err := dec.Token(); err != io.EOF {
+		if err != nil {
+			return out, fmt.Errorf("unexpected trailing content after JSON object: %w", err)
+		}
+		return out, fmt.Errorf("unexpected trailing content after JSON object: %v", extra)
 	}
 	return out, nil
 }

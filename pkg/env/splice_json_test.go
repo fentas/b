@@ -127,6 +127,11 @@ func TestSpliceJSON_RejectsMalformedLocal(t *testing.T) {
 	}{
 		{"no closing brace", `{"binaries":{"a":1}`},
 		{"trailing garbage", `{"binaries":{"a":1}}garbage`},
+		// Stray delimiter forms that the previous dec.More() check
+		// would silently miss because More() is scoped to the
+		// current array/object.
+		{"trailing brace", `{"binaries":{"a":1}}}`},
+		{"trailing bracket", `{"binaries":{"a":1}}]`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
