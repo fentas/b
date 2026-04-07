@@ -741,7 +741,3 @@ func TestBinary_DownloadBinary_Switch(t *testing.T) {
 	}
 }
 
-func TestBinary_IsBinaryInterface(t *testing.T) {
-	// Ensure LocalBinary method on Binary satisfies type assertions used downstream.
-	var _ = (*Binary)(nil)
-}
