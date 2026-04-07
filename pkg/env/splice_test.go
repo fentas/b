@@ -102,10 +102,11 @@ func TestSpliceYAMLByteLevel_PreservesCRLFLineEndings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("splice: %v", err)
 	}
-	// Every newline in the output should be CRLF — no bare LF.
-	if bytes.Contains(out, []byte("\n")) && !bytes.Contains(out, []byte("\r\n")) {
-		t.Errorf("expected CRLF endings, got bare LF:\n%q", out)
-	}
+	// Every newline in the output should be CRLF — no bare LF. The
+	// loop below is the actual check (it walks each '\n' and
+	// requires a '\r' immediately before it). The naive
+	// bytes.Contains check that used to live here was a no-op
+	// because CRLF itself contains '\n'.
 	for i := 0; i < len(out); i++ {
 		if out[i] == '\n' {
 			if i == 0 || out[i-1] != '\r' {
