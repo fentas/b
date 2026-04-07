@@ -147,7 +147,7 @@ extras:
 	binaries := strings.Index(outStr, "binaries:")
 	envs := strings.Index(outStr, "envs:")
 	extras := strings.Index(outStr, "extras:")
-	if !(binaries < envs && envs < extras) {
+	if binaries >= envs || envs >= extras {
 		t.Errorf("scoped keys reordered (binaries=%d envs=%d extras=%d):\n%s",
 			binaries, envs, extras, outStr)
 	}
