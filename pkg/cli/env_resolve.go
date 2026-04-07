@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"os"
@@ -91,9 +90,11 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 		return nil
 	}
 
-	// Normalize each filter arg to its canonical "ref" or "ref#label"
-	// form so labeled envs can be targeted unambiguously when multiple
-	// lock entries share the same ref.
+	// Trim whitespace off each filter arg so the matching loop
+	// below can compare against the canonical "ref" / "ref#label"
+	// form built from the lock entry side. envKey is intentionally
+	// just TrimSpace; the canonical form is built per-entry in the
+	// loop, not here.
 	filter := make(map[string]bool, len(envFilter))
 	for _, k := range envFilter {
 		filter[envKey(k)] = true
@@ -135,10 +136,18 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 			if !hasConflictMarkers(data) {
 				continue
 			}
-			totalConflicts++
-			fmt.Fprintf(o.IO.Out, "  %s → %s\n", key, f.Dest)
 
+			// In list-only mode (no --ours/--theirs) we trust
+			// the line-anchored marker scan and just print the
+			// file. In rewrite mode we need the parser to find
+			// at least one real region; otherwise the marker
+			// scan was a false positive on a pathological
+			// input and we leave the file alone WITHOUT
+			// counting it as a conflict (so the summary line
+			// reflects what was actually actionable).
 			if !o.Ours && !o.Theirs {
+				totalConflicts++
+				fmt.Fprintf(o.IO.Out, "  %s → %s\n", key, f.Dest)
 				continue
 			}
 			resolved, n, rerr := resolveConflictMarkers(data, o.Ours)
@@ -146,14 +155,10 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 				return fmt.Errorf("resolving %s: %w", f.Dest, rerr)
 			}
 			if n == 0 {
-				// hasConflictMarkers said yes but the parser
-				// found no real regions (false-positive
-				// detection on a pathological input). Skip
-				// the write and lock update so we don't
-				// touch a file that doesn't actually need
-				// resolving.
 				continue
 			}
+			totalConflicts++
+			fmt.Fprintf(o.IO.Out, "  %s → %s\n", key, f.Dest)
 			if err := os.WriteFile(absDest, resolved, 0644); err != nil {
 				return fmt.Errorf("writing %s: %w", f.Dest, err)
 			}
@@ -212,12 +217,20 @@ func envKey(s string) string {
 // inside a YAML string literal or a markdown rule like `=======`
 // can't trigger a false positive — Run() would otherwise rewrite
 // a file that has no real conflicts.
+//
+// Implementation note: a tiny state machine instead of bufio.Scanner.
+// Scanner has a max-token-size cap that would silently fail on very
+// long lines (SOPS blobs, minified JSON, lockfiles). The state
+// machine bounds per-line state at conflictPendingMax bytes — the
+// markers we care about are at most 16 bytes — so a degenerate
+// single long line is harmless regardless of file size.
+const conflictPendingMax = 64
+
 func hasConflictMarkers(b []byte) bool {
 	var hasStart, hasSep, hasEnd bool
-	scanner := bufio.NewScanner(bytes.NewReader(b))
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
+	pending := make([]byte, 0, conflictPendingMax)
+	consume := func() {
+		line := pending
 		if n := len(line); n > 0 && line[n-1] == '\r' {
 			line = line[:n-1]
 		}
@@ -229,11 +242,22 @@ func hasConflictMarkers(b []byte) bool {
 		case bytes.HasPrefix(line, []byte(">>>>>>> ")):
 			hasEnd = true
 		}
-		if hasStart && hasSep && hasEnd {
-			return true
+	}
+	for _, c := range b {
+		if c == '\n' {
+			consume()
+			pending = pending[:0]
+			if hasStart && hasSep && hasEnd {
+				return true
+			}
+			continue
+		}
+		if len(pending) < conflictPendingMax {
+			pending = append(pending, c)
 		}
 	}
-	return false
+	consume()
+	return hasStart && hasSep && hasEnd
 }
 
 // resolveConflictMarkers walks a file containing git-style conflict
