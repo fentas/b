@@ -116,7 +116,13 @@ func TestSpliceYAMLByteLevel_PreservesCRLFLineEndings(t *testing.T) {
 	}
 	// Out-of-scope envs section is byte-identical including its CRLFs.
 	envsStart := bytes.Index(local, []byte("envs:"))
+	if envsStart == -1 {
+		t.Fatalf("test fixture missing envs section:\n%q", local)
+	}
 	outEnvsStart := bytes.Index(out, []byte("envs:"))
+	if outEnvsStart == -1 {
+		t.Fatalf("spliced output missing envs section:\n%q", out)
+	}
 	if !bytes.Equal(local[envsStart:], out[outEnvsStart:]) {
 		t.Errorf("envs section not byte-identical under CRLF")
 	}

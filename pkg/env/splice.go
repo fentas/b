@@ -182,9 +182,12 @@ func spliceYAML(local, merged []byte, selectors []string) ([]byte, error) {
 
 // spliceYAMLByteLevel is the format-preserving fast path. It walks
 // `local` byte-by-byte, copies out-of-scope ranges verbatim, and
-// substitutes in-scope ranges with the marshaled value subtree from
-// `merged`. The output preserves whitespace, quoting style, and
-// comments on every byte that wasn't touched.
+// substitutes each in-scope top-level key range with a marshaled
+// `key: value` entry from `merged`. That means the scoped key line
+// is also re-emitted, not preserved from `local`, so key quoting
+// style and any comments attached to that line may change. Bytes
+// outside the replaced top-level ranges keep their original
+// whitespace, quoting style, and comments.
 //
 // Returns an error (instead of falling through to a slower path) when
 // the local YAML can't be parsed or has a non-mapping root. The
