@@ -230,10 +230,9 @@ func TestSyncEnv_LocalMergeAndClient(t *testing.T) {
 	if err := os.WriteFile(localFile, []byte("c: 3\na: 1\n"), 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	// Three-way merge: base = lockEntry's (fake) commit which we don't actually
-	// have in the repo, so doMerge() returns "no previous commit for three-way
-	// merge base" and SyncEnv falls back to replace. Either way, Run should
-	// not fail.
+	// Three-way merge: lockEntry.Commit (firstSha) IS in the bare repo,
+	// so doMerge() fetches base="a: 1", local="c: 3\na: 1\n", upstream=
+	// "a: 1\nb: 2\n" and produces a clean merge. Run should not fail.
 	if _, err := SyncEnv(cfgMerge, project, t.TempDir(), lockEntry); err != nil {
 		t.Errorf("merge sync: %v", err)
 	}

@@ -57,6 +57,19 @@ jobs:
         flags: unittests
         name: codecov-umbrella
 
+    # Share the regenerated badge/JSON with the refresh-coverage job so it
+    # doesn't have to re-run the whole test suite on main.
+    - name: Upload coverage artifacts
+      if: matrix.os == 'ubuntu-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-files
+        path: |
+          test/coverage/badge.json
+          test/coverage/coverage.json
+          test/coverage/coverage.out
+        retention-days: 1
+
   # Refresh test/coverage/{badge,coverage}.json on main only. Coverage is not
   # bit-for-bit reproducible across runners/Go versions, so we deliberately do
   # NOT block PRs on a diff of these files — the badge tracks main.
@@ -71,13 +84,13 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
+    # Reuse the badge/JSON produced by the matrix test job instead of
+    # re-running 'make coverage' (which would run the whole test suite again).
+    - name: Download coverage artifacts
+      uses: actions/download-artifact@v4
       with:
-        go-version-file: go.mod
-
-    - name: Regenerate coverage badge/json
-      run: make coverage
+        name: coverage-files
+        path: test/coverage/
 
     - name: Commit if changed
       run: |
