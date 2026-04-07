@@ -323,6 +323,25 @@ profiles:
 	}
 }
 
+// TestFilterContent_JSON_MixedSelectorsErrors verifies that mixing
+// simple and complex selectors on a JSON file errors out clearly
+// instead of going through an untested merge path. JSON has no
+// comments to preserve, so the historical "mixed mode" merge in
+// filterJSONHybrid was dead code with no real-world use case.
+// Routing requests must be either all simple or all complex.
+func TestFilterContent_JSON_MixedSelectorsErrors(t *testing.T) {
+	content := []byte(`{"binaries": {"a": 1}, "envs": {}}`)
+	_, err := filterContent(content,
+		[]string{"envs", "{binaries: from_items(items(binaries)[?true])}"},
+		"config.json")
+	if err == nil {
+		t.Fatal("expected error for mixed simple+complex selectors on JSON")
+	}
+	if !strings.Contains(err.Error(), "use either dot-paths only or JMESPath only") {
+		t.Errorf("error should explain selector-mode guidance, got: %v", err)
+	}
+}
+
 func TestFilterContent_JMESPath_JSON(t *testing.T) {
 	content := []byte(`{"binaries": {"a": {"g": ["x"]}, "b": {"g": ["y"]}}, "envs": {}}`)
 	out, err := filterContent(content,
