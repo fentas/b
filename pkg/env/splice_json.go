@@ -26,6 +26,15 @@ import (
 func spliceJSON(local, merged []byte, selectors []string) ([]byte, error) {
 	scope := topLevelKeysFromSelectors(selectors)
 	if len(scope) == 0 {
+		// Selectors that reduce to no top-level keys (empty,
+		// "."), are degenerate. Returning `merged` here would
+		// silently drop the consumer's local file in a merge
+		// flow where merged is `{}` from a JMESPath that hit
+		// nothing. Refuse explicitly so the caller fixes the
+		// selector instead of losing data.
+		if len(selectors) > 0 {
+			return nil, fmt.Errorf("JSON splice: selectors %v reduced to no top-level keys (use a real key like \"binaries\" or drop the select)", selectors)
+		}
 		return merged, nil
 	}
 
