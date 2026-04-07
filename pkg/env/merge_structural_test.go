@@ -3,6 +3,8 @@ package env
 import (
 	"strings"
 	"testing"
+
+	"github.com/fentas/b/pkg/gitcache"
 )
 
 // TestStructural_ExplicitEmptyJSONRoundTrips: a real `{}` document
@@ -58,6 +60,17 @@ func TestMergeWithStructuralFallback_AdjacentInsertsResolveStructurally(t *testi
 	base := []byte("binaries:\n  kubectl: {}\n")
 	local := []byte("binaries:\n  kubectl: {}\n  helm: {}\n")
 	upstream := []byte("binaries:\n  kubectl: {}\n  kustomize: {}\n")
+	// Sanity-check the test premise: git merge-file MUST flag this
+	// as a conflict on its own. If it ever resolves cleanly the test
+	// would pass without exercising the structural-merge fallback at
+	// all, which would silently turn the test into a no-op.
+	_, textConflict, textErr := gitcache.Merge3Way(local, base, upstream)
+	if textErr != nil {
+		t.Fatalf("text merge failed: %v", textErr)
+	}
+	if !textConflict {
+		t.Skip("git merge-file resolved this case cleanly on this platform; structural fallback isn't being exercised")
+	}
 	out, hasConflict, err := mergeWithStructuralFallback(local, base, upstream, "b.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -74,6 +87,29 @@ func TestMergeWithStructuralFallback_AdjacentInsertsResolveStructurally(t *testi
 	// The output must NOT contain conflict markers.
 	if strings.Contains(s, "<<<<<<<") {
 		t.Errorf("conflict markers leaked into clean fallback output:\n%s", s)
+	}
+}
+
+// TestStructural_BothAddSameMapKey: base lacks the key entirely,
+// local and upstream both add it as a map. This must be resolved as
+// a recursive merge of the two new maps (NOT a leaf type-change
+// conflict).
+func TestStructural_BothAddSameMapKey(t *testing.T) {
+	base := []byte(`{}`)
+	local := []byte(`{"binaries":{"helm":{}}}`)
+	upstream := []byte(`{"binaries":{"kustomize":{}}}`)
+	out, conflict, err := Merge3WayStructural(local, base, upstream, "b.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conflict {
+		t.Errorf("expected clean merge, got conflict")
+	}
+	s := string(out)
+	for _, k := range []string{"helm", "kustomize"} {
+		if !strings.Contains(s, k) {
+			t.Errorf("missing %q in merged output:\n%s", k, s)
+		}
 	}
 }
 

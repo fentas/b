@@ -212,17 +212,26 @@ func mergeValues(base, local, upstream any, path []string) (any, []string) {
 	if reflect.DeepEqual(base, upstream) {
 		return local, nil
 	}
-	// Both changed differently. We can only safely recurse when ALL
-	// THREE sides are maps — otherwise one side performed a type
-	// change (e.g. base was a scalar, local and upstream both
-	// rewrote it as a map) and silently merging the maps would hide
-	// the type change context. In that case it's a leaf conflict
-	// the user has to resolve.
+	// Both changed differently. We recurse into maps in two cases:
+	//   - all three sides are maps (the normal nested case)
+	//   - base is absent (nil) and both local and upstream added a
+	//     map at this path. This is a "both added concurrently"
+	//     case, not a type change, so we can safely recurse with a
+	//     synthetic empty base map and let mergeMaps reconcile the
+	//     keys.
+	// A non-nil non-map base + map local + map upstream is a real
+	// type change (scalar → map on both sides) and stays a leaf
+	// conflict the user has to resolve.
 	bm, baseIsMap := base.(map[string]any)
 	lm, localIsMap := local.(map[string]any)
 	um, upstreamIsMap := upstream.(map[string]any)
-	if baseIsMap && localIsMap && upstreamIsMap {
-		return mergeMaps(bm, lm, um, path)
+	if localIsMap && upstreamIsMap {
+		switch {
+		case baseIsMap:
+			return mergeMaps(bm, lm, um, path)
+		case base == nil:
+			return mergeMaps(map[string]any{}, lm, um, path)
+		}
 	}
 	// Otherwise: leaf conflict.
 	return local, []string{strings.Join(path, ".")}
