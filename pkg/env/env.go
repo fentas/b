@@ -54,9 +54,15 @@ type SyncResult struct {
 	Commit         string
 	PreviousCommit string
 	Files          []lock.LockFile
-	Skipped        bool   // true if already up-to-date
-	Message        string // human-readable status
-	Conflicts      int    // number of files with merge conflicts
+	// Deleted lists files that were in the previous lock but are no
+	// longer in upstream's manifest. They are kept separate from
+	// Files so the lock writer never persists them, while still
+	// being available to PlanFromResult so they show up as `delete`
+	// rows in the plan. See #125 phase 3.
+	Deleted   []lock.LockFile
+	Skipped   bool   // true if already up-to-date
+	Message   string // human-readable status
+	Conflicts int    // number of files with merge conflicts
 }
 
 // SyncEnv syncs environment files from an upstream git repo.
@@ -477,6 +483,80 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		})
 	}
 
+	// Detect orphans: files that were in the previous lock but no
+	// longer match upstream's current manifest. They are emitted as
+	// rows in result.Deleted so the planner shows them as `delete`
+	// actions and the safety gate can refuse the plan in strict mode.
+	//
+	// Phase 3 of #125: this PR adds the *plumbing* — detection and
+	// plan rendering. Wiring the actual on-disk removal through the
+	// gateApply layer is a deliberate follow-up: the existing flow
+	// runs SyncEnv once for dry-run and once for apply, and the
+	// "should I really delete?" decision belongs in the CLI layer
+	// next to the existing strict/prompt/auto safety logic.
+	var deletedFiles []lock.LockFile
+	if lockEntry != nil {
+		// Match by (source path, dest path) so a file that's still
+		// in upstream but whose dest changed (e.g. user edited
+		// glob config or `dest:`) still surfaces the old dest as
+		// an orphan that needs cleaning up.
+		type fileKey struct{ src, dest string }
+		matchedSet := make(map[fileKey]bool, len(matched))
+		for _, m := range matched {
+			matchedSet[fileKey{src: m.SourcePath, dest: m.DestPath}] = true
+		}
+		for _, prev := range lockEntry.Files {
+			if matchedSet[fileKey{src: prev.Path, dest: prev.Dest}] {
+				continue
+			}
+			absDest := prev.Dest
+			if !filepath.IsAbs(absDest) {
+				absDest = filepath.Join(projectRoot, absDest)
+			}
+			absDest = filepath.Clean(absDest)
+			// Path-traversal check on the previous-lock dest, just
+			// like the in-loop branch does for current files. A
+			// stale or malicious lock entry must not let SyncEnv
+			// surface paths outside the project root.
+			if err := ValidatePathUnderRoot(projectRoot, absDest); err != nil {
+				return nil, fmt.Errorf("path traversal rejected for orphan %s: %w", prev.Dest, err)
+			}
+			deleteStatus := "deleted"
+			if cfg.DryRun {
+				deleteStatus = "deleted (dry-run)"
+			}
+			// Three branches:
+			//   - file already missing on disk → emit
+			//     "delete-noop (already gone)" so the planner
+			//     renders it as a non-destructive keep row;
+			//     the consumer doesn't need to do anything.
+			//   - file unreadable (permissions, transient I/O)
+			//     → emit "delete-skipped (unreadable)" so a real
+			//     read failure never silently maps to a
+			//     destructive deleted row.
+			//   - file present but modified relative to the
+			//     previous lock → emit "delete-skipped (local
+			//     modified)" so the consumer's edits are kept.
+			//   - otherwise → keep the default "deleted" status.
+			localHash, hashErr := lock.SHA256File(absDest)
+			switch {
+			case hashErr != nil && os.IsNotExist(hashErr):
+				deleteStatus = "delete-noop (already gone)"
+			case hashErr != nil:
+				deleteStatus = "delete-skipped (unreadable)"
+			case localHash != "" && localHash != prev.SHA256:
+				deleteStatus = "delete-skipped (local modified)"
+			}
+			deletedFiles = append(deletedFiles, lock.LockFile{
+				Path:   prev.Path,
+				Dest:   prev.Dest,
+				SHA256: "",
+				Mode:   prev.Mode,
+				Status: deleteStatus,
+			})
+		}
+	}
+
 	// Run post-sync hook (skip in dry-run mode)
 	if cfg.OnPostSync != "" && !cfg.DryRun {
 		if err := runHook(cfg.OnPostSync, projectRoot, hookStdout(cfg), hookStderr(cfg)); err != nil {
@@ -491,7 +571,8 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		Commit:         commit,
 		PreviousCommit: previousCommit,
 		Files:          lockFiles,
-		Message:        syncMessage(lockFiles, conflicts),
+		Deleted:        deletedFiles,
+		Message:        syncMessage(lockFiles, deletedFiles, conflicts),
 		Conflicts:      conflicts,
 	}, nil
 }
@@ -728,7 +809,12 @@ func fileModeToString(mode os.FileMode) string {
 }
 
 // syncMessage builds a human-readable sync message from file results.
-func syncMessage(files []lock.LockFile, conflicts int) string {
+// Orphan delete rows are passed in separately because they live on
+// SyncResult.Deleted (not Files) so the lock writer never persists
+// them — but the user-facing message must still account for them or
+// "upstream removed all files" syncs would misleadingly read as
+// "0 files synced".
+func syncMessage(files []lock.LockFile, deleted []lock.LockFile, conflicts int) string {
 	replaced, kept, merged, unchanged := 0, 0, 0, 0
 	for _, f := range files {
 		// Strip dry-run suffix for counting
@@ -746,13 +832,27 @@ func syncMessage(files []lock.LockFile, conflicts int) string {
 			// conflicts are reported separately via the conflicts argument
 		}
 	}
-
+	deletes, deleteSkips, deleteNoops := 0, 0, 0
+	for _, f := range deleted {
+		status := strings.TrimSuffix(f.Status, " (dry-run)")
+		switch {
+		case strings.HasPrefix(status, "delete-skipped"):
+			deleteSkips++
+		case strings.HasPrefix(status, "delete-noop"):
+			deleteNoops++
+		default:
+			deletes++
+		}
+	}
 	parts := []string{}
 	total := len(files)
-	if replaced == total {
+	if total == 0 && deletes == 0 && deleteSkips == 0 && deleteNoops == 0 {
+		return "0 file(s) synced"
+	}
+	if replaced == total && deletes == 0 && deleteSkips == 0 && deleteNoops == 0 {
 		return fmt.Sprintf("%d file(s) synced", total)
 	}
-	if unchanged == total {
+	if unchanged == total && deletes == 0 && deleteSkips == 0 && deleteNoops == 0 {
 		return fmt.Sprintf("%d file(s) unchanged", total)
 	}
 	if replaced > 0 {
@@ -769,6 +869,18 @@ func syncMessage(files []lock.LockFile, conflicts int) string {
 	}
 	if unchanged > 0 {
 		parts = append(parts, fmt.Sprintf("%d unchanged", unchanged))
+	}
+	if deletes > 0 {
+		parts = append(parts, fmt.Sprintf("%d deleted", deletes))
+	}
+	if deleteSkips > 0 {
+		parts = append(parts, fmt.Sprintf("%d delete(s) skipped", deleteSkips))
+	}
+	if deleteNoops > 0 {
+		parts = append(parts, fmt.Sprintf("%d delete(s) already gone", deleteNoops))
+	}
+	if len(parts) == 0 {
+		return "no changes"
 	}
 	return strings.Join(parts, ", ")
 }

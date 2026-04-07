@@ -51,7 +51,7 @@ func TestFindLockFile_EmptyFiles(t *testing.T) {
 }
 
 func TestSyncMessage_EmptyFiles(t *testing.T) {
-	got := syncMessage(nil, 0)
+	got := syncMessage(nil, nil, 0)
 	if got != "0 file(s) synced" {
 		t.Errorf("syncMessage(nil) = %q", got)
 	}
@@ -62,7 +62,7 @@ func TestSyncMessage_AllMerged(t *testing.T) {
 		{Status: "merged"},
 		{Status: "merged"},
 	}
-	got := syncMessage(files, 0)
+	got := syncMessage(files, nil, 0)
 	if got != "2 merged" {
 		t.Errorf("syncMessage() = %q, want %q", got, "2 merged")
 	}
@@ -73,7 +73,7 @@ func TestSyncMessage_ReplacedWithLocalChanges(t *testing.T) {
 		{Status: "replaced (local changes overwritten)"},
 		{Status: "replaced"},
 	}
-	got := syncMessage(files, 0)
+	got := syncMessage(files, nil, 0)
 	if got != "2 file(s) synced" {
 		t.Errorf("syncMessage() = %q, want %q", got, "2 file(s) synced")
 	}
@@ -131,7 +131,7 @@ func TestSyncMessage_MixedStatuses(t *testing.T) {
 		{Status: "kept"},
 		{Status: "merged"},
 	}
-	got := syncMessage(files, 0)
+	got := syncMessage(files, nil, 0)
 	if got == "" {
 		t.Error("expected non-empty message")
 	}
@@ -142,7 +142,7 @@ func TestSyncMessage_WithConflicts(t *testing.T) {
 		{Status: "replaced"},
 		{Status: "conflict"},
 	}
-	got := syncMessage(files, 1)
+	got := syncMessage(files, nil, 1)
 	if got == "" {
 		t.Error("expected non-empty message")
 	}
@@ -153,7 +153,7 @@ func TestSyncMessage_AllKept(t *testing.T) {
 		{Status: "kept"},
 		{Status: "kept"},
 	}
-	got := syncMessage(files, 0)
+	got := syncMessage(files, nil, 0)
 	if got != "2 kept" {
 		t.Errorf("syncMessage() = %q, want %q", got, "2 kept")
 	}
