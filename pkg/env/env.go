@@ -415,6 +415,17 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 					if err := writeFile(destPath, target, fileMode); err != nil {
 						return nil, err
 					}
+				} else {
+					// Content unchanged but upstream may have
+					// flipped the file mode (e.g. 644→755).
+					// writeFile would normally do this; apply
+					// it explicitly when we skip the write so
+					// permissions stay in sync.
+					if info, statErr := os.Stat(destPath); statErr == nil && info.Mode().Perm() != fileMode {
+						if chmodErr := os.Chmod(destPath, fileMode); chmodErr != nil {
+							return nil, fmt.Errorf("updating permissions for %s: %w", destPath, chmodErr)
+						}
+					}
 				}
 			}
 		} else {

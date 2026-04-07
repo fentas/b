@@ -185,6 +185,33 @@ func TestApplyPinsYAML_NestedPinAtArbitraryDepth(t *testing.T) {
 	}
 }
 
+// TestApplyPinsYAML_TruthyValueVariants covers the documented set of
+// truthy values for b.pin: true / yes / on, plus mixed-case variants.
+// Without this coverage a future "tighten the parser" change could
+// silently drop yes/on support without breaking any test.
+func TestApplyPinsYAML_TruthyValueVariants(t *testing.T) {
+	pending := []byte(`binaries:
+  kubectl:
+    version: v1.31.0
+`)
+	for _, val := range []string{"true", "yes", "on", "True", "YES", "On"} {
+		t.Run(val, func(t *testing.T) {
+			local := []byte(`binaries:
+  kubectl:
+    version: v1.30.0
+    b.pin: ` + val + `
+`)
+			out, err := applyPinsYAML(local, pending, "b.yaml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(out), "v1.30.0") {
+				t.Errorf("b.pin: %s should pin, got:\n%s", val, out)
+			}
+		})
+	}
+}
+
 // TestApplyPinsYAML_PinFalseIsNotAPin documents that only true-ish
 // values (true/yes/on) trigger the pin. `false` is treated as "no
 // pin set" so the upstream value can flow through.

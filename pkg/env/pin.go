@@ -34,7 +34,12 @@ const PinAnnotation = "b.pin"
 // The function is a no-op when:
 //   - the file is not YAML (caller filters by extension)
 //   - local has no pinned keys
-//   - pending parses cleanly but the pinned path isn't present
+//   - pending is unparseable (e.g. has conflict markers) — handled
+//     on a future clean sync
+//
+// Pinned paths that exist in `local` but NOT in `pending` are
+// reinserted via addPath, so a key the consumer pinned that
+// upstream then deleted is preserved.
 //
 // Pin scope is per-map-node: if `kubectl` is pinned, the entire
 // `kubectl:` map is preserved verbatim. Deeper pins only apply when
