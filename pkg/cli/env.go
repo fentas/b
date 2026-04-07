@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +23,16 @@ import (
 	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/b/pkg/state"
 )
+
+// hasConflictMarkers reports whether the byte slice contains all
+// three pieces of a git merge-file conflict region. We require all
+// three so partial matches (e.g. a markdown rule line that contains
+// `=======`) don't trip the detector.
+func hasConflictMarkers(b []byte) bool {
+	return bytes.Contains(b, []byte("<<<<<<<")) &&
+		bytes.Contains(b, []byte("=======")) &&
+		bytes.Contains(b, []byte(">>>>>>>"))
+}
 
 // NewEnvCmd creates the env parent command with subcommands.
 func NewEnvCmd(shared *SharedOptions) *cobra.Command {
@@ -108,6 +119,12 @@ func (o *EnvStatusOptions) Run() error {
 		// Check local files for drift (content and mode)
 		localDrift := 0
 		missingFiles := 0
+		// Conflicted files are surfaced separately so users see them
+		// in `b env status` without having to run `b env resolve`.
+		// They still count as drift internally — a file with markers
+		// is by definition modified relative to the lock — but we
+		// also report the conflict count so the message is actionable.
+		conflictedFiles := 0
 		for _, f := range lockEntry.Files {
 			destPath := f.Dest
 			if !filepath.IsAbs(destPath) {
@@ -137,6 +154,14 @@ func (o *EnvStatusOptions) Run() error {
 			}
 			if hash != f.SHA256 {
 				localDrift++
+				// Re-read and check for conflict markers so the
+				// status output can call them out specifically. We
+				// only ever read files we already know are drifted,
+				// so this is bounded by `localDrift` rather than
+				// scanning every synced file on every status run.
+				if data, rerr := os.ReadFile(destPath); rerr == nil && hasConflictMarkers(data) {
+					conflictedFiles++
+				}
 				continue
 			}
 			// Also check file mode drift when lock records a mode
@@ -163,6 +188,9 @@ func (o *EnvStatusOptions) Run() error {
 			}
 			if localDrift > 0 {
 				fmt.Fprintf(o.IO.Out, "    ✎ %d file(s) modified locally\n", localDrift)
+			}
+			if conflictedFiles > 0 {
+				fmt.Fprintf(o.IO.Out, "    ✗ %d file(s) with unresolved conflict markers — run `b env resolve`\n", conflictedFiles)
 			}
 			if missingFiles > 0 {
 				fmt.Fprintf(o.IO.Out, "    ✗ %d file(s) missing\n", missingFiles)
