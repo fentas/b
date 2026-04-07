@@ -28,7 +28,10 @@ func TestFindConfigFile(t *testing.T) {
 		t.Errorf("err: %v", err)
 	}
 	if p != "" {
-		absDir, _ := filepath.Abs(dir)
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			t.Fatalf("Abs(%q): %v", dir, err)
+		}
 		if strings.HasPrefix(p, absDir) {
 			t.Errorf("unexpected match inside tempdir: %q (under %q)", p, absDir)
 		}

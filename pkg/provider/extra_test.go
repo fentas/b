@@ -169,7 +169,10 @@ func TestDocker_Metadata(t *testing.T) {
 }
 
 func TestGiteaSetAuth(t *testing.T) {
-	r, _ := http.NewRequest("GET", "http://x", nil)
+	r, err := http.NewRequest("GET", "http://x", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	t.Setenv("GITEA_TOKEN", "")
 	giteaSetAuth(r)
 	if r.Header.Get("Authorization") != "" {
