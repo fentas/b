@@ -86,11 +86,14 @@ jobs:
 
     # Reuse the badge/JSON produced by the matrix test job instead of
     # re-running 'make coverage' (which would run the whole test suite again).
+    # upload-artifact@v4 preserves the uploaded paths relative to the
+    # workspace root, so we download to '.' to restore them to their original
+    # locations (e.g. 'test/coverage/badge.json').
     - name: Download coverage artifacts
       uses: actions/download-artifact@v4
       with:
         name: coverage-files
-        path: test/coverage/
+        path: .
 
     - name: Commit if changed
       run: |
