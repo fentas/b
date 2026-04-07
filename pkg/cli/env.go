@@ -89,14 +89,23 @@ func (s *conflictMarkerScanner) consumeLine() {
 		line = line[:n-1]
 	}
 	switch {
-	case bytes.HasPrefix(line, []byte("<<<<<<< ")):
+	case bytes.HasPrefix(line, conflictStartMarker):
 		s.hasStart = true
-	case bytes.Equal(line, []byte("=======")):
+	case bytes.Equal(line, conflictSepMarker):
 		s.hasSep = true
-	case bytes.HasPrefix(line, []byte(">>>>>>> ")):
+	case bytes.HasPrefix(line, conflictEndMarker):
 		s.hasEnd = true
 	}
 }
+
+// Package-level marker byte slices. Defined once so the
+// per-line consumeLine path doesn't allocate a fresh []byte on
+// every comparison while scanning large files.
+var (
+	conflictStartMarker = []byte("<<<<<<< ")
+	conflictSepMarker   = []byte("=======")
+	conflictEndMarker   = []byte(">>>>>>> ")
+)
 
 func (s *conflictMarkerScanner) allSeen() bool {
 	return s.hasStart && s.hasSep && s.hasEnd
