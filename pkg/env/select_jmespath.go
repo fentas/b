@@ -30,18 +30,20 @@ import (
 //
 // Classification policy: this is a *blocklist* of JMESPath grammar
 // characters, not an allowlist of identifier characters. The legacy
-// dot-path validator in filterYAML/filterJSON only rejects `[]` and
-// `\` and empty segments — it accepts plain keys with characters like
-// `/`, `+`, `@`, `#`, etc. To stay backward compatible (per copilot
-// review on PR #127 round 2), the classifier must NOT route those
-// keys to JMESPath, where they'd hit a parse error.
+// YAML dot-path validator (in filterYAML) only rejects `[]` and `\`
+// and empty segments — it accepts plain keys with characters like
+// `/`, `+`, `@`, `#`, etc. JSON selection (in filterJSON) does not
+// use that same validator and instead follows gjson/sjson path
+// semantics. To stay backward compatible (per copilot review on
+// PR #127 rounds 2 and 5), the classifier must NOT route those
+// legacy plain keys to JMESPath, where they'd hit a parse error.
 //
 // The blocklisted characters are exactly the ones that introduce
 // JMESPath grammar: brackets `[]`, parens `()`, braces `{}`, pipe `|`,
 // star `*`, ampersand `&`, comma `,`, single/double quote `'"`,
 // comparison `<>=!`, backtick (literal), and backslash. Empty/double
 // dots are also rejected to keep the classification consistent with
-// the validator's segment check.
+// the YAML validator's segment check.
 func isSimpleDotPath(sel string) bool {
 	// Reject multiple leading dots (e.g. "..a"). The existing simple
 	// dot-path validator (filterYAML) treats ".a..b" → segments
