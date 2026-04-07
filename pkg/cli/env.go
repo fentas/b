@@ -25,11 +25,83 @@ import (
 	"github.com/fentas/b/pkg/state"
 )
 
+// conflictMarkerScanner is a small line-anchored detector for git
+// merge-file conflict regions. It is line-oriented so a markdown
+// rule like `=======` or a stray `<<<<<<<` inside a string literal
+// can't trip the detector. CRLF endings are tolerated by trimming
+// `\r` off the end of each candidate line before comparison.
+//
+// The scanner is intentionally state-machine based instead of using
+// bufio.Scanner so a single very long line cannot exceed the buffer
+// limit and panic / fall back silently — `b env status` is expected
+// to scan arbitrary user files including SOPS-encrypted blobs.
+type conflictMarkerScanner struct {
+	hasStart, hasSep, hasEnd bool
+	// pending holds the bytes of the current line so far. We only
+	// keep up to the first 64 bytes — the markers we care about are
+	// all <= 16 bytes — so a degenerate one-line file with no
+	// newlines doesn't grow this slice unbounded.
+	pending []byte
+}
+
+const conflictPendingMax = 64
+
+// Update feeds another chunk of file bytes to the scanner. Returns
+// true once all three marker shapes have been seen (the caller can
+// stop checking after that).
+func (s *conflictMarkerScanner) Update(chunk []byte) bool {
+	if s.allSeen() {
+		return true
+	}
+	for _, b := range chunk {
+		if b == '\n' {
+			s.consumeLine()
+			s.pending = s.pending[:0]
+			if s.allSeen() {
+				return true
+			}
+			continue
+		}
+		if len(s.pending) < conflictPendingMax {
+			s.pending = append(s.pending, b)
+		}
+	}
+	return s.allSeen()
+}
+
+// Done flushes the final partial line (a file with no trailing
+// newline) and returns whether all three markers were seen.
+func (s *conflictMarkerScanner) Done() bool {
+	if !s.allSeen() {
+		s.consumeLine()
+	}
+	return s.allSeen()
+}
+
+func (s *conflictMarkerScanner) consumeLine() {
+	line := s.pending
+	// Tolerate CRLF: drop a trailing \r so the separator check
+	// matches `=======\r` files too.
+	if n := len(line); n > 0 && line[n-1] == '\r' {
+		line = line[:n-1]
+	}
+	switch {
+	case bytes.HasPrefix(line, []byte("<<<<<<< ")):
+		s.hasStart = true
+	case bytes.Equal(line, []byte("=======")):
+		s.hasSep = true
+	case bytes.HasPrefix(line, []byte(">>>>>>> ")):
+		s.hasEnd = true
+	}
+}
+
+func (s *conflictMarkerScanner) allSeen() bool {
+	return s.hasStart && s.hasSep && s.hasEnd
+}
+
 // hasConflictMarkers reports whether the byte slice contains a git
-// merge-file conflict region. The check is line-anchored so a
-// markdown rule line like `=======` or stray `<<<<<<<` inside a
-// string literal can't trip the detector. We early-return as soon
-// as all three line markers have been seen.
+// merge-file conflict region. The check is line-anchored, tolerates
+// CRLF endings, and has no maximum line length.
 //
 // Note: pkg/env/splice.go has a similar `containsConflictMarkers`
 // helper that uses substring matching and isn't currently exported.
@@ -37,24 +109,11 @@ import (
 // surface in this small follow-up; merging that into one shared
 // helper is tracked as a separate cleanup.
 func hasConflictMarkers(b []byte) bool {
-	var hasStart, hasSep, hasEnd bool
-	scanner := bufio.NewScanner(bytes.NewReader(b))
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		switch {
-		case bytes.HasPrefix(line, []byte("<<<<<<< ")):
-			hasStart = true
-		case bytes.Equal(line, []byte("=======")):
-			hasSep = true
-		case bytes.HasPrefix(line, []byte(">>>>>>> ")):
-			hasEnd = true
-		}
-		if hasStart && hasSep && hasEnd {
-			return true
-		}
+	var s conflictMarkerScanner
+	if s.Update(b) {
+		return true
 	}
-	return false
+	return s.Done()
 }
 
 // hashAndScanConflicts reads a file once, computing its SHA-256 hex
@@ -67,6 +126,14 @@ func hasConflictMarkers(b []byte) bool {
 // error from the caller's perspective and is not handled specially
 // here — env.Status's existing missing-file branch checks os.Stat
 // before calling this helper.
+//
+// Implementation note: we deliberately don't use bufio.Scanner. Its
+// MaxScanTokenSize cap (default 64 KiB, configurable up to whatever
+// we set) would silently fall back on files with very long lines —
+// SOPS blobs, minified JSON, lockfiles. The conflictMarkerScanner
+// state machine has no per-line memory limit; a degenerate single
+// long line bounds at conflictPendingMax bytes regardless of file
+// size.
 func hashAndScanConflicts(path string) (string, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -75,29 +142,23 @@ func hashAndScanConflicts(path string) (string, bool, error) {
 	defer f.Close()
 
 	h := sha256.New()
-	scanner := bufio.NewScanner(io.TeeReader(f, h))
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	var hasStart, hasSep, hasEnd, hasAll bool
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if !hasAll {
-			switch {
-			case bytes.HasPrefix(line, []byte("<<<<<<< ")):
-				hasStart = true
-			case bytes.Equal(line, []byte("=======")):
-				hasSep = true
-			case bytes.HasPrefix(line, []byte(">>>>>>> ")):
-				hasEnd = true
-			}
-			if hasStart && hasSep && hasEnd {
-				hasAll = true
-			}
+	var ms conflictMarkerScanner
+	buf := make([]byte, 64*1024)
+	for {
+		n, rerr := f.Read(buf)
+		if n > 0 {
+			h.Write(buf[:n])
+			ms.Update(buf[:n])
+		}
+		if rerr == io.EOF {
+			break
+		}
+		if rerr != nil {
+			return "", false, rerr
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return "", false, err
-	}
-	return fmt.Sprintf("%x", h.Sum(nil)), hasAll, nil
+	hasMarkers := ms.Done()
+	return fmt.Sprintf("%x", h.Sum(nil)), hasMarkers, nil
 }
 
 // NewEnvCmd creates the env parent command with subcommands.
@@ -185,11 +246,15 @@ func (o *EnvStatusOptions) Run() error {
 		// Check local files for drift (content and mode)
 		localDrift := 0
 		missingFiles := 0
-		// Conflicted files are surfaced separately so users see them
-		// in `b env status` without having to run `b env resolve`.
-		// They still count as drift internally — a file with markers
-		// is by definition modified relative to the lock — but we
-		// also report the conflict count so the message is actionable.
+		// Conflicted files are surfaced as a distinct counter so
+		// users see them in `b env status` without having to run
+		// `b env resolve`. We deliberately do NOT also count them
+		// as drift: when env update writes a merge result with
+		// conflict markers, the lock SHA records the post-merge
+		// bytes (markers and all), so a conflicted file may match
+		// its lock SHA exactly. Treating it as drift would mask
+		// the more actionable "unresolved conflict markers"
+		// message; the conflict counter is the source of truth.
 		conflictedFiles := 0
 		for _, f := range lockEntry.Files {
 			destPath := f.Dest

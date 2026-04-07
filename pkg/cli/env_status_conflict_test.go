@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -26,6 +27,16 @@ func TestHasConflictMarkers_StatusHelper(t *testing.T) {
 		{"stray opener inside string", `value: "<<<<<<<"` + "\n", false},
 		{"full diff3", "<<<<<<< local\nours\n||||||| base\nbase\n=======\ntheirs\n>>>>>>> upstream\n", true},
 		{"full 2-way", "<<<<<<< local\nours\n=======\ntheirs\n>>>>>>> upstream\n", true},
+		// CRLF endings: the separator line is `=======\r` after
+		// scanning, which a naive bytes.Equal would miss. The
+		// scanner trims the trailing \r before comparing.
+		{"full 2-way CRLF", "<<<<<<< local\r\nours\r\n=======\r\ntheirs\r\n>>>>>>> upstream\r\n", true},
+		// Very long line with no newline must not panic or fall
+		// back. Build a 200KB line of `x` followed by a real
+		// conflict region; the scanner state machine should ignore
+		// the long line entirely (no marker prefix matches) and
+		// still detect the conflict that comes after.
+		{"long line then conflict", strings.Repeat("x", 200*1024) + "\n<<<<<<< local\nours\n=======\ntheirs\n>>>>>>> upstream\n", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
