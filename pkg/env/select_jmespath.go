@@ -21,22 +21,34 @@ import (
 //	".binaries"                 → true
 //	"database.host"             → true
 //	"binaries.kubectl"          → true
+//	"foo/bar"                   → true  (legacy plain key with /)
+//	"my-key"                    → true
 //	"binaries | [?...]"         → false (pipe, filter)
 //	"{b: binaries}"             → false (multi-select hash)
-//	"binaries[0]"               → false (index)
+//	"binaries[0]"               → false (index/bracket)
 //	"from_items(items(...))"    → false (function, parens)
 //
-// This is a lexical classifier, not a full JMESPath parser — anything that
-// contains a character outside [A-Za-z0-9_.-] is treated as "complex".
-// That's conservative (some valid simple paths with weird characters get
-// routed to JMESPath and lose comments) but safe (no false positives).
+// Classification policy: this is a *blocklist* of JMESPath grammar
+// characters, not an allowlist of identifier characters. The legacy
+// dot-path validator in filterYAML/filterJSON only rejects `[]` and
+// `\` and empty segments — it accepts plain keys with characters like
+// `/`, `+`, `@`, `#`, etc. To stay backward compatible (per copilot
+// review on PR #127 round 2), the classifier must NOT route those
+// keys to JMESPath, where they'd hit a parse error.
+//
+// The blocklisted characters are exactly the ones that introduce
+// JMESPath grammar: brackets `[]`, parens `()`, braces `{}`, pipe `|`,
+// star `*`, ampersand `&`, comma `,`, single/double quote `'"`,
+// comparison `<>=!`, backtick (literal), and backslash. Empty/double
+// dots are also rejected to keep the classification consistent with
+// the validator's segment check.
 func isSimpleDotPath(sel string) bool {
 	// Reject multiple leading dots (e.g. "..a"). The existing simple
 	// dot-path validator (filterYAML) treats ".a..b" → segments
 	// ["", "a", "", "b"] and errors out. Without this guard the
 	// classifier would accept "..a" as simple, then the validator
 	// would reject it at runtime — the classification and validation
-	// would disagree. Per copilot review on PR #127.
+	// would disagree.
 	if strings.HasPrefix(sel, "..") {
 		return false
 	}
@@ -44,21 +56,23 @@ func isSimpleDotPath(sel string) bool {
 	if s == "" {
 		return false
 	}
-	// Reject any character that could introduce JMESPath grammar. This
-	// covers brackets, parens, quotes, pipes, stars, filters, wildcards,
-	// comparison operators, multi-select hashes/lists, function commas.
+	// Blocklist any character that introduces JMESPath grammar.
+	// Anything else passes through — including `/`, `+`, `@`, `#`,
+	// etc. — so plain top-level keys containing those characters keep
+	// using the comment-preserving Node API path.
 	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c >= 'A' && c <= 'Z':
-		case c >= 'a' && c <= 'z':
-		case c >= '0' && c <= '9':
-		case c == '_' || c == '-' || c == '.':
-		default:
+		switch s[i] {
+		case '[', ']', '(', ')', '{', '}',
+			'|', '*', '&', ',',
+			'\'', '"', '`',
+			'<', '>', '=', '!',
+			'\\', '?',
+			' ', '\t', '\n', '\r':
 			return false
 		}
 	}
-	// Reject consecutive or trailing dots.
+	// Reject consecutive or trailing dots so the segment validator
+	// downstream doesn't reject what we classified as simple.
 	if strings.HasSuffix(s, ".") || strings.Contains(s, "..") {
 		return false
 	}

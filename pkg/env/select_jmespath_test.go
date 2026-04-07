@@ -20,6 +20,13 @@ func TestIsSimpleDotPath(t *testing.T) {
 		{"a-b", true},
 		{"a_b", true},
 		{"a.b.c.d", true},
+		// Plain keys with non-identifier characters that the legacy
+		// dot-path validator accepts. The classifier must NOT route
+		// these to JMESPath where they'd hit a parse error. Per
+		// copilot review on PR #127 round 2.
+		{"foo/bar", true},
+		{"my+key", true},
+		{"a@b", true},
 		// complex
 		{"", false},
 		{".", false},
@@ -202,6 +209,36 @@ func TestFilterContent_Hybrid_ComplexOnly(t *testing.T) {
 	}
 	if strings.Contains(outStr, "b:") {
 		t.Errorf("b should be filtered, got:\n%s", outStr)
+	}
+}
+
+// TestFilterContent_LegacyKeyWithSlash verifies the backward-compat
+// fix for the classifier: a top-level YAML key like `foo/bar` used to
+// work via the legacy filterYAML path, then PR #127 routed it to
+// JMESPath where it failed to parse. The widened classifier now
+// passes plain keys with `/`, `+`, `@`, `#`, etc. through to the
+// Node API path so they keep working. Per copilot review on PR #127
+// round 2.
+func TestFilterContent_LegacyKeyWithSlash(t *testing.T) {
+	content := []byte(`foo/bar:
+  value: 1
+other:
+  value: 2
+`)
+	out, err := filterContent(content, []string{"foo/bar"}, "config.yaml")
+	if err != nil {
+		t.Fatalf("filterContent: %v", err)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "foo/bar") {
+		t.Errorf("foo/bar key missing in output: %s", outStr)
+	}
+	if !strings.Contains(outStr, "value: 1") {
+		t.Errorf("foo/bar.value missing: %s", outStr)
+	}
+	// other was not selected → must not be in output
+	if strings.Contains(outStr, "other") {
+		t.Errorf("non-selected 'other' should be filtered out: %s", outStr)
 	}
 }
 

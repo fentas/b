@@ -17,9 +17,14 @@ import (
 //
 // Selector syntax is **hybrid**:
 //
-//   - Simple dot-paths (e.g. "binaries", ".binaries", "database.host") are
-//     routed to the comment-preserving Node API path for YAML. This is
-//     backward compatible with pre-#124 behavior.
+//   - Simple dot-paths are routed to the comment-preserving Node API
+//     path for YAML. The classifier accepts any selector that does not
+//     contain JMESPath grammar characters (brackets, parens, braces,
+//     pipe, star, ampersand, comma, quotes, comparison ops, backtick,
+//     backslash, question mark, whitespace) and does not contain
+//     empty path segments. This matches the legacy `filterYAML`
+//     validator's behavior, so plain top-level keys with characters
+//     like `/`, `+`, `@`, `#` continue to work without quoting.
 //
 //   - Complex expressions — filter predicates, projections, functions,
 //     multi-select hashes, array indexing — are routed to the JMESPath
