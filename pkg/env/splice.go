@@ -246,22 +246,27 @@ func spliceYAMLByteLevel(local, merged []byte, scope map[string]bool) ([]byte, e
 	// local[cursor:r.endByte] can panic at runtime instead of
 	// returning an error and letting spliceYAML fall back to the
 	// structural / text path.
+	// Every range must be non-empty and make forward progress.
+	// startByte == endByte was previously allowed, which let a
+	// flow-style mapping with zero-length yaml.v3 metadata sneak
+	// through and emit garbage. We require startByte < endByte for
+	// every range so the splice loop is guaranteed to advance.
 	prevEnd := 0
-	for i, r := range ranges {
+	for _, r := range ranges {
 		if r.startByte < 0 || r.endByte < 0 ||
 			r.startByte > len(local) || r.endByte > len(local) ||
-			r.startByte > r.endByte ||
+			r.startByte >= r.endByte ||
 			r.startByte < prevEnd {
 			return nil, fmt.Errorf("byte splice: invalid range for key %q (start=%d end=%d prevEnd=%d len=%d)",
 				r.key, r.startByte, r.endByte, prevEnd, len(local))
 		}
-		// At least one of the ranges must make forward progress, or
-		// the splice loop would emit nothing useful.
-		if i == 0 && r.endByte == 0 {
-			return nil, fmt.Errorf("byte splice: zero-length first range for key %q", r.key)
-		}
 		prevEnd = r.endByte
 	}
+
+	// Detect line-ending convention once. usesCRLF scans the whole
+	// file, so calling it inside the per-key loop turns the splice
+	// into O(n*k); hoist it here so the cost is paid exactly once.
+	crlf := usesCRLF(local)
 
 	// Walk local byte-by-byte. For each top-level key:
 	//   - in-scope, in merged   → emit serialized merged value
@@ -313,7 +318,7 @@ func spliceYAMLByteLevel(local, merged []byte, scope map[string]bool) ([]byte, e
 		// we'd otherwise produce a mixed-ending file (CRLF in the
 		// preserved bytes, LF in the spliced regions), which is
 		// noisy in diffs and trips Windows-aware tooling.
-		if usesCRLF(local) {
+		if crlf {
 			serialized = bytes.ReplaceAll(serialized, []byte("\n"), []byte("\r\n"))
 		}
 		out.Write(serialized)
@@ -337,7 +342,6 @@ func spliceYAMLByteLevel(local, merged []byte, scope map[string]bool) ([]byte, e
 		}
 	}
 	if len(additions) > 0 {
-		crlf := usesCRLF(local)
 		buf := out.Bytes()
 		if len(buf) > 0 && buf[len(buf)-1] != '\n' {
 			if crlf {

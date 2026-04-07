@@ -88,6 +88,40 @@ envs:
 	}
 }
 
+// TestSpliceYAMLByteLevel_PreservesCRLFLineEndings verifies that a
+// local file using Windows-style CRLF endings stays CRLF after the
+// splice. yaml.v3 always emits LF, so without the CRLF normalization
+// path the spliced regions would mix endings with the verbatim
+// regions and produce noisy diffs on every sync from a Windows
+// consumer.
+func TestSpliceYAMLByteLevel_PreservesCRLFLineEndings(t *testing.T) {
+	// Build a local file with explicit CRLF separators.
+	local := []byte("binaries:\r\n  kubectl: {}\r\n\r\nenvs:\r\n  github.com/x/y: {}\r\n")
+	merged := []byte("binaries:\n  kubectl: {}\n  helm: {}\n")
+	out, err := spliceSelectedScope(local, merged, []string{"binaries"}, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	// Every newline in the output should be CRLF — no bare LF.
+	if bytes.Contains(out, []byte("\n")) && !bytes.Contains(out, []byte("\r\n")) {
+		t.Errorf("expected CRLF endings, got bare LF:\n%q", out)
+	}
+	for i := 0; i < len(out); i++ {
+		if out[i] == '\n' {
+			if i == 0 || out[i-1] != '\r' {
+				t.Errorf("bare LF at byte %d in CRLF file:\n%q", i, out)
+				break
+			}
+		}
+	}
+	// Out-of-scope envs section is byte-identical including its CRLFs.
+	envsStart := bytes.Index(local, []byte("envs:"))
+	outEnvsStart := bytes.Index(out, []byte("envs:"))
+	if !bytes.Equal(local[envsStart:], out[outEnvsStart:]) {
+		t.Errorf("envs section not byte-identical under CRLF")
+	}
+}
+
 // TestSpliceYAMLByteLevel_PreservesOutOfScopeBytesVerbatim verifies
 // that the format-preserving byte-level splice keeps out-of-scope
 // content byte-identical to the input. The previous structural
