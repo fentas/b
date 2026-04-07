@@ -115,7 +115,10 @@ func TestEnvConfigMarshal(t *testing.T) {
 func TestEnvConfigMarshal_PromptOverrideWithIncludes(t *testing.T) {
 	// Without includes: prompt is omitted as default.
 	noInc := &State{Envs: EnvList{{Key: "github.com/org/a", Safety: "prompt"}}}
-	data, _ := yaml.Marshal(noInc)
+	data, err := yaml.Marshal(noInc)
+	if err != nil {
+		t.Fatalf("marshal noInc: %v", err)
+	}
 	if contains(string(data), "safety:") {
 		t.Errorf("safety: prompt should be omitted when no includes, got:\n%s", data)
 	}
@@ -126,7 +129,10 @@ func TestEnvConfigMarshal_PromptOverrideWithIncludes(t *testing.T) {
 		Safety:   "prompt",
 		Includes: []string{"core"},
 	}}}
-	data, _ = yaml.Marshal(withInc)
+	data, err = yaml.Marshal(withInc)
+	if err != nil {
+		t.Fatalf("marshal withInc: %v", err)
+	}
 	if !contains(string(data), "safety: prompt") {
 		t.Errorf("safety: prompt should be emitted as override when includes are set, got:\n%s", data)
 	}

@@ -218,14 +218,20 @@ When upstream files change and you've also modified the local copy, the **strate
 
 ### `replace` (default)
 
-Overwrites local files with upstream content. In an interactive terminal, prompts per-file:
+Overwrites local files with upstream content. The behavior depends on the **safety** mode:
 
-```
-  system/config.yaml has local changes.
-    [r]eplace  [k]eep  [m]erge  [d]iff > _
-```
+- **`safety: auto`** (or `--yes`) on a TTY: still uses the legacy per-file interactive resolver, which prompts:
 
-In non-interactive mode (CI/CD), overwrites without prompting.
+  ```
+    system/config.yaml has local changes.
+      [r]eplace  [k]eep  [m]erge  [d]iff > _
+  ```
+
+  This lets you make per-file decisions during apply.
+
+- **`safety: strict` / `safety: prompt`** (default): uses the **plan-based gate** instead of the legacy per-file resolver. You see the full plan up-front, then approve or reject the whole batch — there are no per-file prompts during apply, because the plan you approved IS the apply contract. If you need per-file granularity, switch the env to `safety: auto`.
+
+- **CI / non-TTY**: overwrites without prompting under `auto`; refused under `strict` or `prompt` (the latter falls back to strict on non-TTY). See [Safety tiers](#safety-tiers) below.
 
 ### `client`
 

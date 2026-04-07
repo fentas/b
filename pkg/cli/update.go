@@ -441,11 +441,26 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 
 		// Second pass: real apply. The gitcache is hot from the first
 		// pass, so only the actual file writes hit disk newly.
+		//
+		// Notably we do NOT attach the per-file
+		// interactiveConflictResolver here, even on TTY+replace.
+		// In the plan-first flow the user has already approved (or
+		// rejected) the entire plan via the safety gate. Attaching
+		// the legacy per-file resolver would (a) show a second
+		// round of interactive prompts after they already accepted
+		// the plan, and (b) create a plan-vs-reality skew because
+		// the dry-run pass that produced the plan ran without the
+		// resolver, so its destructiveness verdict (and the strict
+		// gate's decision) was based on "unconditional overwrite"
+		// while the apply pass would actually call the resolver
+		// and might pick keep/merge/diff per file. Per copilot
+		// review on PR #128 round 9.
+		//
+		// Auto / --yes mode is the only path where the legacy
+		// resolver is still attached (handled at the top of the
+		// loop where !needsPlanFirst).
 		applyCfg := cfg
 		applyCfg.DryRun = false
-		if (strategy == "" || strategy == env.StrategyReplace) && isTTYFunc() {
-			applyCfg.ResolveConflict = o.interactiveConflictResolver(ref, lk)
-		}
 		realResult, err := syncEnvFunc(applyCfg, projectRoot, "", lockEntry)
 		if err != nil {
 			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
