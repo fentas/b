@@ -97,12 +97,29 @@ func topLevelKeysFromSelectors(selectors []string) map[string]bool {
 	return keys
 }
 
-// usesCRLF reports whether the file appears to use Windows-style CRLF
-// line endings. We check for `\r\n` rather than just `\n` so a stray
-// `\n` doesn't fool us. The byte-level splice uses this to keep
-// emitted regions consistent with the local file's line endings.
+// usesCRLF reports whether the file should be treated as having
+// Windows-style CRLF line endings. We require:
+//   - at least one `\r\n` (so empty / single-line files don't
+//     accidentally trigger the rewrite path)
+//   - every `\n` to be preceded by `\r` (mixed-ending files keep
+//     LF so the splice doesn't make the mixing worse — yaml.v3
+//     emits LF and that matches the dominant convention)
+//
+// The byte-level splice uses this to keep emitted regions
+// consistent with the local file's line endings.
 func usesCRLF(b []byte) bool {
-	return bytes.Contains(b, []byte("\r\n"))
+	sawCRLF := false
+	for i := 0; i < len(b); i++ {
+		if b[i] != '\n' {
+			continue
+		}
+		if i == 0 || b[i-1] != '\r' {
+			// Found a bare LF → mixed or LF-only file.
+			return false
+		}
+		sawCRLF = true
+	}
+	return sawCRLF
 }
 
 // containsConflictMarkers checks if a byte slice contains git merge-file

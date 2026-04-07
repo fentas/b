@@ -88,6 +88,32 @@ envs:
 	}
 }
 
+// TestUsesCRLF covers the strict CRLF detector. A file is only CRLF
+// when at least one \r\n is present AND every \n is preceded by \r;
+// mixed-ending files (mostly LF with a stray CRLF) stay LF so the
+// splice doesn't make the mixing worse.
+func TestUsesCRLF(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"empty", "", false},
+		{"lf only", "a\nb\n", false},
+		{"crlf only", "a\r\nb\r\n", true},
+		{"mostly lf with stray crlf", "a\nb\r\nc\n", false},
+		{"mostly crlf with stray lf", "a\r\nb\nc\r\n", false},
+		{"single line no newline", "abc", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := usesCRLF([]byte(c.in)); got != c.want {
+				t.Errorf("usesCRLF(%q) = %v, want %v", c.in, got, c.want)
+			}
+		})
+	}
+}
+
 // TestSpliceYAMLByteLevel_PreservesCRLFLineEndings verifies that a
 // local file using Windows-style CRLF endings stays CRLF after the
 // splice. yaml.v3 always emits LF, so without the CRLF normalization
