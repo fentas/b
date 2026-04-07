@@ -95,15 +95,15 @@ func TestSyncEnv_OrphanDetection_EmitsDeleteRows(t *testing.T) {
 		},
 	}
 
-	// Sub-case 1: orphan file exists on disk and matches the
-	// recorded SHA → should be "deleted" (or "deleted (dry-run)").
+	// Sub-case 1: orphan file exists on disk but its content does
+	// NOT match the recorded SHA (the consumer modified it locally).
+	// Expected status: "delete-skipped (local modified)" so the
+	// consumer's edits are preserved. The fake "deadbeef" SHA in
+	// prev guarantees the mismatch.
 	orphanPath := filepath.Join(project, "configs", "orphan.yaml")
 	if err := os.MkdirAll(filepath.Dir(orphanPath), 0755); err != nil {
 		t.Fatal(err)
 	}
-	// Write content matching the recorded SHA. Since we used a
-	// fake "deadbeef" SHA, write something with no chance of
-	// matching, then exercise the local-modified branch instead.
 	if err := os.WriteFile(orphanPath, []byte("local edits\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
