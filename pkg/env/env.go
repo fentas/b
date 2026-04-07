@@ -818,8 +818,6 @@ func syncMessage(files []lock.LockFile, deleted []lock.LockFile, conflicts int) 
 			deletes++
 		}
 	}
-	_ = deleteNoops // currently surfaced via the plan, not the message
-
 	parts := []string{}
 	total := len(files)
 	if total == 0 && deletes == 0 && deleteSkips == 0 && deleteNoops == 0 {
@@ -851,6 +849,12 @@ func syncMessage(files []lock.LockFile, deleted []lock.LockFile, conflicts int) 
 	}
 	if deleteSkips > 0 {
 		parts = append(parts, fmt.Sprintf("%d delete(s) skipped", deleteSkips))
+	}
+	if deleteNoops > 0 {
+		parts = append(parts, fmt.Sprintf("%d delete(s) already gone", deleteNoops))
+	}
+	if len(parts) == 0 {
+		return "no changes"
 	}
 	return strings.Join(parts, ", ")
 }
