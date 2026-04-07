@@ -188,9 +188,22 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			return nil, fmt.Errorf("reading %s from %s@%s: %w", m.SourcePath, cfg.Ref, safeShort(commit), err)
 		}
 
-		// Apply select filter for YAML/JSON files
+		// Build a reusable filter closure for this file's select spec. The
+		// closure is applied to upstream here, and passed to doMerge below so
+		// base and local get filtered symmetrically. When no select is set,
+		// the closure is nil and doMerge skips filtering.
+		var filterFn func([]byte) ([]byte, error)
 		if len(m.Select) > 0 {
-			content, err = filterContent(content, m.Select, m.SourcePath)
+			sel := m.Select
+			src := m.SourcePath
+			filterFn = func(raw []byte) ([]byte, error) {
+				return filterContent(raw, sel, src)
+			}
+		}
+
+		// Apply select filter to upstream content
+		if filterFn != nil {
+			content, err = filterFn(content)
 			if err != nil {
 				return nil, fmt.Errorf("filtering %s: %w", m.SourcePath, err)
 			}
@@ -273,7 +286,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 				}
 
 			case StrategyMerge:
-				merged, hasConflict, mergeErr := doMerge(repoDir, previousCommit, m.SourcePath, destPath, content)
+				merged, hasConflict, mergeErr := doMerge(repoDir, previousCommit, m.SourcePath, destPath, content, filterFn)
 				if mergeErr != nil {
 					// Merge failed, fall back to replace with warning
 					status = "replaced (merge failed: " + mergeErr.Error() + ")"
@@ -282,23 +295,36 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 							return nil, err
 						}
 					}
-				} else if hasConflict {
-					status = "conflict"
-					conflicts++
-					if !cfg.DryRun {
-						if err := writeFile(destPath, merged, fileMode); err != nil {
-							return nil, err
-						}
-					}
-					finalHash = fmt.Sprintf("%x", sha256.Sum256(merged))
 				} else {
-					status = "merged"
+					// Splice the merged (filtered) scope back into the
+					// consumer's full local file so that out-of-scope
+					// content (other top-level keys, comments on
+					// non-replaced keys, trailing layout) is preserved.
+					// When no select is set, splice is a no-op pass-through.
+					spliced := merged
+					if filterFn != nil {
+						localFull, readErr := os.ReadFile(destPath)
+						if readErr != nil {
+							return nil, fmt.Errorf("reading local for splice: %w", readErr)
+						}
+						spliceOut, spliceErr := spliceSelectedScope(localFull, merged, m.Select, m.SourcePath)
+						if spliceErr != nil {
+							return nil, fmt.Errorf("splicing merged %s: %w", m.SourcePath, spliceErr)
+						}
+						spliced = spliceOut
+					}
+					if hasConflict {
+						status = "conflict"
+						conflicts++
+					} else {
+						status = "merged"
+					}
 					if !cfg.DryRun {
-						if err := writeFile(destPath, merged, fileMode); err != nil {
+						if err := writeFile(destPath, spliced, fileMode); err != nil {
 							return nil, err
 						}
 					}
-					finalHash = fmt.Sprintf("%x", sha256.Sum256(merged))
+					finalHash = fmt.Sprintf("%x", sha256.Sum256(spliced))
 				}
 
 			default: // StrategyReplace
@@ -351,25 +377,56 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 }
 
 // doMerge performs a three-way merge for a single file.
-// base = file at previousCommit, local = current file on disk, upstream = new content.
-func doMerge(repoDir, previousCommit, sourcePath, destPath string, upstream []byte) ([]byte, bool, error) {
-	// Read local file
-	local, err := os.ReadFile(destPath)
+//
+// The three sides (local, base, upstream) are all passed through filterFn
+// before being fed to the text-based 3-way merge. This is essential when a
+// select filter is in play: the upstream content was already filtered in
+// SyncEnv, so base and local MUST be filtered by the same selector or the
+// merge will see the difference between "whole file" and "filtered subset"
+// as deletions and clobber the consumer's out-of-scope content (envs,
+// profiles, comments, etc). See issue #122.
+//
+//   - repoDir:        git repo directory (bare or local work tree)
+//   - previousCommit: commit from the lock entry (required, caller checks)
+//   - sourcePath:     file path inside the repo
+//   - destPath:       local file on disk (the consumer's copy)
+//   - upstream:       already-filtered upstream content
+//   - filterFn:       applied to base and local to match upstream's shape;
+//     may be nil when no select is configured
+func doMerge(
+	repoDir, previousCommit, sourcePath, destPath string,
+	upstream []byte,
+	filterFn func(content []byte) ([]byte, error),
+) ([]byte, bool, error) {
+	// Read local file (full, unfiltered)
+	localFull, err := os.ReadFile(destPath)
 	if err != nil {
 		return nil, false, fmt.Errorf("reading local %s: %w", destPath, err)
 	}
 
-	// Get base version (file at previous commit)
-	var base []byte
-	if previousCommit != "" {
-		base, err = gitcache.ShowFileDir(repoDir, previousCommit, sourcePath)
-		if err != nil {
-			// Can't get base — treat as new file, fall back
-			return nil, false, fmt.Errorf("reading base version: %w", err)
-		}
-	} else {
-		// No previous commit — can't do three-way merge
+	// Read base version (file at previous commit, full, unfiltered)
+	if previousCommit == "" {
 		return nil, false, fmt.Errorf("no previous commit for three-way merge base")
+	}
+	baseFull, err := gitcache.ShowFileDir(repoDir, previousCommit, sourcePath)
+	if err != nil {
+		return nil, false, fmt.Errorf("reading base version: %w", err)
+	}
+
+	// Apply the same filter to base and local that was applied to upstream.
+	// Without this step, git merge-file would diff "filtered upstream" against
+	// "whole base/local" and flag every out-of-scope byte as a deletion.
+	local := localFull
+	base := baseFull
+	if filterFn != nil {
+		local, err = filterFn(localFull)
+		if err != nil {
+			return nil, false, fmt.Errorf("filtering local for merge: %w", err)
+		}
+		base, err = filterFn(baseFull)
+		if err != nil {
+			return nil, false, fmt.Errorf("filtering base for merge: %w", err)
+		}
 	}
 
 	return gitcache.Merge3Way(local, base, upstream)
