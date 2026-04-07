@@ -28,12 +28,25 @@ func TestFindConfigFile(t *testing.T) {
 		t.Errorf("err: %v", err)
 	}
 	if p != "" {
+		// Normalize both sides: FindConfigFile walks up via os.Getwd() which
+		// resolves symlinks, while `dir` from t.TempDir() may still be a
+		// symlinked path (e.g., macOS /var → /private/var). Compare the
+		// resolved forms to avoid false positives/negatives.
 		absDir, err := filepath.Abs(dir)
 		if err != nil {
 			t.Fatalf("Abs(%q): %v", dir, err)
 		}
-		if strings.HasPrefix(p, absDir) {
-			t.Errorf("unexpected match inside tempdir: %q (under %q)", p, absDir)
+		resolvedDir, err := filepath.EvalSymlinks(absDir)
+		if err != nil {
+			t.Fatalf("EvalSymlinks(%q): %v", absDir, err)
+		}
+		resolvedP, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			// p doesn't exist any more (race?) — treat as not inside
+			resolvedP = p
+		}
+		if strings.HasPrefix(resolvedP, resolvedDir) {
+			t.Errorf("unexpected match inside tempdir: %q (under %q)", p, dir)
 		}
 	}
 

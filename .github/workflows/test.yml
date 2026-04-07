@@ -107,6 +107,7 @@ jobs:
 
   lint:
     name: Lint
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
 
     steps:
@@ -125,6 +126,7 @@ jobs:
 
   integration:
     name: Integration Tests
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
 
     steps:
