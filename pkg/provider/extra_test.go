@@ -3,6 +3,7 @@ package provider
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -188,15 +189,17 @@ type rewriteTransport struct {
 }
 
 func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	newURL := rt.server + req.URL.Path
-	if req.URL.RawQuery != "" {
-		newURL += "?" + req.URL.RawQuery
-	}
-	newReq, err := http.NewRequest(req.Method, newURL, req.Body)
+	// Clone the request so we keep its context and deep-copy its headers
+	// rather than aliasing them.
+	newReq := req.Clone(req.Context())
+	parsed, err := url.Parse(rt.server + req.URL.Path)
 	if err != nil {
 		return nil, err
 	}
-	newReq.Header = req.Header
+	parsed.RawQuery = req.URL.RawQuery
+	newReq.URL = parsed
+	newReq.Host = parsed.Host
+	newReq.RequestURI = ""
 	return rt.inner.RoundTrip(newReq)
 }
 

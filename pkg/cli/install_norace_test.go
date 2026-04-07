@@ -3,7 +3,6 @@
 package cli
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -11,8 +10,8 @@ import (
 func TestInstallOptions_Run_ExistingBinary(t *testing.T) {
 	dir := t.TempDir()
 	binDir := filepath.Join(dir, ".bin")
-	_ = os.MkdirAll(binDir, 0755)
-	_ = os.WriteFile(filepath.Join(binDir, "jq"), []byte("#!/bin/sh\n"), 0755)
+	mustMkdir(t, binDir)
+	mustWriteExec(t, filepath.Join(binDir, "jq"), []byte("#!/bin/sh\n"))
 	t.Setenv("PATH_BIN", binDir)
 	t.Setenv("PATH_BASE", dir)
 
@@ -32,16 +31,18 @@ func TestInstallOptions_Run_ExistingBinary(t *testing.T) {
 func TestInstallOptions_Run_AddBinaryToConfig(t *testing.T) {
 	dir := t.TempDir()
 	binDir := filepath.Join(dir, ".bin")
-	_ = os.MkdirAll(binDir, 0755)
-	_ = os.WriteFile(filepath.Join(binDir, "jq"), []byte("#!/bin/sh\n"), 0755)
+	mustMkdir(t, binDir)
+	mustWriteExec(t, filepath.Join(binDir, "jq"), []byte("#!/bin/sh\n"))
 	t.Setenv("PATH_BIN", binDir)
 	t.Setenv("PATH_BASE", dir)
 
 	cfgYaml := filepath.Join(dir, "b.yaml")
-	_ = os.WriteFile(cfgYaml, []byte("binaries: {}\n"), 0644)
+	mustWrite(t, cfgYaml, []byte("binaries: {}\n"))
 	shared := NewSharedOptions(mkIO(), mkBinaries())
 	shared.ConfigPath = cfgYaml
-	_ = shared.LoadConfig()
+	if err := shared.LoadConfig(); err != nil {
+		t.Fatal(err)
+	}
 	o := &InstallOptions{SharedOptions: shared, Add: true}
 	if err := o.Complete([]string{"jq"}); err != nil {
 		t.Fatal(err)
@@ -54,27 +55,31 @@ func TestInstallOptions_Run_AddBinaryToConfig(t *testing.T) {
 func TestInstallOptions_Run_ForceMode(t *testing.T) {
 	dir := t.TempDir()
 	binDir := filepath.Join(dir, ".bin")
-	_ = os.MkdirAll(binDir, 0755)
-	_ = os.WriteFile(filepath.Join(binDir, "jq"), []byte("#!/bin/sh\n"), 0755)
+	mustMkdir(t, binDir)
+	mustWriteExec(t, filepath.Join(binDir, "jq"), []byte("#!/bin/sh\n"))
 	t.Setenv("PATH_BIN", binDir)
 	t.Setenv("PATH_BASE", dir)
 
-	// Force mode with a binary that has no download source → will fail, but exercises the path
+	// Force mode exercises the DownloadBinary path. installBinaries reports
+	// per-binary errors via the progress writer, not the Run() return value,
+	// so Run() is expected to succeed even when the underlying download fails
+	// (mkBinaries() jq has no URL). The smoke test is that it doesn't panic.
 	shared := NewSharedOptions(mkIO(), mkBinaries())
 	shared.Force = true
 	o := &InstallOptions{SharedOptions: shared}
 	if err := o.Complete([]string{"jq"}); err != nil {
 		t.Fatal(err)
 	}
-	// Expected to fail (no URL in mkBinaries jq), but covers the force path
-	_ = o.Run()
+	if err := o.Run(); err != nil {
+		t.Errorf("Run: %v", err)
+	}
 }
 
 func TestCmdBinaryOptions_Run_InstallExisting(t *testing.T) {
 	dir := t.TempDir()
 	binDir := filepath.Join(dir, ".bin")
-	_ = os.MkdirAll(binDir, 0755)
-	_ = os.WriteFile(filepath.Join(binDir, "jq"), []byte("#!/bin/sh\n"), 0755)
+	mustMkdir(t, binDir)
+	mustWriteExec(t, filepath.Join(binDir, "jq"), []byte("#!/bin/sh\n"))
 	t.Setenv("PATH_BIN", binDir)
 
 	opts := &CmdBinaryOptions{IO: mkIO(), Binaries: mkBinaries()}

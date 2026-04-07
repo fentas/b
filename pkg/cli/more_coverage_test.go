@@ -46,7 +46,9 @@ func TestRequestOptions(t *testing.T) {
 func TestNewRequestCmd(t *testing.T) {
 	c := NewRequestCmd(NewSharedOptions(mkIO(), nil))
 	c.SetArgs([]string{"--help"})
-	_ = c.Execute()
+	if err := c.Execute(); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 }
 
 // --- search.go ---
@@ -65,20 +67,28 @@ func TestSearchOptions(t *testing.T) {
 	if err := o.Validate(); err != nil {
 		t.Error(err)
 	}
-	// Set format so IO.Print works
-	_ = o.Run()
+	// Run goes through IO.Print which encodes to YAML by default — should succeed.
+	if err := o.Run(); err != nil {
+		t.Errorf("Run jq: %v", err)
+	}
 
 	// Empty query
 	o.Query = ""
-	_ = o.Run()
+	if err := o.Run(); err != nil {
+		t.Errorf("Run empty: %v", err)
+	}
 
 	// Query that triggers no-results hint
 	o.Query = "nonexistent"
-	_ = o.Run()
+	if err := o.Run(); err != nil {
+		t.Errorf("Run no-results: %v", err)
+	}
 
 	// Query shaped like a provider ref
 	o.Query = "github.com/org/repo"
-	_ = o.Run()
+	if err := o.Run(); err != nil {
+		t.Errorf("Run provider-ref: %v", err)
+	}
 }
 
 // --- list.go ---
@@ -86,8 +96,12 @@ func TestSearchOptions(t *testing.T) {
 func TestListOptions_NoConfig(t *testing.T) {
 	shared := NewSharedOptions(mkIO(), nil)
 	o := &ListOptions{SharedOptions: shared}
-	_ = o.Complete(nil)
-	_ = o.Validate()
+	if err := o.Complete(nil); err != nil {
+		t.Errorf("Complete: %v", err)
+	}
+	if err := o.Validate(); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
 	if err := o.Run(); err != nil {
 		t.Error(err)
 	}
@@ -98,7 +112,7 @@ func TestListOptions_WithConfig(t *testing.T) {
 	t.Setenv("PATH_BIN", filepath.Join(dir, ".bin"))
 	shared := NewSharedOptions(mkIO(), mkBinaries())
 	cfgYaml := filepath.Join(dir, "b.yaml")
-	_ = os.WriteFile(cfgYaml, []byte("binaries:\n  jq: {}\n"), 0644)
+	mustWrite(t, cfgYaml, []byte("binaries:\n  jq: {}\n"))
 	shared.ConfigPath = cfgYaml
 	if err := shared.LoadConfig(); err != nil {
 		t.Fatal(err)
@@ -112,7 +126,9 @@ func TestListOptions_WithConfig(t *testing.T) {
 func TestSearchCmd_Execute(t *testing.T) {
 	c := NewSearchCmd(NewSharedOptions(mkIO(), mkBinaries()))
 	c.SetArgs([]string{"jq"})
-	_ = c.Execute()
+	if err := c.Execute(); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 }
 
 func TestListCmd_Execute(t *testing.T) {
@@ -120,7 +136,9 @@ func TestListCmd_Execute(t *testing.T) {
 	t.Setenv("PATH_BIN", filepath.Join(dir, ".bin"))
 	c := NewListCmd(NewSharedOptions(mkIO(), mkBinaries()))
 	c.SetArgs([]string{})
-	_ = c.Execute()
+	if err := c.Execute(); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 }
 
 func TestInitCmd_Execute(t *testing.T) {
@@ -129,7 +147,9 @@ func TestInitCmd_Execute(t *testing.T) {
 	t.Chdir(dir)
 	c := NewInitCmd(NewSharedOptions(mkIO(), nil))
 	c.SetArgs([]string{})
-	_ = c.Execute()
+	if err := c.Execute(); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 }
 
 func TestVersionCmd_Execute(t *testing.T) {
@@ -137,13 +157,17 @@ func TestVersionCmd_Execute(t *testing.T) {
 	t.Setenv("PATH_BIN", filepath.Join(dir, ".bin"))
 	c := NewVersionCmd(NewSharedOptions(mkIO(), mkBinaries()))
 	c.SetArgs([]string{"--local"})
-	_ = c.Execute()
+	if err := c.Execute(); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 }
 
 func TestNewListCmd(t *testing.T) {
 	c := NewListCmd(NewSharedOptions(mkIO(), nil))
 	c.SetArgs([]string{"--help"})
-	_ = c.Execute()
+	if err := c.Execute(); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 }
 
 // --- verify.go ---
@@ -208,7 +232,10 @@ func TestVerifyRun_WithEntries(t *testing.T) {
 	shared := NewSharedOptions(mkIO(), nil)
 	shared.ConfigPath = filepath.Join(dir, "b.yaml")
 	o := &VerifyOptions{SharedOptions: shared}
-	_ = o.Run()
+	// Lock has intentional mismatches/missing files — Run should report failures.
+	if err := o.Run(); err == nil {
+		t.Error("expected verify to return an error for mismatched/missing entries")
+	}
 }
 
 func TestVerifyRun_NoLock(t *testing.T) {
@@ -225,7 +252,9 @@ func TestVerifyRun_NoLock(t *testing.T) {
 func TestNewVerifyCmd(t *testing.T) {
 	c := NewVerifyCmd(NewSharedOptions(mkIO(), nil))
 	c.SetArgs([]string{"--help"})
-	_ = c.Execute()
+	if err := c.Execute(); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 }
 
 // --- version ---
@@ -233,19 +262,29 @@ func TestNewVerifyCmd(t *testing.T) {
 func TestVersionOptions_Run_Local(t *testing.T) {
 	dir := t.TempDir()
 	binDir := filepath.Join(dir, ".bin")
-	_ = os.MkdirAll(binDir, 0755)
-	_ = os.WriteFile(filepath.Join(binDir, "jq"), []byte("#!/bin/sh\n"), 0755)
+	mustMkdir(t, binDir)
+	mustWriteExec(t, filepath.Join(binDir, "jq"), []byte("#!/bin/sh\n"))
 	t.Setenv("PATH_BIN", binDir)
 
 	shared := NewSharedOptions(mkIO(), mkBinaries())
 	o := &VersionOptions{SharedOptions: shared, Local: true}
-	_ = o.Complete(nil)
-	_ = o.Validate()
-	_ = o.Run()
+	if err := o.Complete(nil); err != nil {
+		t.Errorf("Complete nil: %v", err)
+	}
+	if err := o.Validate(); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
+	if err := o.Run(); err != nil {
+		t.Errorf("Run all: %v", err)
+	}
 
 	// With specific args
-	_ = o.Complete([]string{"jq"})
-	_ = o.Run()
+	if err := o.Complete([]string{"jq"}); err != nil {
+		t.Errorf("Complete jq: %v", err)
+	}
+	if err := o.Run(); err != nil {
+		t.Errorf("Run jq: %v", err)
+	}
 
 	// Unknown binary
 	if err := o.Complete([]string{"totally-unknown"}); err == nil {
@@ -258,7 +297,9 @@ func TestVersionOptions_Run_Local(t *testing.T) {
 func TestNewInstallCmd_Help(t *testing.T) {
 	c := NewInstallCmd(NewSharedOptions(mkIO(), nil))
 	c.SetArgs([]string{"--help"})
-	_ = c.Execute()
+	if err := c.Execute(); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 }
 
 // --- env match with local repo ---
@@ -277,9 +318,9 @@ func setupLocalRepo(t *testing.T) string {
 	run("git", "-C", work, "config", "user.email", "t@t.com")
 	run("git", "-C", work, "config", "user.name", "T")
 	run("git", "-C", work, "config", "commit.gpgsign", "false")
-	_ = os.MkdirAll(filepath.Join(work, "manifests"), 0755)
-	_ = os.WriteFile(filepath.Join(work, "manifests", "a.yaml"), []byte("a: 1\n"), 0644)
-	_ = os.WriteFile(filepath.Join(work, "manifests", "b.yaml"), []byte("b: 2\n"), 0644)
+	mustMkdir(t, filepath.Join(work, "manifests"))
+	mustWrite(t, filepath.Join(work, "manifests", "a.yaml"), []byte("a: 1\n"))
+	mustWrite(t, filepath.Join(work, "manifests", "b.yaml"), []byte("b: 2\n"))
 	run("git", "-C", work, "add", "-A")
 	run("git", "-C", work, "commit", "-m", "init", "--no-gpg-sign")
 	run("git", "clone", "--bare", "-q", work, bare)
@@ -319,14 +360,14 @@ func setupLocalRepoWithBYaml(t *testing.T) string {
 	run("git", "-C", work, "config", "user.email", "t@t.com")
 	run("git", "-C", work, "config", "user.name", "T")
 	run("git", "-C", work, "config", "commit.gpgsign", "false")
-	_ = os.MkdirAll(filepath.Join(work, "manifests"), 0755)
-	_ = os.WriteFile(filepath.Join(work, "manifests", "a.yaml"), []byte("a: 1\n"), 0644)
-	_ = os.WriteFile(filepath.Join(work, "b.yaml"), []byte(`profiles:
+	mustMkdir(t, filepath.Join(work, "manifests"))
+	mustWrite(t, filepath.Join(work, "manifests", "a.yaml"), []byte("a: 1\n"))
+	mustWrite(t, filepath.Join(work, "b.yaml"), []byte(`profiles:
   base:
     description: Base profile
     files:
       "manifests/*.yaml": {dest: "manifests"}
-`), 0644)
+`))
 	run("git", "-C", work, "add", "-A")
 	run("git", "-C", work, "commit", "-m", "init", "--no-gpg-sign")
 	run("git", "clone", "--bare", "-q", work, bare)
@@ -401,8 +442,10 @@ func TestEnvProfilesOptions_Run_Local(t *testing.T) {
 	t.Setenv("HOME", home)
 	shared := NewSharedOptions(mkIO(), nil)
 	o := &EnvProfilesOptions{SharedOptions: shared}
-	// No upstream b.yaml — returns without error ("No profiles found")
-	_ = o.Run(bare)
+	// No upstream b.yaml — Run prints "No profiles found" but should not error.
+	if err := o.Run(bare); err != nil {
+		t.Errorf("Run: %v", err)
+	}
 }
 
 // --- install.Run with existing binary ---
@@ -412,7 +455,7 @@ func TestInstallOptions_Run_NoBinariesNoEnvs(t *testing.T) {
 	t.Setenv("PATH_BIN", filepath.Join(dir, ".bin"))
 	t.Setenv("PATH_BASE", dir)
 	cfgPath := filepath.Join(dir, "b.yaml")
-	_ = os.WriteFile(cfgPath, []byte("binaries: {}\n"), 0644)
+	mustWrite(t, cfgPath, []byte("binaries: {}\n"))
 	shared := NewSharedOptions(mkIO(), mkBinaries())
 	shared.ConfigPath = cfgPath
 	_ = shared.LoadConfig()
@@ -429,7 +472,7 @@ func TestInstallOptions_AddEnvToConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PATH_BIN", filepath.Join(dir, ".bin"))
 	cfgYaml := filepath.Join(dir, "b.yaml")
-	_ = os.WriteFile(cfgYaml, []byte("envs: {}\n"), 0644)
+	mustWrite(t, cfgYaml, []byte("envs: {}\n"))
 	shared := NewSharedOptions(mkIO(), nil)
 	shared.ConfigPath = cfgYaml
 	_ = shared.LoadConfig()
@@ -484,7 +527,7 @@ func TestInstallOptions_SyncConfigEnvs(t *testing.T) {
     files:
       "manifests/*.yaml": {dest: "out"}
 `
-	_ = os.WriteFile(cfgYaml, []byte(yaml), 0644)
+	mustWrite(t, cfgYaml, []byte(yaml))
 	shared := NewSharedOptions(mkIO(), mkBinaries())
 	shared.ConfigPath = cfgYaml
 	if err := shared.LoadConfig(); err != nil {
@@ -542,7 +585,9 @@ func TestNewEnvCmd_Subcommands(t *testing.T) {
 	c := NewEnvCmd(NewSharedOptions(mkIO(), nil))
 	for _, sub := range []string{"status", "remove", "match", "profiles", "add"} {
 		c.SetArgs([]string{sub, "--help"})
-		_ = c.Execute()
+		if err := c.Execute(); err != nil {
+			t.Errorf("Execute: %v", err)
+		}
 	}
 }
 
@@ -630,9 +675,9 @@ func TestInit_GitignoreSkip(t *testing.T) {
 	t.Chdir(dir)
 
 	// Pre-create .bin/.gitignore so the create path takes the skip branch
-	_ = os.MkdirAll(filepath.Join(dir, ".bin"), 0755)
-	_ = os.WriteFile(filepath.Join(dir, ".bin", ".gitignore"), []byte("existing"), 0644)
-	_ = os.WriteFile(filepath.Join(dir, ".envrc"), []byte("existing"), 0644)
+	mustMkdir(t, filepath.Join(dir, ".bin"))
+	mustWrite(t, filepath.Join(dir, ".bin", ".gitignore"), []byte("existing"))
+	mustWrite(t, filepath.Join(dir, ".envrc"), []byte("existing"))
 
 	shared := NewSharedOptions(mkIO(), nil)
 	o := &InitOptions{SharedOptions: shared}
@@ -654,7 +699,7 @@ func TestSharedOptions_LoadConfig_Missing(t *testing.T) {
 func TestSharedOptions_LoadConfig_WithPath(t *testing.T) {
 	dir := t.TempDir()
 	yaml := filepath.Join(dir, "b.yaml")
-	_ = os.WriteFile(yaml, []byte("binaries:\n  jq: {}\n"), 0644)
+	mustWrite(t, yaml, []byte("binaries:\n  jq: {}\n"))
 	so := NewSharedOptions(mkIO(), nil)
 	so.ConfigPath = yaml
 	if err := so.LoadConfig(); err != nil {
@@ -676,8 +721,8 @@ func TestCacheOptions_RunClean_Empty(t *testing.T) {
 func TestCacheOptions_RunClean_NonEmpty(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	_ = os.MkdirAll(filepath.Join(home, ".cache", "b", "repos", "x"), 0755)
-	_ = os.WriteFile(filepath.Join(home, ".cache", "b", "repos", "x", "y"), []byte("hello"), 0644)
+	mustMkdir(t, filepath.Join(home, ".cache", "b", "repos", "x"))
+	mustWrite(t, filepath.Join(home, ".cache", "b", "repos", "x", "y"), []byte("hello"))
 	o := &CacheOptions{SharedOptions: NewSharedOptions(mkIO(), nil)}
 	if err := o.runClean(); err != nil {
 		t.Errorf("%v", err)

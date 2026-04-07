@@ -17,6 +17,30 @@ func mkIO() *streams.IO {
 	return &streams.IO{In: strings.NewReader(""), Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
 }
 
+// mustWrite writes content to path, calling t.Fatalf on error.
+func mustWrite(t *testing.T, path string, content []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, content, 0644); err != nil {
+		t.Fatalf("WriteFile %s: %v", path, err)
+	}
+}
+
+// mustWriteExec is like mustWrite but with executable mode.
+func mustWriteExec(t *testing.T, path string, content []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, content, 0755); err != nil {
+		t.Fatalf("WriteFile %s: %v", path, err)
+	}
+}
+
+// mustMkdir creates a directory tree, calling t.Fatalf on error.
+func mustMkdir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatalf("MkdirAll %s: %v", path, err)
+	}
+}
+
 func mkBinaries() []*binary.Binary {
 	return []*binary.Binary{
 		{Name: "jq", Context: context.Background()},
