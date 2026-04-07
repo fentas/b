@@ -31,6 +31,15 @@ import (
 // That's conservative (some valid simple paths with weird characters get
 // routed to JMESPath and lose comments) but safe (no false positives).
 func isSimpleDotPath(sel string) bool {
+	// Reject multiple leading dots (e.g. "..a"). The existing simple
+	// dot-path validator (filterYAML) treats ".a..b" → segments
+	// ["", "a", "", "b"] and errors out. Without this guard the
+	// classifier would accept "..a" as simple, then the validator
+	// would reject it at runtime — the classification and validation
+	// would disagree. Per copilot review on PR #127.
+	if strings.HasPrefix(sel, "..") {
+		return false
+	}
 	s := strings.TrimPrefix(sel, ".")
 	if s == "" {
 		return false

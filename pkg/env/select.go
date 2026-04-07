@@ -105,27 +105,85 @@ func filterJSONHybrid(content []byte, selectors []string) ([]byte, error) {
 	return mergeJSONTopLevel(simpleOut, jmesOut)
 }
 
-// mergeYAMLTopLevel merges b's top-level keys into a's. Any key present in
-// b overrides a. Other keys from a survive.
+// mergeYAMLTopLevel merges b's top-level keys into a's. Any key present
+// in b overrides a; other keys from a survive.
+//
+// This function operates on yaml.v3 Node trees so that comments and
+// layout attached to a's keys (which came from the comment-preserving
+// Node API path in filterYAML) survive the merge. The previous
+// implementation round-tripped through map[string]interface{} and
+// silently dropped all that information — see copilot review on PR #127.
 func mergeYAMLTopLevel(a, b []byte) ([]byte, error) {
-	var aData, bData map[string]interface{}
-	if err := yaml.Unmarshal(a, &aData); err != nil {
-		return nil, fmt.Errorf("merging YAML results: parsing simple: %w", err)
+	aDoc, aRoot, err := parseYAMLMappingDoc(a, "simple")
+	if err != nil {
+		return nil, fmt.Errorf("merging YAML results: %w", err)
 	}
-	if err := yaml.Unmarshal(b, &bData); err != nil {
-		return nil, fmt.Errorf("merging YAML results: parsing jmespath: %w", err)
+	_, bRoot, err := parseYAMLMappingDoc(b, "jmespath")
+	if err != nil {
+		return nil, fmt.Errorf("merging YAML results: %w", err)
 	}
-	if aData == nil {
-		aData = make(map[string]interface{})
+
+	// Walk b's top-level pairs. For each, replace the matching pair in a
+	// (if any), or append. Comments / styles attached to a's untouched
+	// nodes are preserved because we never touch those nodes.
+	for i := 0; i+1 < len(bRoot.Content); i += 2 {
+		bKey := bRoot.Content[i]
+		bVal := bRoot.Content[i+1]
+		if idx := findYAMLTopLevelKey(aRoot, bKey.Value); idx >= 0 {
+			aRoot.Content[idx] = bKey
+			aRoot.Content[idx+1] = bVal
+			continue
+		}
+		aRoot.Content = append(aRoot.Content, bKey, bVal)
 	}
-	for k, v := range bData {
-		aData[k] = v
-	}
-	out, err := yaml.Marshal(aData)
+
+	out, err := yaml.Marshal(aDoc)
 	if err != nil {
 		return nil, fmt.Errorf("encoding merged YAML: %w", err)
 	}
 	return out, nil
+}
+
+// parseYAMLMappingDoc parses YAML bytes into a Document node and returns
+// (doc, root mapping, err). Empty input is normalized to an empty
+// mapping document so callers don't have to special-case it. The source
+// label is included in error messages for diagnostics.
+func parseYAMLMappingDoc(data []byte, source string) (*yaml.Node, *yaml.Node, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, nil, fmt.Errorf("parsing %s YAML: %w", source, err)
+	}
+	if doc.Kind == 0 {
+		// Empty input — synthesize an empty document with an empty
+		// mapping so the caller can append into it.
+		doc = yaml.Node{
+			Kind: yaml.DocumentNode,
+			Content: []*yaml.Node{{
+				Kind: yaml.MappingNode,
+				Tag:  "!!map",
+			}},
+		}
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0] == nil {
+		return nil, nil, fmt.Errorf("parsing %s YAML: expected a document with a mapping root", source)
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return nil, nil, fmt.Errorf("parsing %s YAML: expected a top-level mapping, got kind %d", source, root.Kind)
+	}
+	return &doc, root, nil
+}
+
+// findYAMLTopLevelKey returns the index of the key node in a mapping
+// node's Content slice (so the matching value is at index+1), or -1 if
+// the key isn't present. Walks pairs in source order.
+func findYAMLTopLevelKey(mapping *yaml.Node, key string) int {
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i] != nil && mapping.Content[i].Value == key {
+			return i
+		}
+	}
+	return -1
 }
 
 // mergeJSONTopLevel is the JSON sibling of mergeYAMLTopLevel.

@@ -24,6 +24,8 @@ func TestIsSimpleDotPath(t *testing.T) {
 		{"", false},
 		{".", false},
 		{"..", false},
+		{"..a", false}, // multiple leading dots — per copilot review on PR #127
+		{"...a.b", false},
 		{"a..b", false},
 		{"a.", false},
 		{"binaries[0]", false},
@@ -200,6 +202,55 @@ func TestFilterContent_Hybrid_ComplexOnly(t *testing.T) {
 	}
 	if strings.Contains(outStr, "b:") {
 		t.Errorf("b should be filtered, got:\n%s", outStr)
+	}
+}
+
+// TestFilterContent_Hybrid_Mixed_PreservesSimpleComments verifies that
+// when a mixed-list select runs, the simple-side keys keep their
+// comments. Per copilot review on PR #127: the previous map-roundtrip
+// implementation of mergeYAMLTopLevel silently dropped comments here,
+// contradicting the docs claim.
+func TestFilterContent_Hybrid_Mixed_PreservesSimpleComments(t *testing.T) {
+	content := []byte(`# top-of-file comment
+binaries:
+  a:
+    groups: [core]
+  b:
+    groups: [other]
+
+# this comment is attached to envs
+envs:
+  github.com/example/repo: # inline comment
+    files:
+      a.yaml:
+        dest: a.yaml
+`)
+	out, err := filterContent(content,
+		[]string{
+			"envs", // simple → Node API path
+			"{binaries: from_items(items(binaries)[?contains([1].groups, 'core')])}", // complex → JMESPath
+		},
+		"b.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outStr := string(out)
+
+	// JMESPath side worked.
+	if !strings.Contains(outStr, "binaries:") || !strings.Contains(outStr, "a:") {
+		t.Errorf("binaries scope missing, got:\n%s", outStr)
+	}
+	if strings.Contains(outStr, "b:") {
+		t.Errorf("b should be filtered out by JMESPath, got:\n%s", outStr)
+	}
+
+	// Simple-side comments survived. Either the head comment on `envs:`
+	// or the inline comment on the github.com line should be present —
+	// any of these proves the merge didn't strip them.
+	hasComment := strings.Contains(outStr, "# this comment is attached to envs") ||
+		strings.Contains(outStr, "# inline comment")
+	if !hasComment {
+		t.Errorf("simple-side comments stripped during mixed merge, got:\n%s", outStr)
 	}
 }
 
