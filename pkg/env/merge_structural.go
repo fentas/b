@@ -23,12 +23,19 @@ import (
 // conflicted, even though the changes are semantically independent.
 //
 // The function returns:
-//   - merged bytes (re-serialised in the same format as `local`)
+//   - merged bytes, re-serialised in the format chosen by destPath's
+//     extension (.json or .yaml). Note this is NOT byte-for-byte
+//     identical to local: the structural merge round-trips through
+//     yaml.v3 / encoding/json so key order, comments, and whitespace
+//     in `local` are NOT preserved. The wider doMerge wiring runs the
+//     text 3-way merge first and only falls back to the structural
+//     path on conflicts, so a clean merge keeps local's bytes intact.
 //   - hasConflict: true when any leaf-level conflict could not be auto-resolved
 //   - error: only set when parsing/serialisation fails (i.e. the caller
 //     should fall back to the text path)
 //
-// destPath is used purely to pick the output format (.json vs .yaml).
+// destPath is used purely to pick the output format extension; the
+// helper does not preserve local's original formatting.
 //
 // Conflict resolution rules (per key):
 //   - base==local==upstream → keep
@@ -60,22 +67,33 @@ func Merge3WayStructural(local, base, upstream []byte, destPath string) ([]byte,
 		return nil, false, fmt.Errorf("parse upstream: %w", err)
 	}
 
+	// Track whether ANY input was a real (non-empty) document. If at
+	// least one side had bytes, the merged result must serialize as
+	// a real document — even if it ends up empty — so that an
+	// explicit `{}` upstream isn't silently dropped to empty bytes.
+	// When every side started empty, the result stays empty.
+	anyContent := !isEmptyBytes(local) || !isEmptyBytes(base) || !isEmptyBytes(upstream)
+
 	merged, conflicts := mergeValues(baseVal, localVal, upstreamVal, nil)
 	if len(conflicts) > 0 {
 		// Re-serialise the partial merge so the caller can fall back to
 		// the text path with confidence; the boolean signals conflict.
-		out, err := serializeStructural(merged, format)
+		out, err := serializeStructuralAlways(merged, format, anyContent)
 		if err != nil {
 			return nil, true, err
 		}
 		return out, true, nil
 	}
 
-	out, err := serializeStructural(merged, format)
+	out, err := serializeStructuralAlways(merged, format, anyContent)
 	if err != nil {
 		return nil, false, err
 	}
 	return out, false, nil
+}
+
+func isEmptyBytes(b []byte) bool {
+	return len(bytes.TrimSpace(b)) == 0
 }
 
 // detectStructuralFormat returns "json", "yaml", or "" based purely
@@ -144,14 +162,25 @@ func normalizeValue(v any) any {
 	return v
 }
 
+// serializeStructural is kept as a thin wrapper that preserves the
+// "every side started empty → empty output" shortcut. Callers that
+// know whether at least one input had real content should call
+// serializeStructuralAlways with anyContent=true so an explicit empty
+// document like JSON `{}` round-trips faithfully.
 func serializeStructural(v any, format string) ([]byte, error) {
-	// Empty input → empty output. Without this check, an empty map
-	// would serialize as `{}\n`, changing the document even when
-	// every side started empty. The structural merge runs as a
-	// fallback path on conflicts and shouldn't materialize content
-	// out of nothing.
-	if m, ok := v.(map[string]any); ok && len(m) == 0 {
-		return nil, nil
+	return serializeStructuralAlways(v, format, false)
+}
+
+// serializeStructuralAlways serializes v in the given format. When
+// anyContent is true the function always emits a real document even
+// for an empty map (so a real `{}` doesn't get silently dropped to
+// empty bytes). When anyContent is false an empty map maps back to
+// empty bytes — used by the legacy serializeStructural shortcut.
+func serializeStructuralAlways(v any, format string, anyContent bool) ([]byte, error) {
+	if !anyContent {
+		if m, ok := v.(map[string]any); ok && len(m) == 0 {
+			return nil, nil
+		}
 	}
 	switch format {
 	case "json":
@@ -191,14 +220,16 @@ func mergeValues(base, local, upstream any, path []string) (any, []string) {
 	if reflect.DeepEqual(base, upstream) {
 		return local, nil
 	}
-	// Both changed differently. If both are maps, recurse key-wise.
+	// Both changed differently. We can only safely recurse when ALL
+	// THREE sides are maps — otherwise one side performed a type
+	// change (e.g. base was a scalar, local and upstream both
+	// rewrote it as a map) and silently merging the maps would hide
+	// the type change context. In that case it's a leaf conflict
+	// the user has to resolve.
 	bm, baseIsMap := base.(map[string]any)
 	lm, localIsMap := local.(map[string]any)
 	um, upstreamIsMap := upstream.(map[string]any)
-	if localIsMap && upstreamIsMap {
-		if !baseIsMap {
-			bm = map[string]any{}
-		}
+	if baseIsMap && localIsMap && upstreamIsMap {
 		return mergeMaps(bm, lm, um, path)
 	}
 	// Otherwise: leaf conflict.

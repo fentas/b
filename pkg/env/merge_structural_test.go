@@ -5,6 +5,30 @@ import (
 	"testing"
 )
 
+// TestStructural_ExplicitEmptyJSONRoundTrips: a real `{}` document
+// must serialize back to a real document, not be silently dropped to
+// empty bytes. This was the round-3 review concern: the empty-bytes
+// shortcut conflated "every input was empty" with "the merged result
+// is an explicit empty object".
+func TestStructural_ExplicitEmptyJSONRoundTrips(t *testing.T) {
+	base := []byte(`{}`)
+	local := []byte(`{}`)
+	upstream := []byte(`{}`)
+	out, conflict, err := Merge3WayStructural(local, base, upstream, "config.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if conflict {
+		t.Fatal("unexpected conflict")
+	}
+	if len(out) == 0 {
+		t.Errorf("explicit empty object got dropped to empty bytes")
+	}
+	if !strings.Contains(string(out), "{}") {
+		t.Errorf("expected '{}' in output, got: %q", out)
+	}
+}
+
 // TestMergeWithStructuralFallback_CleanTextMergePreservesBytes verifies
 // the doMerge wiring: when the text 3-way merge resolves cleanly, we
 // keep its byte-for-byte output and DO NOT round-trip through the
