@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"os"
@@ -144,6 +145,15 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 			if rerr != nil {
 				return fmt.Errorf("resolving %s: %w", f.Dest, rerr)
 			}
+			if n == 0 {
+				// hasConflictMarkers said yes but the parser
+				// found no real regions (false-positive
+				// detection on a pathological input). Skip
+				// the write and lock update so we don't
+				// touch a file that doesn't actually need
+				// resolving.
+				continue
+			}
 			if err := os.WriteFile(absDest, resolved, 0644); err != nil {
 				return fmt.Errorf("writing %s: %w", f.Dest, err)
 			}
@@ -196,14 +206,34 @@ func envKey(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// hasConflictMarkers reports whether the byte slice contains the
-// minimum signature of a git merge-file conflict region. We require
-// all three markers because partial matches can be legitimate file
-// content (e.g. a markdown rule like `=======`).
+// hasConflictMarkers reports whether the byte slice contains a git
+// merge-file conflict region. The check is line-anchored (and
+// tolerates a trailing CR for CRLF files) so a marker substring
+// inside a YAML string literal or a markdown rule like `=======`
+// can't trigger a false positive — Run() would otherwise rewrite
+// a file that has no real conflicts.
 func hasConflictMarkers(b []byte) bool {
-	return bytes.Contains(b, []byte("<<<<<<<")) &&
-		bytes.Contains(b, []byte("=======")) &&
-		bytes.Contains(b, []byte(">>>>>>>"))
+	var hasStart, hasSep, hasEnd bool
+	scanner := bufio.NewScanner(bytes.NewReader(b))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if n := len(line); n > 0 && line[n-1] == '\r' {
+			line = line[:n-1]
+		}
+		switch {
+		case bytes.HasPrefix(line, []byte("<<<<<<< ")):
+			hasStart = true
+		case bytes.Equal(line, []byte("=======")):
+			hasSep = true
+		case bytes.HasPrefix(line, []byte(">>>>>>> ")):
+			hasEnd = true
+		}
+		if hasStart && hasSep && hasEnd {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveConflictMarkers walks a file containing git-style conflict

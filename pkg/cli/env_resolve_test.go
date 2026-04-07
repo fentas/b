@@ -154,6 +154,7 @@ func TestEnvResolveRun_RewritesFileAndUpdatesLock(t *testing.T) {
 		SharedOptions: &SharedOptions{
 			IO:               &streams.IO{Out: &out, ErrOut: &bytes.Buffer{}},
 			loadedConfigPath: filepath.Join(tmp, "b.yaml"),
+			bVersion:         "test",
 		},
 		Theirs: true,
 	}
@@ -205,6 +206,7 @@ func TestEnvResolveRun_PathTraversalRejected(t *testing.T) {
 		SharedOptions: &SharedOptions{
 			IO:               &streams.IO{Out: &out, ErrOut: &bytes.Buffer{}},
 			loadedConfigPath: filepath.Join(tmp, "b.yaml"),
+			bVersion:         "test",
 		},
 	}
 	err := o.Run(nil)
