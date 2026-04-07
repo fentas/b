@@ -257,7 +257,15 @@ func hasConflictMarkers(b []byte) bool {
 		}
 	}
 	consume()
-	return hasStart && hasSep && hasEnd
+	// Treat the presence of a start marker as conflicted even
+	// without a closing >>>>>>> line. The point of `b env resolve`
+	// is to surface and clean up malformed merge state, so an
+	// unterminated region — which a partial manual edit can leave
+	// behind — needs to show up rather than be silently ignored.
+	// resolveConflictMarkers below will fail to find a complete
+	// region and either error out or return n == 0, which the Run
+	// loop already handles.
+	return hasStart
 }
 
 // resolveConflictMarkers walks a file containing git-style conflict

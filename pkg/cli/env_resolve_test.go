@@ -218,13 +218,24 @@ func TestEnvResolveRun_PathTraversalRejected(t *testing.T) {
 	}
 }
 
-// TestHasConflictMarkers requires all three signature pieces so a
-// markdown rule like `=======` alone doesn't trip the detector.
+// TestHasConflictMarkers exercises the line-anchored detector.
+// A markdown rule like `=======` alone must not trip the detector,
+// but an unterminated region (start marker with no closing line)
+// MUST be reported so `b env resolve` surfaces files left in a
+// half-merged state by a partial manual edit.
 func TestHasConflictMarkers(t *testing.T) {
 	if hasConflictMarkers([]byte("=======\n")) {
 		t.Error("=======-only should not be a conflict")
 	}
 	if !hasConflictMarkers([]byte("<<<<<<< local\nx\n=======\ny\n>>>>>>> upstream\n")) {
 		t.Error("full conflict not detected")
+	}
+	// Unterminated region: start marker, no closing >>>>>>>.
+	if !hasConflictMarkers([]byte("<<<<<<< local\nleft over\n")) {
+		t.Error("unterminated conflict region should be detected")
+	}
+	// Stray >>>>>>> with no opening should NOT trip the detector.
+	if hasConflictMarkers([]byte(">>>>>>> stray\n")) {
+		t.Error("stray closing marker should not be a conflict")
 	}
 }
