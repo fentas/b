@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.13.0](https://github.com/fentas/b/compare/v4.12.0...v4.13.0) (2026-04-07)
+
+
+### Features
+
+* **env:** hybrid JMESPath selector for select: filters ([#124](https://github.com/fentas/b/issues/124)) ([#127](https://github.com/fentas/b/issues/127)) ([aaf184e](https://github.com/fentas/b/commit/aaf184e37bafc1b8b40e3a5c5e1c80149565b1a4))
+* **env:** safety tiers + plan output for env update ([#125](https://github.com/fentas/b/issues/125) phase 1) ([#128](https://github.com/fentas/b/issues/128)) ([3e02aaf](https://github.com/fentas/b/commit/3e02aafb13ad616e5bf76af8112629860efb9994))
+
+
+### Bug Fixes
+
+* **env:** symmetric filtering + splice for select + merge ([#122](https://github.com/fentas/b/issues/122)) ([#126](https://github.com/fentas/b/issues/126)) ([3617709](https://github.com/fentas/b/commit/36177099359355626ea5b71ffdeb88032b7c1d39))
+
 ## [4.12.0](https://github.com/fentas/b/compare/v4.11.0...v4.12.0) (2026-04-06)
 
 
