@@ -740,4 +740,3 @@ func TestBinary_DownloadBinary_Switch(t *testing.T) {
 		t.Errorf("%v", err)
 	}
 }
-
