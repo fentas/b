@@ -287,7 +287,7 @@ b env remove --delete-files github.com/org/infra
 b update --dry-run
 ```
 
-`--dry-run` always prints the plan and never writes. Combine with `--plan-json` to emit a machine-readable plan for PR comment bots and CI summary jobs:
+`--dry-run` prints a per-file plan for any env that has changes and never writes. Envs that are already up-to-date with the lock print a single `(up to date)` line instead of an empty plan table — that's the cheap path. In `--plan-json` mode, every env gets an entry in the array (even up-to-date ones, with `rows: []`) so consumers can distinguish "no envs configured" from "all envs up-to-date". Combine with `--plan-json` to emit a machine-readable plan for PR comment bots and CI summary jobs:
 
 ```bash
 b update --plan-json

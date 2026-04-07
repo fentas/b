@@ -356,12 +356,21 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		}
 
 		if firstResult.Skipped {
-			// In plan-json mode the skipped notice would corrupt the
-			// JSON output (per copilot review on PR #128 round 2).
-			// Suppress the human-readable line and skip the env
-			// entirely — there's nothing to add to the plan array
-			// because no work was planned.
-			if !o.PlanJSON {
+			// Plan-json mode: emit an explicit empty plan for the
+			// skipped env so consumers can distinguish "all envs are
+			// up to date" from "no envs configured" — both used to
+			// produce []. Per copilot review on PR #128 round 3.
+			// In dry-run/plan-text mode also emit the empty plan
+			// (header + "no changes" summary) so the docs claim
+			// "every b update produces a plan" is accurate.
+			if o.PlanJSON {
+				planJSONOut = append(planJSONOut, &env.Plan{
+					Ref:     ref,
+					Label:   label,
+					Version: entry.Version,
+					Commit:  firstResult.Commit,
+				})
+			} else {
 				fmt.Fprintf(o.IO.Out, "  %-40s %s\n", entry.Key, firstResult.Message)
 			}
 			continue // don't overwrite lock entry when up-to-date

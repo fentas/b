@@ -1714,7 +1714,7 @@ func TestPrintFileStatus_AllStatuses(t *testing.T) {
 //   - --safety=auto applies without prompting (legacy behavior)
 //   - --safety=strict refuses ANY destructive plan, with or without TTY
 //   - --yes overrides the prompt and behaves like auto
-//   - --plan-json emits one JSON document per env and skips writes
+//   - --plan-json emits a single JSON array for the whole run and skips writes
 //   - the dry-run pass never updates the lock and always renders a plan
 //   - the auto / --yes paths only call SyncEnv ONCE — the plan-first
 //     paths call it twice (one dry-run for the plan + one apply)
@@ -1915,6 +1915,38 @@ func TestUpdateEnvs_Yes_OverridesPrompt(t *testing.T) {
 	}
 	if (*calls)[0] != false {
 		t.Error("--yes call should be real apply")
+	}
+}
+
+// TestUpdateEnvs_PlanJSON_IncludesSkippedEnvs verifies that an env
+// with `Skipped: true` (already up-to-date) still produces a plan
+// object in the JSON array — empty rows + ref/commit metadata — so
+// consumers can distinguish "no envs configured" from "all envs
+// up-to-date". Per copilot review on PR #128 round 3.
+func TestUpdateEnvs_PlanJSON_IncludesSkippedEnvs(t *testing.T) {
+	saveHooks(t)
+	syncFn, _ := makeSyncFunc(&env.SyncResult{
+		Ref:     "github.com/org/repo",
+		Commit:  "abc",
+		Skipped: true,
+		Message: "(up to date)",
+	})
+	syncEnvFunc = syncFn
+
+	o, out, _ := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo"},
+		func(o *UpdateOptions) { o.PlanJSON = true })
+	if err := o.updateEnvs(nil); err != nil {
+		t.Fatalf("updateEnvs: %v", err)
+	}
+	outStr := out.String()
+	// Output should be a JSON array with one entry, not [].
+	if !strings.Contains(outStr, `"github.com/org/repo"`) {
+		t.Errorf("expected skipped env in JSON output, got:\n%s", outStr)
+	}
+	// Sanity: must NOT contain the human "(up to date)" line that
+	// would corrupt the JSON.
+	if strings.Contains(outStr, "(up to date)") {
+		t.Errorf("plan-json should not include human-readable up-to-date line, got:\n%s", outStr)
 	}
 }
 

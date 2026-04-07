@@ -114,10 +114,13 @@ func (list *EnvList) MarshalYAML() (interface{}, error) {
 		if e.Strategy != "" && e.Strategy != "replace" {
 			cfg["strategy"] = e.Strategy
 		}
-		// Omit safety when it's the default ("prompt" or empty) so b.yaml
-		// stays terse for the common case.
-		if e.Safety != "" && e.Safety != SafetyPrompt {
-			cfg["safety"] = e.Safety
+		// Omit safety when it normalizes to the default ("prompt") or
+		// is empty so b.yaml stays terse for the common case. Compare
+		// against the normalized value so non-canonical inputs like
+		// `Prompt`, ` auto `, etc. round-trip cleanly. Per copilot
+		// review on PR #128 round 3.
+		if e.Safety != "" && NormalizeSafety(e.Safety) != SafetyPrompt {
+			cfg["safety"] = NormalizeSafety(e.Safety)
 		}
 		if e.Group != "" {
 			cfg["group"] = e.Group
