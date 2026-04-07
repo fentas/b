@@ -201,12 +201,49 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			}
 		}
 
-		// Apply select filter to upstream content
+		// Apply select filter to upstream content. After this point,
+		// `content` is the *filtered* upstream view — i.e. only the
+		// selected scope. Writing it directly to a destination that
+		// holds a full file would wipe out-of-scope content; the
+		// strategy branches below handle that by splicing.
 		if filterFn != nil {
 			content, err = filterFn(content)
 			if err != nil {
 				return nil, fmt.Errorf("filtering %s: %w", m.SourcePath, err)
 			}
+		}
+
+		// computeTargetBytes returns the exact bytes that should land on
+		// disk for this file under a non-merge strategy. When there is no
+		// select filter, that's just the (filtered or full) upstream
+		// content. When a select is in play, we splice the filtered
+		// upstream into the consumer's full local file so that
+		// out-of-scope content (other top-level keys, envs:, profiles:)
+		// is preserved across syncs.
+		//
+		// This is the fix for the #126 review comment: previously, the
+		// no-local-changes branch and the StrategyReplace branch wrote
+		// `content` directly, which silently dropped out-of-scope local
+		// content on every sync after a merge had run.
+		computeTargetBytes := func() ([]byte, error) {
+			if filterFn == nil {
+				return content, nil
+			}
+			localFull, readErr := os.ReadFile(destPath)
+			if readErr != nil {
+				if os.IsNotExist(readErr) {
+					// New file: nothing to splice into. Write the
+					// filtered upstream as-is. The user can then
+					// extend it locally; subsequent syncs will splice.
+					return content, nil
+				}
+				return nil, fmt.Errorf("reading local for splice: %w", readErr)
+			}
+			spliced, spliceErr := spliceSelectedScope(localFull, content, m.Select, m.SourcePath)
+			if spliceErr != nil {
+				return nil, fmt.Errorf("splicing %s: %w", m.SourcePath, spliceErr)
+			}
+			return spliced, nil
 		}
 
 		upstreamHash := fmt.Sprintf("%x", sha256.Sum256(content))
@@ -221,8 +258,15 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			if oldFile := findLockFile(lockEntry, m.SourcePath); oldFile != nil {
 				localHash, hashErr := lock.SHA256File(destPath)
 				if hashErr == nil {
-					// Fast-path: treat as unchanged only when local file matches upstream content
-					if localHash == upstreamHash {
+					// Fast-path: treat as unchanged only when local file
+					// matches upstream content. The comparison is meaningful
+					// only when there's no select filter — when filterFn is
+					// set, `content` is just the scoped slice and the
+					// on-disk file is the full document, so the two hashes
+					// will never match. In that case we fall through to
+					// drift detection, which compares against the lock's
+					// recorded hash for the spliced-target view.
+					if filterFn == nil && localHash == upstreamHash {
 						// Ensure file permissions match upstream even when content is identical
 						if !cfg.DryRun {
 							if info, statErr := os.Stat(destPath); statErr == nil {
@@ -265,12 +309,21 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		finalHash := upstreamHash
 
 		if !localChanged {
-			// No local changes — always safe to replace
+			// No local changes — safe to write upstream. With a select
+			// filter we MUST splice rather than write the filtered slice
+			// directly, otherwise the consumer's out-of-scope content gets
+			// silently dropped on every sync. computeTargetBytes returns
+			// the right thing for both filtered and unfiltered cases.
+			target, err := computeTargetBytes()
+			if err != nil {
+				return nil, err
+			}
 			if !cfg.DryRun {
-				if err := writeFile(destPath, content, fileMode); err != nil {
+				if err := writeFile(destPath, target, fileMode); err != nil {
 					return nil, err
 				}
 			}
+			finalHash = fmt.Sprintf("%x", sha256.Sum256(target))
 		} else {
 			switch fileStrategy {
 			case StrategyClient:
@@ -288,13 +341,21 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			case StrategyMerge:
 				merged, hasConflict, mergeErr := doMerge(repoDir, previousCommit, m.SourcePath, destPath, content, filterFn)
 				if mergeErr != nil {
-					// Merge failed, fall back to replace with warning
+					// Merge failed (e.g. no previous commit). Fall back to
+					// the same splice path the no-local-changes branch
+					// uses, so we never overwrite out-of-scope content
+					// even when degrading to replace.
+					target, tErr := computeTargetBytes()
+					if tErr != nil {
+						return nil, tErr
+					}
 					status = "replaced (merge failed: " + mergeErr.Error() + ")"
 					if !cfg.DryRun {
-						if err := writeFile(destPath, content, fileMode); err != nil {
+						if err := writeFile(destPath, target, fileMode); err != nil {
 							return nil, err
 						}
 					}
+					finalHash = fmt.Sprintf("%x", sha256.Sum256(target))
 				} else {
 					// Splice the merged (filtered) scope back into the
 					// consumer's full local file so that out-of-scope
@@ -328,12 +389,22 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 				}
 
 			default: // StrategyReplace
+				// Replace with select also goes through the splice so the
+				// consumer's out-of-scope content is preserved. The status
+				// label still says "local changes overwritten" because the
+				// IN-scope local edits will be lost — only the out-of-scope
+				// portion is preserved.
+				target, err := computeTargetBytes()
+				if err != nil {
+					return nil, err
+				}
 				status = "replaced (local changes overwritten)"
 				if !cfg.DryRun {
-					if err := writeFile(destPath, content, fileMode); err != nil {
+					if err := writeFile(destPath, target, fileMode); err != nil {
 						return nil, err
 					}
 				}
+				finalHash = fmt.Sprintf("%x", sha256.Sum256(target))
 			}
 		}
 

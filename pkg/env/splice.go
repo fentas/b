@@ -26,7 +26,9 @@ import (
 //     comments and layout are preserved because their Nodes are untouched.
 //     Note: yaml.Marshal re-emits the whole document, so the output won't
 //     be byte-identical to the input even for unchanged keys — this is a
-//     limitation of yaml.v3. See TODO below.
+//     limitation of yaml.v3 that the structural splice cannot work around
+//     here. A format-preserving emitter is tracked as a separate
+//     follow-up.
 //
 //   - Text splice (conflict path): when `merged` contains `git merge-file`
 //     conflict markers, it doesn't parse as YAML. In that case we find the
@@ -50,11 +52,17 @@ func spliceSelectedScope(local, merged []byte, selectors []string, filePath stri
 	case ".yaml", ".yml":
 		return spliceYAML(local, merged, selectors)
 	case ".json":
-		// JSON splice isn't implemented yet. The core #122 use case is
-		// YAML (.bin/b.yaml) so this keeps the old behavior for JSON until
-		// there is a real use case that needs it.
-		return merged, nil
+		// JSON scope selection is supported by filterContent, but
+		// splicing the scoped result back into the full local document
+		// is not implemented yet. Returning `merged` here would
+		// overwrite the on-disk file with only the selected scope and
+		// drop out-of-scope content — exactly the bug #122 is fixing.
+		// Fail fast until JSON splice support exists.
+		return nil, fmt.Errorf("scoped merge is not supported for JSON files yet (%s) — remove the select filter or move the data to YAML", filePath)
 	default:
+		// Unknown extension: select isn't supported on these in
+		// filterContent either, so this branch only fires from internal
+		// callers. Pass through.
 		return merged, nil
 	}
 }
@@ -215,13 +223,13 @@ func topLevelKeyRanges(source []byte, root *yaml.Node) []keyByteRange {
 	var ranges []keyByteRange
 	for i := 0; i < total-1; i += 2 {
 		keyNode := root.Content[i]
-		startByte := lineStart(lineOffsets, keyNode.Line)
+		startByte := lineStart(lineOffsets, keyNode.Line, len(source))
 
 		// End of this entry = start of the next top-level key, or EOF.
 		var endByte int
 		if i+2 < total-1 {
 			nextKey := root.Content[i+2]
-			endByte = lineStart(lineOffsets, nextKey.Line)
+			endByte = lineStart(lineOffsets, nextKey.Line, len(source))
 		} else {
 			endByte = len(source)
 		}
@@ -246,14 +254,21 @@ func computeLineOffsets(source []byte) []int {
 	return offsets
 }
 
-// lineStart returns the byte offset at which the 1-based line begins. If
-// the line is out of range, returns len(source).
-func lineStart(offsets []int, line int) int {
+// lineStart returns the byte offset at which the 1-based line begins.
+// `srcLen` is the length of the source the offsets were computed from.
+// If line is <= 0 it returns 0; if line is past the last recorded line
+// it clamps to srcLen (true EOF), not the start of the last line.
+//
+// The srcLen parameter was added in response to copilot review on
+// PR #126: previously the function returned offsets[len(offsets)-1] for
+// out-of-range lines, which is the start of the LAST line, not EOF —
+// contradicting the doc comment.
+func lineStart(offsets []int, line int, srcLen int) int {
 	if line <= 0 {
 		return 0
 	}
 	if line-1 >= len(offsets) {
-		return offsets[len(offsets)-1]
+		return srcLen
 	}
 	return offsets[line-1]
 }
@@ -265,18 +280,21 @@ func lineStart(offsets []int, line int) int {
 // Strategy:
 //
 //  1. Parse local → get top-level key byte ranges.
-//  2. Identify the contiguous "scoped region" in local: the bytes from the
-//     first scoped key to the end of the last scoped key. If scoped keys
-//     are not contiguous (some out-of-scope key sits between them), the
-//     strategy still works: we replace each scoped key's range
-//     individually.
-//  3. Replace each scoped key's range with the *entire* merged text the
-//     first time, and with empty bytes thereafter. This is coarser than
-//     per-key splicing but safe: since the merge output contains all
-//     scoped keys, inserting it once covers everything.
+//  2. Heuristically split `merged` into per-top-level-key byte ranges by
+//     scanning for unindented `key:` lines. This works even when one of
+//     those ranges contains conflict markers — we just need to find the
+//     line where the next top-level key starts.
+//  3. For each scoped top-level key in local, replace its byte range with
+//     the corresponding range from merged. Out-of-scope ranges in local
+//     are left untouched. If we can't find a key in merged's ranges
+//     (e.g. because the scanner couldn't parse merged at all), the
+//     scoped local range is replaced with the entire merged blob — same
+//     as the previous behavior, used as a defensive fallback.
 //
-// The output has conflict markers in place of the scoped region, and the
-// rest of the file is preserved byte-for-byte.
+// Per-key splicing was added in response to copilot review on PR #126,
+// which pointed out that the previous "insert once at the first scoped
+// range, suppress subsequent ranges" approach reordered content when
+// scoped keys were non-contiguous in the local file.
 func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error) {
 	var localDoc yaml.Node
 	if err := yaml.Unmarshal(local, &localDoc); err != nil {
@@ -316,22 +334,31 @@ func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error)
 		return buf.Bytes(), nil
 	}
 
-	// Build the output: walk local byte-by-byte, and when we hit the start
-	// of the first scoped range, emit the full merged text; for subsequent
-	// scoped ranges, emit nothing (they're already represented in merged).
+	// Build per-key ranges from merged via the heuristic scanner.
+	mergedByKey := scanTopLevelKeyRanges(merged)
+
+	// Walk local byte-by-byte, replacing each scoped range with the
+	// corresponding per-key slice from merged. Out-of-scope ranges
+	// (anything outside `scoped`) are copied verbatim.
 	var out bytes.Buffer
 	cursor := 0
-	insertedMerged := false
 	for _, r := range scoped {
 		if r.startByte > cursor {
 			out.Write(local[cursor:r.startByte])
 		}
-		if !insertedMerged {
+		if mergedSlice, ok := mergedByKey[r.key]; ok {
+			out.Write(mergedSlice)
+			if len(mergedSlice) > 0 && mergedSlice[len(mergedSlice)-1] != '\n' {
+				out.WriteByte('\n')
+			}
+		} else {
+			// Couldn't find this key in merged. Defensive fallback:
+			// drop the entire merged blob into THIS range. Better
+			// than losing the merge result entirely.
 			out.Write(merged)
 			if len(merged) > 0 && merged[len(merged)-1] != '\n' {
 				out.WriteByte('\n')
 			}
-			insertedMerged = true
 		}
 		cursor = r.endByte
 	}
@@ -339,4 +366,96 @@ func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error)
 		out.Write(local[cursor:])
 	}
 	return out.Bytes(), nil
+}
+
+// scanTopLevelKeyRanges is a heuristic byte-range extractor for YAML
+// top-level keys. It walks `src` line by line and treats every line
+// matching `^[A-Za-z_][A-Za-z0-9_-]*:` (no leading whitespace) as the
+// start of a new top-level key. The key's byte range runs from the
+// start of its line to the start of the next top-level key (or EOF).
+//
+// This is intentionally tolerant: it does NOT parse YAML, so it works on
+// inputs that contain `git merge-file` conflict markers in nested values.
+// Conflict markers themselves start with `<<<<<<<` / `=======` /
+// `>>>>>>>`, none of which match the top-level-key regex, so they don't
+// confuse the scanner.
+//
+// Limitations:
+//   - Doesn't handle quoted keys, multi-line keys, or keys containing
+//     special characters. These are rare in YAML files used as b config
+//     and the cost of misclassification is "merged content gets dropped
+//     into the first scoped range as a fallback" — not data loss.
+//   - Doesn't handle YAML documents starting with `---` directives.
+func scanTopLevelKeyRanges(src []byte) map[string][]byte {
+	out := make(map[string][]byte)
+	if len(src) == 0 {
+		return out
+	}
+	type keyStart struct {
+		name  string
+		start int
+	}
+	var keys []keyStart
+
+	lineStart := 0
+	for i := 0; i <= len(src); i++ {
+		if i == len(src) || src[i] == '\n' {
+			if k := tryParseTopLevelKey(src[lineStart:i]); k != "" {
+				keys = append(keys, keyStart{name: k, start: lineStart})
+			}
+			lineStart = i + 1
+		}
+	}
+
+	for i, k := range keys {
+		end := len(src)
+		if i+1 < len(keys) {
+			end = keys[i+1].start
+		}
+		out[k.name] = src[k.start:end]
+	}
+	return out
+}
+
+// tryParseTopLevelKey returns the key name if `line` is a valid
+// top-level YAML key declaration (no leading whitespace, identifier
+// chars followed by `:`), or "" otherwise.
+func tryParseTopLevelKey(line []byte) string {
+	if len(line) == 0 {
+		return ""
+	}
+	// Reject leading whitespace.
+	if line[0] == ' ' || line[0] == '\t' {
+		return ""
+	}
+	// Reject comment lines.
+	if line[0] == '#' {
+		return ""
+	}
+	// Identifier scan.
+	end := 0
+	for end < len(line) {
+		c := line[end]
+		isIdent := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') || c == '_' || c == '-'
+		if !isIdent {
+			break
+		}
+		end++
+	}
+	if end == 0 {
+		return ""
+	}
+	if end >= len(line) || line[end] != ':' {
+		return ""
+	}
+	// After the colon must come EOL, space, or tab — anything else and
+	// it's not a key (e.g. `https://...` should not match).
+	if end+1 < len(line) {
+		c := line[end+1]
+		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
+			return ""
+		}
+	}
+	return string(line[:end])
 }

@@ -87,6 +87,72 @@ envs:
 	}
 }
 
+// TestSpliceYAMLStructural_NonContiguousScopedKeys verifies that the
+// structural splice handles two scoped keys separated by an out-of-scope
+// key in the local file, without reordering. (Reviewer note on PR #126.)
+//
+// Local layout:
+//
+//	binaries: ...     ← in-scope
+//	envs: ...         ← out-of-scope
+//	extras: ...       ← in-scope
+//
+// After splice with select:[binaries, extras], the order must remain
+// binaries → envs → extras (envs untouched in the middle), and both
+// scoped keys must hold the merged values.
+func TestSpliceYAMLStructural_NonContiguousScopedKeys(t *testing.T) {
+	local := []byte(`binaries:
+  old: {}
+
+envs:
+  github.com/keep/me:
+    files:
+      a.yaml:
+        dest: a.yaml
+
+extras:
+  legacy: {}
+`)
+	merged := []byte(`binaries:
+  new: {}
+extras:
+  shiny: {}
+`)
+	out, err := spliceSelectedScope(local, merged, []string{"binaries", "extras"}, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	outStr := string(out)
+
+	// Both scoped keys hold the merged values
+	if !strings.Contains(outStr, "new:") {
+		t.Errorf("binaries.new missing: %s", outStr)
+	}
+	if !strings.Contains(outStr, "shiny:") {
+		t.Errorf("extras.shiny missing: %s", outStr)
+	}
+	// Old in-scope content gone (replaced by merge)
+	if strings.Contains(outStr, "old:") {
+		t.Errorf("binaries.old should have been replaced: %s", outStr)
+	}
+	if strings.Contains(outStr, "legacy:") {
+		t.Errorf("extras.legacy should have been replaced: %s", outStr)
+	}
+	// Out-of-scope envs preserved in the middle
+	if !strings.Contains(outStr, "github.com/keep/me") {
+		t.Errorf("envs scope dropped: %s", outStr)
+	}
+
+	// Order check: binaries must appear before envs, envs before extras.
+	binaries := strings.Index(outStr, "binaries:")
+	envs := strings.Index(outStr, "envs:")
+	extras := strings.Index(outStr, "extras:")
+	if !(binaries < envs && envs < extras) {
+		t.Errorf("scoped keys reordered (binaries=%d envs=%d extras=%d):\n%s",
+			binaries, envs, extras, outStr)
+	}
+}
+
 // TestSpliceYAMLStructural_RemovesScopedKeyAbsentInMerge verifies that if
 // the merge decided a scoped key should no longer exist, the splice
 // removes it from local too.
@@ -185,17 +251,19 @@ binaries:
 	}
 }
 
-// TestSpliceSelectedScope_JSONPassthrough — JSON splice is not yet
-// implemented, so the function should return merged unchanged for .json.
-func TestSpliceSelectedScope_JSONPassthrough(t *testing.T) {
+// TestSpliceSelectedScope_JSONErrors — JSON splice is not implemented;
+// passing through `merged` would silently drop out-of-scope JSON content
+// (the exact #122 bug), so the function must error out instead. Per
+// copilot review on PR #126.
+func TestSpliceSelectedScope_JSONErrors(t *testing.T) {
 	local := []byte(`{"binaries": {"a": 1}, "envs": {}}`)
 	merged := []byte(`{"binaries": {"a": 1, "b": 2}}`)
-	out, err := spliceSelectedScope(local, merged, []string{"binaries"}, "config.json")
-	if err != nil {
-		t.Fatal(err)
+	_, err := spliceSelectedScope(local, merged, []string{"binaries"}, "config.json")
+	if err == nil {
+		t.Fatal("expected error for scoped JSON merge (not yet supported)")
 	}
-	if string(out) != string(merged) {
-		t.Errorf("JSON splice should pass merged through, got %q", out)
+	if !strings.Contains(err.Error(), "JSON") {
+		t.Errorf("error should mention JSON, got: %v", err)
 	}
 }
 

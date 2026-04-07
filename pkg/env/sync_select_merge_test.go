@@ -258,6 +258,89 @@ envs:
 	}
 }
 
+// TestSyncEnv_SelectMerge_NoLocalChanges_PreservesEnvs is the regression
+// test for a bug copilot caught on PR #126: after a successful sync, the
+// consumer's local file matches the previously-recorded lock entry, so
+// the next sync sees `localChanged=false` and used to take the
+// "no local changes — safe to replace" branch which wrote the *filtered*
+// upstream content directly. That re-introduced the data loss the splice
+// path was supposed to fix.
+//
+// The fix is to splice in the no-local-changes branch too. This test
+// pins it: consumer has envs:, lock matches local file, sync runs with
+// upstream changes inside the binaries scope, envs: must survive.
+func TestSyncEnv_SelectMerge_NoLocalChanges_PreservesEnvs(t *testing.T) {
+	repo := setupMergeRepo(t)
+	project := t.TempDir()
+
+	// Consumer's local file: starts as the v1 binaries (matching base),
+	// PLUS an envs: section. This is the "no in-scope local changes,
+	// only out-of-scope content" steady state after a previous sync.
+	destFile := filepath.Join(project, ".bin", "b.yaml")
+	if err := os.MkdirAll(filepath.Dir(destFile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	consumer := `binaries:
+  kubectl: {}
+  kustomize: {}
+
+envs:
+  github.com/keep/me:
+    files:
+      a.yaml:
+        dest: a.yaml
+`
+	if err := os.WriteFile(destFile, []byte(consumer), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Lock entry pinned to base. Crucially the recorded SHA matches the
+	// CURRENT on-disk file (not the filtered upstream) — that's what
+	// "no local changes since previous spliced sync" looks like in
+	// practice. With the fix, this case must still preserve envs.
+	lockEntry := &lock.EnvEntry{
+		Ref:    "local-repo",
+		Commit: repo.baseCommit,
+		Files: []lock.LockFile{{
+			Path: repo.sourcePath,
+			Dest: repo.sourcePath,
+			SHA256: func() string {
+				h, _ := lock.SHA256File(destFile)
+				return h
+			}(),
+		}},
+	}
+
+	cfg := EnvConfig{
+		Ref: repo.bare,
+		// Strategy doesn't really matter — the bug was in the
+		// localChanged=false branch, which fires for ALL strategies.
+		Strategy: StrategyMerge,
+		Files: map[string]envmatch.GlobConfig{
+			repo.sourcePath: {Select: []string{"binaries"}},
+		},
+	}
+
+	if _, err := SyncEnv(cfg, project, t.TempDir(), lockEntry); err != nil {
+		t.Fatalf("SyncEnv: %v", err)
+	}
+
+	after, err := os.ReadFile(destFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterStr := string(after)
+
+	// Upstream change applied (tilt added).
+	if !strings.Contains(afterStr, "tilt") {
+		t.Errorf("expected 'tilt' from upstream, got:\n%s", afterStr)
+	}
+	// Consumer envs survived — the regression assertion.
+	if !strings.Contains(afterStr, "github.com/keep/me") {
+		t.Errorf("REGRESSION: consumer envs wiped on no-local-changes sync, got:\n%s", afterStr)
+	}
+}
+
 // TestSyncEnv_SelectMerge_FallsBackWhenNoBase — when there is no previous
 // commit (first sync with merge strategy), doMerge can't run and SyncEnv
 // should fall through cleanly. We exercise this path by passing a lock
@@ -303,10 +386,11 @@ func TestSyncEnv_SelectMerge_FallsBackWhenNoBase(t *testing.T) {
 	}
 }
 
-// TestSyncEnv_SelectMerge_UpstreamRename — when the upstream version of a
-// binary changes inside the selected scope and the consumer hasn't touched
-// it, the merge should apply cleanly (no conflict) and the out-of-scope
-// content must still survive.
+// TestSyncEnv_SelectMerge_ValueChangeInsideScope — when the upstream
+// bumps a value inside the selected scope (e.g. kubectl version v1.30 →
+// v1.31) and the consumer hasn't touched the scoped section, the merge
+// should apply cleanly (no conflict) and the consumer's out-of-scope
+// content (envs:) must survive.
 func TestSyncEnv_SelectMerge_ValueChangeInsideScope(t *testing.T) {
 	tmp := t.TempDir()
 	work := filepath.Join(tmp, "work")
