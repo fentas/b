@@ -218,9 +218,21 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 				}
 			}
 			if !allTopLevelSelectors && strategy == StrategyMerge {
+				// Tailor the suggestion to the file type. JSON files
+				// can't recover from this with a top-level selector
+				// either, because spliceSelectedScope rejects scoped
+				// JSON entirely (the splice is YAML-only). For JSON,
+				// the only path forward is to drop the select filter
+				// or move the data to YAML. Per copilot review on
+				// PR #126 round 7.
+				ext := strings.ToLower(filepath.Ext(m.SourcePath))
+				suggestion := "use a top-level selector or strategy: replace"
+				if ext == ".json" {
+					suggestion = "JSON splicing is not implemented, drop the select filter or move the data to YAML"
+				}
 				return nil, fmt.Errorf(
-					"nested selector on %s is not supported with strategy: merge — use a top-level selector or strategy: replace",
-					m.SourcePath)
+					"nested selector on %s is not supported with strategy: merge — %s",
+					m.SourcePath, suggestion)
 			}
 			sel := m.Select
 			src := m.SourcePath
