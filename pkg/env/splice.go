@@ -148,7 +148,7 @@ func spliceYAMLStructural(local, merged []byte, scope map[string]bool) ([]byte, 
 	// header comments and whitespace that yaml.v3 doesn't surface
 	// as Document.Content. Preserve those original bytes by
 	// concatenating local + merged instead of dropping local
-	// entirely. Per copilot review on PR #126 round 9.
+	// entirely..
 	if localDoc.Kind == 0 || len(localDoc.Content) == 0 {
 		if len(local) == 0 {
 			return merged, nil
@@ -172,8 +172,7 @@ func spliceYAMLStructural(local, merged []byte, scope map[string]bool) ([]byte, 
 		// can't splice scoped top-level keys into a non-mapping. Return
 		// an error so the caller falls back to the text splice (which
 		// preserves bytes) instead of silently overwriting the local
-		// file with only the filtered scope. Per copilot review on
-		// PR #126 round 2.
+		// file with only the filtered scope.
 		return nil, fmt.Errorf("local YAML root is not a mapping (kind %d), cannot splice scoped keys", localRoot.Kind)
 	}
 
@@ -261,7 +260,7 @@ type keyByteRange struct {
 // path: if a comment block sits between an in-scope key and an
 // out-of-scope key, that comment belongs (semantically) to the
 // out-of-scope key and must not be replaced when the in-scope key's
-// range is rewritten. Per copilot review on PR #126 round 5.
+// range is rewritten..
 func topLevelKeyRanges(source []byte, root *yaml.Node) []keyByteRange {
 	lineOffsets := computeLineOffsets(source)
 	total := len(root.Content)
@@ -308,8 +307,7 @@ func computeLineOffsets(source []byte) []int {
 // If line is <= 0 it returns 0; if line is past the last recorded line
 // it clamps to srcLen (true EOF), not the start of the last line.
 //
-// The srcLen parameter was added in response to copilot review on
-// PR #126: previously the function returned offsets[len(offsets)-1] for
+// The srcLen parameter
 // out-of-range lines, which is the start of the LAST line, not EOF —
 // contradicting the doc comment.
 func lineStart(offsets []int, line int, srcLen int) int {
@@ -327,7 +325,7 @@ func lineStart(offsets []int, line int, srcLen int) int {
 // unindented `#` comment lines (i.e. lines that "belong" to the
 // following block) are excluded from the previous key's range. The
 // floor is the start of the current key's range so we never trim
-// before that. Per copilot review on PR #126 round 5.
+// before that..
 func trimTrailingBlankAndCommentLines(source []byte, floor, end int) int {
 	if end <= floor {
 		return end
@@ -409,10 +407,10 @@ func isBlankOrUnindentedComment(line []byte) bool {
 //  4. Any keys present in `merged` but absent from `local` are
 //     appended at the end (additions, in merged source order).
 //
-// Per-key splicing was added in response to copilot review on PR #126,
-// which pointed out that the previous "insert once at the first scoped
-// range, suppress subsequent ranges" approach reordered content when
-// scoped keys were non-contiguous in the local file.
+// Per-key splicing matters when scoped keys are non-contiguous in
+// the local file: a coarser "insert once at the first scoped range,
+// suppress subsequent ranges" strategy would reorder content because
+// merged-side keys would all collapse to the first scoped position.
 func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error) {
 	var localDoc yaml.Node
 	if err := yaml.Unmarshal(local, &localDoc); err != nil {
@@ -434,8 +432,7 @@ func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error)
 	if len(ranges) == 0 {
 		// No replaceable top-level key ranges (e.g. local was an
 		// empty `{}` mapping). Preserve original bytes and append
-		// merged so any leading comments stay with the file. Per
-		// copilot review on PR #126 round 9.
+		// merged so any leading comments stay with the file.
 		if len(local) == 0 {
 			return merged, nil
 		}
@@ -483,7 +480,7 @@ func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error)
 	// Track which merged keys we've consumed so we can append the rest
 	// (additions: keys present in merged but absent from local) after
 	// the loop. This matches the structural splice's add/remove
-	// semantics. Per copilot review on PR #126 round 3.
+	// semantics..
 	var out bytes.Buffer
 	cursor := 0
 	consumed := make(map[string]bool, len(scoped))
@@ -550,7 +547,7 @@ func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error)
 //     as absent from `merged` and gets removed from local (deletion
 //     path), and merged keys the scanner fails to detect are simply
 //     not emitted as additions. There is no fallback that relocates
-//     such content. Per copilot review on PR #126 round 5.
+//     such content..
 //   - Doesn't handle YAML documents starting with `---` directives.
 func scanTopLevelKeyRanges(src []byte) map[string][]byte {
 	m, _ := scanTopLevelKeyRangesOrdered(src)
@@ -587,8 +584,7 @@ func scanTopLevelKeyRangesOrdered(src []byte) (map[string][]byte, []string) {
 		// For the first key, extend the range backwards to include any
 		// leading bytes (header comments, conflict markers above the
 		// first key, blank lines). Without this, those bytes would be
-		// silently dropped during splicing. Per copilot review on
-		// PR #126 round 2.
+		// silently dropped during splicing.
 		start := k.start
 		if i == 0 {
 			start = 0

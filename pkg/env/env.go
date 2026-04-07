@@ -198,7 +198,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		// a nested selector like `database.host` would, when spliced,
 		// replace the entire `database` top-level node with the
 		// truncated `{host: ...}` view and silently drop siblings
-		// like `database.port`. Per copilot review on PR #126 round 6.
+		// like `database.port`..
 		//
 		// When all selectors are top-level, splice is correct and we
 		// use it. When any selector is nested, splice is unsafe — for
@@ -223,8 +223,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 				// either, because spliceSelectedScope rejects scoped
 				// JSON entirely (the splice is YAML-only). For JSON,
 				// the only path forward is to drop the select filter
-				// or move the data to YAML. Per copilot review on
-				// PR #126 round 7.
+				// or move the data to YAML.
 				ext := strings.ToLower(filepath.Ext(m.SourcePath))
 				suggestion := "use a top-level selector or strategy: replace"
 				if ext == ".json" {
@@ -274,7 +273,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			// directly. This preserves the legacy `select` semantics
 			// (extract a subset, overwrite the destination) for
 			// callers that explicitly opted into per-key extraction.
-			// Per copilot review on PR #126 round 6.
+			//.
 			if !allTopLevelSelectors {
 				return content, nil
 			}
@@ -285,10 +284,11 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			// localFull is nil for not-exist; pass it through to
 			// spliceSelectedScope so YAML still gets the empty-doc
 			// fast path AND JSON errors consistently regardless of
-			// whether the local file exists yet. Per copilot review
-			// on PR #126 round 2: skipping the splice for new files
-			// silently bypassed the JSON-not-supported error, so the
-			// first sync would succeed and the second would fail.
+			// whether the local file exists yet. Skipping the splice
+			// for new files would silently bypass the
+			// JSON-not-supported error: the first sync would succeed
+			// and the second would fail when the on-disk file came
+			// into existence.
 			spliced, spliceErr := spliceSelectedScope(localFull, content, m.Select, m.SourcePath)
 			if spliceErr != nil {
 				return nil, fmt.Errorf("splicing %s: %w", m.SourcePath, spliceErr)

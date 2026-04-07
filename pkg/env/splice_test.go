@@ -89,7 +89,7 @@ envs:
 
 // TestSpliceYAMLStructural_NonContiguousScopedKeys verifies that the
 // structural splice handles two scoped keys separated by an out-of-scope
-// key in the local file, without reordering. (Reviewer note on PR #126.)
+// key in the local file, without reordering..
 //
 // Local layout:
 //
@@ -253,8 +253,7 @@ binaries:
 
 // TestSpliceSelectedScope_JSONErrors — JSON splice is not implemented;
 // passing through `merged` would silently drop out-of-scope JSON content
-// (the exact #122 bug), so the function must error out instead. Per
-// copilot review on PR #126.
+// (the exact #122 bug), so the function must error out instead.
 func TestSpliceSelectedScope_JSONErrors(t *testing.T) {
 	local := []byte(`{"binaries": {"a": 1}, "envs": {}}`)
 	merged := []byte(`{"binaries": {"a": 1, "b": 2}}`)
@@ -291,12 +290,12 @@ func TestSpliceYAMLStructural_HeaderCommentsPreservedOnEmptyDoc(t *testing.T) {
 }
 
 // TestSpliceYAMLText_PreservesCommentAttributedToNextKey verifies the
-// boundary attribution fix from PR #126 round 5: a comment block sitting
-// between an in-scope key and an out-of-scope key must be preserved when
-// the in-scope key is replaced. Before the fix, topLevelKeyRanges set
-// the in-scope key's endByte to the start of the next key's line, so
-// the comment block ended up inside the in-scope key's range and got
-// silently dropped during the splice.
+// boundary attribution rule: a comment block sitting between an
+// in-scope key and an out-of-scope key must be preserved when the
+// in-scope key is replaced. A naive topLevelKeyRanges implementation
+// would set the in-scope key's endByte to the start of the next key's
+// line, so the comment block would end up inside the in-scope key's
+// range and get silently dropped during the splice.
 func TestSpliceYAMLText_PreservesCommentAttributedToNextKey(t *testing.T) {
 	local := []byte(`binaries:
   a: {}
@@ -333,7 +332,7 @@ envs:
 // TestSpliceYAMLText_AddsScopedKeyMissingInLocal verifies the text
 // splice's "additions" path: a scoped key present in `merged` but
 // absent from `local` must be appended to the output (not silently
-// dropped). Per copilot review on PR #126 round 3.
+// dropped)..
 func TestSpliceYAMLText_AddsScopedKeyMissingInLocal(t *testing.T) {
 	local := []byte(`binaries:
   a: {}
@@ -369,8 +368,8 @@ extras:
 
 // TestSpliceYAMLText_RemovesScopedKeyAbsentInMerge verifies the text
 // splice's "deletions" path: a scoped key present in `local` but
-// absent from `merged` must be removed from the output. Per copilot
-// review on PR #126 round 3.
+// absent from `merged` must be removed from the output (matching the
+// structural splice's "key absent in merged" semantics).
 func TestSpliceYAMLText_RemovesScopedKeyAbsentInMerge(t *testing.T) {
 	local := []byte(`binaries:
   old: {}
@@ -409,7 +408,7 @@ extras:
 
 // TestScanTopLevelKeyRanges_PreservesPrefix verifies that header
 // comments and other content above the first top-level key are kept
-// in the first key's range. Per copilot review on PR #126 round 2:
+// in the first key's range.
 // dropping these bytes during text-splice fallback would lose user
 // content even when the structural splice is unavailable.
 func TestScanTopLevelKeyRanges_PreservesPrefix(t *testing.T) {
@@ -442,8 +441,7 @@ envs:
 
 // TestSpliceYAMLStructural_NonMappingErrors verifies the structural
 // splice now errors out (rather than silently passing through `merged`)
-// when the local YAML root is not a mapping. Per copilot review on
-// PR #126 round 2.
+// when the local YAML root is not a mapping.
 func TestSpliceYAMLStructural_NonMappingErrors(t *testing.T) {
 	local := []byte("- item1\n- item2\n") // sequence, not mapping
 	merged := []byte("binaries:\n  a: {}\n")
@@ -455,8 +453,8 @@ func TestSpliceYAMLStructural_NonMappingErrors(t *testing.T) {
 
 // TestSpliceSelectedScope_JSONErrorsForNewFile verifies that JSON +
 // select errors out even when the destination file doesn't exist yet,
-// so a first sync can't silently produce a half-written file. Per
-// copilot review on PR #126 round 2.
+// so a first sync can't silently produce a half-written file that
+// would then fail on the next sync.
 func TestSpliceSelectedScope_JSONErrorsForNewFile(t *testing.T) {
 	merged := []byte(`{"binaries": {"a": 1}}`)
 	// Empty `local` simulates the not-exist case (the caller passes
