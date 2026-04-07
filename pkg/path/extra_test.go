@@ -9,9 +9,7 @@ import (
 func TestFindConfigFile(t *testing.T) {
 	// No config anywhere → returns empty
 	dir := t.TempDir()
-	cwd, _ := os.Getwd()
-	defer os.Chdir(cwd)
-	_ = os.Chdir(dir)
+	t.Chdir(dir)
 	p, err := FindConfigFile()
 	if err != nil {
 		t.Errorf("err: %v", err)
@@ -20,9 +18,13 @@ func TestFindConfigFile(t *testing.T) {
 
 	// With a config in .bin/
 	dir2 := t.TempDir()
-	_ = os.MkdirAll(filepath.Join(dir2, ".bin"), 0755)
-	_ = os.WriteFile(filepath.Join(dir2, ".bin", "b.yaml"), []byte(""), 0644)
-	_ = os.Chdir(dir2)
+	if err := os.MkdirAll(filepath.Join(dir2, ".bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir2, ".bin", "b.yaml"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir2)
 	p, err = FindConfigFile()
 	if err != nil {
 		t.Errorf("%v", err)
@@ -33,8 +35,10 @@ func TestFindConfigFile(t *testing.T) {
 
 	// With a config in root (no .bin)
 	dir3 := t.TempDir()
-	_ = os.WriteFile(filepath.Join(dir3, "b.yaml"), []byte(""), 0644)
-	_ = os.Chdir(dir3)
+	if err := os.WriteFile(filepath.Join(dir3, "b.yaml"), []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir3)
 	p, err = FindConfigFile()
 	if err != nil {
 		t.Errorf("%v", err)

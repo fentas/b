@@ -160,7 +160,7 @@ func TestBinary_LocalBinary(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmp, "fake"), []byte("x"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	b.File = "" // reset cached
+	b.File = ""               // reset cached
 	lb = b.LocalBinary(false) // skip remote
 	if lb.File == "" || lb.Latest != "" {
 		t.Errorf("LocalBinary = %+v", lb)
@@ -743,4 +743,3 @@ func TestBinary_IsBinaryInterface(t *testing.T) {
 	// Ensure LocalBinary method on Binary satisfies type assertions used downstream.
 	var _ = (*Binary)(nil)
 }
-

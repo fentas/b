@@ -166,7 +166,7 @@ func TestDocker_Metadata(t *testing.T) {
 
 func TestGiteaSetAuth(t *testing.T) {
 	r, _ := http.NewRequest("GET", "http://x", nil)
-	os.Unsetenv("GITEA_TOKEN")
+	t.Setenv("GITEA_TOKEN", "")
 	giteaSetAuth(r)
 	if r.Header.Get("Authorization") != "" {
 		t.Error("expected empty without env")
