@@ -8,4 +8,6 @@ main
 /.back
 /test/coverage/*
 !/test/coverage/badge.json
-!/test/coverage/coverage.json.mise.toml
+!/test/coverage/coverage.json
+
+.mise.toml
