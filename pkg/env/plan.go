@@ -244,8 +244,9 @@ func RenderPlanJSON(w io.Writer, p *Plan) error {
 
 // RenderPlansJSON writes a slice of plans as a single JSON array. This
 // is the format the CLI emits for `--plan-json` so consumers can parse
-// the entire run with one `jq .` invocation. Per emitting one JSON document per env produced concatenated
-// docs that weren't valid JSON for standard parsers.
+// the entire run with one `jq .` invocation. Previously, emitting one
+// JSON document per env produced concatenated docs that weren't valid
+// JSON for standard parsers.
 func RenderPlansJSON(w io.Writer, plans []*Plan) error {
 	if plans == nil {
 		plans = []*Plan{}
