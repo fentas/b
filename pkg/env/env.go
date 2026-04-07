@@ -230,15 +230,16 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 				return content, nil
 			}
 			localFull, readErr := os.ReadFile(destPath)
-			if readErr != nil {
-				if os.IsNotExist(readErr) {
-					// New file: nothing to splice into. Write the
-					// filtered upstream as-is. The user can then
-					// extend it locally; subsequent syncs will splice.
-					return content, nil
-				}
+			if readErr != nil && !os.IsNotExist(readErr) {
 				return nil, fmt.Errorf("reading local for splice: %w", readErr)
 			}
+			// localFull is nil for not-exist; pass it through to
+			// spliceSelectedScope so YAML still gets the empty-doc
+			// fast path AND JSON errors consistently regardless of
+			// whether the local file exists yet. Per copilot review
+			// on PR #126 round 2: skipping the splice for new files
+			// silently bypassed the JSON-not-supported error, so the
+			// first sync would succeed and the second would fail.
 			spliced, spliceErr := spliceSelectedScope(localFull, content, m.Select, m.SourcePath)
 			if spliceErr != nil {
 				return nil, fmt.Errorf("splicing %s: %w", m.SourcePath, spliceErr)

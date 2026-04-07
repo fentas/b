@@ -12,8 +12,13 @@ import (
 // spliceSelectedScope takes the consumer's full local file, the merged
 // result of the selected scope (from doMerge), and the list of selectors,
 // and returns a new file where only the selected top-level keys in `local`
-// are replaced with the merged values. All other top-level keys, comments,
-// and layout in `local` are preserved verbatim.
+// are replaced with the merged values. Out-of-scope top-level keys in
+// `local` are preserved; YAML comments and key ordering are preserved on
+// a best-effort basis. The structural fast path round-trips through
+// yaml.v3's emitter, which can normalize whitespace and quoting style
+// even for unchanged keys, so the output is not guaranteed to be
+// byte-identical to the input. The text fallback path (used when the
+// merge produced conflict markers) preserves bytes verbatim.
 //
 // This is the complement of filterContent: filterContent extracts a scope;
 // spliceSelectedScope puts a (merged) scope back.
@@ -128,7 +133,8 @@ func spliceYAMLStructural(local, merged []byte, scope map[string]bool) ([]byte, 
 		return nil, fmt.Errorf("parsing local YAML for splice: %w", err)
 	}
 
-	// Empty local file: emit the merged content verbatim.
+	// Empty local file: emit the merged content verbatim. There's
+	// nothing to splice into and nothing to lose.
 	if localDoc.Kind == 0 || len(localDoc.Content) == 0 {
 		return merged, nil
 	}
@@ -137,7 +143,13 @@ func spliceYAMLStructural(local, merged []byte, scope map[string]bool) ([]byte, 
 	}
 	localRoot := localDoc.Content[0]
 	if localRoot.Kind != yaml.MappingNode {
-		return merged, nil
+		// Local YAML root is a scalar or sequence, not a mapping. We
+		// can't splice scoped top-level keys into a non-mapping. Return
+		// an error so the caller falls back to the text splice (which
+		// preserves bytes) instead of silently overwriting the local
+		// file with only the filtered scope. Per copilot review on
+		// PR #126 round 2.
+		return nil, fmt.Errorf("local YAML root is not a mapping (kind %d), cannot splice scoped keys", localRoot.Kind)
 	}
 
 	var mergedDoc yaml.Node
@@ -298,16 +310,18 @@ func lineStart(offsets []int, line int, srcLen int) int {
 func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error) {
 	var localDoc yaml.Node
 	if err := yaml.Unmarshal(local, &localDoc); err != nil {
-		// Can't parse local either — nothing useful we can do. Return the
-		// merged bytes verbatim so the user at least sees the conflict.
-		return merged, nil
+		// Can't parse local either. Returning `merged` would silently
+		// overwrite the local file with just the filtered scope (the
+		// #126 data-loss bug). Return an error so the caller surfaces
+		// it instead.
+		return nil, fmt.Errorf("text splice: local YAML is not parseable: %w", err)
 	}
 	if localDoc.Kind != yaml.DocumentNode || len(localDoc.Content) == 0 {
-		return merged, nil
+		return nil, fmt.Errorf("text splice: local YAML has no document content")
 	}
 	localRoot := localDoc.Content[0]
 	if localRoot.Kind != yaml.MappingNode {
-		return merged, nil
+		return nil, fmt.Errorf("text splice: local YAML root is not a mapping (kind %d), cannot preserve out-of-scope content", localRoot.Kind)
 	}
 
 	ranges := topLevelKeyRanges(local, localRoot)
@@ -370,9 +384,11 @@ func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error)
 
 // scanTopLevelKeyRanges is a heuristic byte-range extractor for YAML
 // top-level keys. It walks `src` line by line and treats every line
-// matching `^[A-Za-z_][A-Za-z0-9_-]*:` (no leading whitespace) as the
-// start of a new top-level key. The key's byte range runs from the
-// start of its line to the start of the next top-level key (or EOF).
+// matching `^[A-Za-z0-9_-]+:` (no leading whitespace) as the start of
+// a new top-level key. The key's byte range runs from the start of its
+// line to the start of the next top-level key (or EOF). The first key's
+// range is extended back to the start of `src` so leading content
+// (header comments, conflict markers) is preserved.
 //
 // This is intentionally tolerant: it does NOT parse YAML, so it works on
 // inputs that contain `git merge-file` conflict markers in nested values.
@@ -408,11 +424,20 @@ func scanTopLevelKeyRanges(src []byte) map[string][]byte {
 	}
 
 	for i, k := range keys {
+		// For the first key, extend the range backwards to include any
+		// leading bytes (header comments, conflict markers above the
+		// first key, blank lines). Without this, those bytes would be
+		// silently dropped during splicing. Per copilot review on
+		// PR #126 round 2.
+		start := k.start
+		if i == 0 {
+			start = 0
+		}
 		end := len(src)
 		if i+1 < len(keys) {
 			end = keys[i+1].start
 		}
-		out[k.name] = src[k.start:end]
+		out[k.name] = src[start:end]
 	}
 	return out
 }

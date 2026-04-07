@@ -267,6 +267,69 @@ func TestSpliceSelectedScope_JSONErrors(t *testing.T) {
 	}
 }
 
+// TestScanTopLevelKeyRanges_PreservesPrefix verifies that header
+// comments and other content above the first top-level key are kept
+// in the first key's range. Per copilot review on PR #126 round 2:
+// dropping these bytes during text-splice fallback would lose user
+// content even when the structural splice is unavailable.
+func TestScanTopLevelKeyRanges_PreservesPrefix(t *testing.T) {
+	src := []byte(`# header comment
+# more
+binaries:
+  a: {}
+envs:
+  x: {}
+`)
+	out := scanTopLevelKeyRanges(src)
+	binaries, ok := out["binaries"]
+	if !ok {
+		t.Fatalf("binaries key missing")
+	}
+	if !strings.Contains(string(binaries), "header comment") {
+		t.Errorf("first key range should include preceding header comments, got:\n%s", binaries)
+	}
+	if !strings.Contains(string(binaries), "more") {
+		t.Errorf("first key range should include all preceding lines, got:\n%s", binaries)
+	}
+	envs, ok := out["envs"]
+	if !ok {
+		t.Fatalf("envs key missing")
+	}
+	if !strings.HasPrefix(string(envs), "envs:") {
+		t.Errorf("non-first key range should start at the key, got:\n%s", envs)
+	}
+}
+
+// TestSpliceYAMLStructural_NonMappingErrors verifies the structural
+// splice now errors out (rather than silently passing through `merged`)
+// when the local YAML root is not a mapping. Per copilot review on
+// PR #126 round 2.
+func TestSpliceYAMLStructural_NonMappingErrors(t *testing.T) {
+	local := []byte("- item1\n- item2\n") // sequence, not mapping
+	merged := []byte("binaries:\n  a: {}\n")
+	_, err := spliceYAMLStructural(local, merged, map[string]bool{"binaries": true})
+	if err == nil {
+		t.Error("expected error when local root is not a mapping")
+	}
+}
+
+// TestSpliceSelectedScope_JSONErrorsForNewFile verifies that JSON +
+// select errors out even when the destination file doesn't exist yet,
+// so a first sync can't silently produce a half-written file. Per
+// copilot review on PR #126 round 2.
+func TestSpliceSelectedScope_JSONErrorsForNewFile(t *testing.T) {
+	merged := []byte(`{"binaries": {"a": 1}}`)
+	// Empty `local` simulates the not-exist case (the caller passes
+	// nil bytes when ReadFile returned ErrNotExist).
+	_, err := spliceSelectedScope(nil, merged, []string{"binaries"}, "config.json")
+	if err == nil {
+		t.Fatal("expected error for JSON select even when local file doesn't exist")
+	}
+	if !strings.Contains(err.Error(), "JSON") {
+		t.Errorf("error should mention JSON, got: %v", err)
+	}
+}
+
 // TestSpliceSelectedScope_NoSelectors — no selectors means "merge was
 // whole-file", so splice is a pass-through.
 func TestSpliceSelectedScope_NoSelectors(t *testing.T) {
