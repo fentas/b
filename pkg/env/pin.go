@@ -42,13 +42,15 @@ const PinAnnotation = "b.pin"
 // `kubectl.version` value cannot be pinned directly because there is
 // nowhere to attach the annotation. The implementation walks the
 // local tree once to collect annotated map paths and then walks
-// pending to substitute, leaving everything else untouched.
+// pending to substitute. Pinned paths that don't exist in pending
+// (because upstream deleted them) are reinserted from local.
 func applyPinsYAML(local, pending []byte, filePath string) ([]byte, error) {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	if ext != ".yaml" && ext != ".yml" {
 		return pending, nil
 	}
-	if len(local) == 0 || len(pending) == 0 {
+	if len(local) == 0 {
+		// No local file → nothing pinned to honor.
 		return pending, nil
 	}
 
@@ -64,13 +66,43 @@ func applyPinsYAML(local, pending []byte, filePath string) ([]byte, error) {
 		return pending, nil
 	}
 
+	// Pending may be empty (a brand-new file) or header-only (no
+	// document content). Synthesize a minimal mapping document so
+	// addPath has somewhere to attach pinned keys. The yaml.v3
+	// encoder will emit it cleanly.
 	var pendingDoc yaml.Node
-	if err := yaml.Unmarshal(pending, &pendingDoc); err != nil {
-		// Pending has conflict markers or is otherwise unparseable.
-		// We can't structurally substitute, so return as-is and let
-		// the conflict-resolution path handle it. The user's pin will
-		// take effect on the next clean sync.
-		return pending, nil
+	if len(pending) == 0 {
+		pendingDoc = yaml.Node{
+			Kind:    yaml.DocumentNode,
+			Content: []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}},
+		}
+	} else {
+		if err := yaml.Unmarshal(pending, &pendingDoc); err != nil {
+			// Pending has conflict markers or is otherwise unparseable.
+			// We can't structurally substitute, so return as-is and let
+			// the conflict-resolution path handle it. The user's pin
+			// will take effect on the next clean sync.
+			return pending, nil
+		}
+		// Header-only or empty document: yaml.v3 may leave the
+		// document as the zero value (Kind == 0) rather than a
+		// proper DocumentNode. Coerce both shapes into a synthetic
+		// mapping document so setPath / addPath have somewhere to
+		// walk into.
+		if pendingDoc.Kind == 0 || (pendingDoc.Kind == yaml.DocumentNode && len(pendingDoc.Content) == 0) {
+			pendingDoc = yaml.Node{
+				Kind:    yaml.DocumentNode,
+				Content: []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}},
+			}
+		}
+		if pendingDoc.Kind != yaml.DocumentNode {
+			return pending, nil
+		}
+		if pendingDoc.Content[0].Kind != yaml.MappingNode {
+			// Pending root is not a mapping (sequence, scalar) —
+			// pinning doesn't apply, leave it alone.
+			return pending, nil
+		}
 	}
 
 	for _, p := range pinned {

@@ -98,6 +98,63 @@ func TestApplyPinsYAML_PinAddsBackDeletedKey(t *testing.T) {
 	}
 }
 
+// TestApplyPinsYAML_EmptyPendingPreservesPinned covers the case where
+// pending is brand-new / empty (e.g. first sync of a file the
+// consumer was previously maintaining manually). The pinned keys
+// from local must be carried over instead of dropped.
+func TestApplyPinsYAML_EmptyPendingPreservesPinned(t *testing.T) {
+	local := []byte(`binaries:
+  helm:
+    version: v3.14.0
+    b.pin: true
+`)
+	out, err := applyPinsYAML(local, nil, "b.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "helm") || !strings.Contains(s, "v3.14.0") {
+		t.Errorf("pinned key not carried over to empty pending: %s", s)
+	}
+}
+
+// TestApplyPinsYAML_HeaderOnlyPending covers a pending document that
+// has only header comments (no actual content). yaml.v3 leaves
+// Document.Content empty in that case; the helper must synthesize a
+// mapping root instead of crashing.
+func TestApplyPinsYAML_HeaderOnlyPending(t *testing.T) {
+	local := []byte(`a:
+  b.pin: true
+  v: 1
+`)
+	pending := []byte("# only a comment\n")
+	out, err := applyPinsYAML(local, pending, "b.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "v: 1") {
+		t.Errorf("pinned subtree dropped: %s", out)
+	}
+}
+
+// TestApplyPinsYAML_NonMappingPendingPassesThrough: if pending has a
+// sequence or scalar root, pinning doesn't apply and we leave it
+// alone.
+func TestApplyPinsYAML_NonMappingPendingPassesThrough(t *testing.T) {
+	local := []byte(`a:
+  b.pin: true
+  v: 1
+`)
+	pending := []byte("- one\n- two\n")
+	out, err := applyPinsYAML(local, pending, "b.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(pending) {
+		t.Errorf("non-mapping pending should pass through: got %q", out)
+	}
+}
+
 // TestApplyPinsYAML_NestedPinAtArbitraryDepth: a pin deep in the tree
 // is honored just like a top-level one.
 func TestApplyPinsYAML_NestedPinAtArbitraryDepth(t *testing.T) {
