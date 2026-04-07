@@ -549,6 +549,16 @@ func doMerge(
 		}
 	}
 
+	// Try the structural merge first for YAML/JSON destinations. It
+	// resolves the "both sides added adjacent map entries" case that
+	// the text-based git merge-file mistakes for a conflict. On parse
+	// failure, unsupported format, or any conflicts it returns, fall
+	// back to the text path which still produces well-known conflict
+	// markers consumers know how to resolve.
+	if merged, hasConflict, structErr := Merge3WayStructural(local, base, upstream, destPath); structErr == nil && !hasConflict {
+		return merged, false, nil
+	}
+
 	return gitcache.Merge3Way(local, base, upstream)
 }
 
