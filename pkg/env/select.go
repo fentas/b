@@ -49,7 +49,7 @@ import (
 //     mixing simple and complex selectors on the same file is
 //     explicitly rejected by `filterJSONHybrid` because JSON has no
 //     comments to preserve and the merge logic only existed to
-//     keep YAML comments intact — see #135 follow-up.
+//     keep YAML comments intact.
 //
 // See docs/env-sync.mdx for examples and the comment-preservation matrix.
 func filterContent(content []byte, selectors []string, filePath string) ([]byte, error) {

@@ -126,7 +126,7 @@ Selectors use **hybrid syntax**:
 > starting with `@` is treated as complex. Top-level keys whose name
 > starts with `@` need to be selected via JMESPath quoted identifiers
 > (e.g. `'"@foo"'`) instead of as bare dot-paths.
-- **Mixed lists** are supported: simple and complex selectors on the same file are evaluated independently and merged at the top level via the Node API. Simple-side comments and layout survive the merge; complex-side keys carry no comments. JMESPath wins on key collisions.
+- **Mixed lists** are supported **for YAML files only**: simple and complex selectors on the same YAML file are evaluated independently and merged at the top level via the Node API. Simple-side comments and layout survive the merge; complex-side keys carry no comments. JMESPath wins on key collisions. JSON files reject mixed selectors with an explicit error — use either dot-paths only or JMESPath only — because JSON has no comments to preserve and the merge logic only existed to keep YAML comments intact.
 
 > **⚠ `items()` returns tuples, not objects in the v1.1.1 Go fork**
 >
