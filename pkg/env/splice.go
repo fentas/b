@@ -148,7 +148,7 @@ func spliceYAMLStructural(local, merged []byte, scope map[string]bool) ([]byte, 
 	// header comments and whitespace that yaml.v3 doesn't surface
 	// as Document.Content. Preserve those original bytes by
 	// concatenating local + merged instead of dropping local
-	// entirely..
+	// entirely.
 	if localDoc.Kind == 0 || len(localDoc.Content) == 0 {
 		if len(local) == 0 {
 			return merged, nil
