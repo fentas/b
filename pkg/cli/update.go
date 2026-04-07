@@ -158,6 +158,18 @@ func (o *UpdateOptions) Validate() error {
 			return fmt.Errorf("invalid strategy %q: must be replace, client, or merge", o.Strategy)
 		}
 	}
+	// `--safety` materially changes non-TTY behavior, so a typo (e.g.
+	// `--safety=autp`) must error rather than silently fall back to
+	// prompt. Per copilot review on PR #128.
+	if o.Safety != "" {
+		switch o.Safety {
+		case state.SafetyAuto, state.SafetyPrompt, state.SafetyStrict:
+			// valid
+		default:
+			return fmt.Errorf("invalid --safety value %q: must be %s, %s, or %s",
+				o.Safety, state.SafetyStrict, state.SafetyPrompt, state.SafetyAuto)
+		}
+	}
 	return nil
 }
 
@@ -233,6 +245,19 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 	if err != nil {
 		return err
 	}
+
+	// Tracks any per-env safety gate refusals so we can return a
+	// non-zero exit at the end. Per copilot review on PR #128: silent
+	// refusal contradicts the documented "CI pipelines will fail"
+	// promise. Per-env apply work continues for non-refused envs so a
+	// single bad apple doesn't block the rest of the run.
+	var refusedEnvs []string
+
+	// Collected plans for --plan-json. Per copilot review on PR #128:
+	// emitting one JSON document per env produced concatenated docs
+	// that aren't valid JSON for typical parsers. We now collect plans
+	// in this slice and emit a single JSON array at the end.
+	var planJSONOut []*env.Plan
 
 	for _, entry := range o.Config.Envs {
 		if refs != nil {
@@ -327,13 +352,12 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			continue // don't overwrite lock entry when up-to-date
 		}
 
-		plan := env.PlanFromResult(firstResult)
+		plan := env.PlanFromResult(firstResult, lockEntry)
 
-		// --plan-json: emit JSON and skip everything else for this env.
+		// --plan-json: collect the plan for batched JSON output below.
+		// We never apply in plan-json mode (it implies dry-run).
 		if o.PlanJSON {
-			if err := env.RenderPlanJSON(o.IO.Out, plan); err != nil {
-				fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, err)
-			}
+			planJSONOut = append(planJSONOut, plan)
 			continue
 		}
 
@@ -363,10 +387,12 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		apply, gateErr := o.gateApply(safety, plan, isDryRun)
 		if gateErr != nil {
 			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, gateErr)
+			refusedEnvs = append(refusedEnvs, entry.Key)
 			continue
 		}
 		if !apply {
-			// Dry-run, strict refusal, or user declined.
+			// Dry-run or user declined the prompt — not an error,
+			// just nothing to do for this env.
 			continue
 		}
 
@@ -397,11 +423,30 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		})
 	}
 
-	if o.DryRun || o.PlanJSON {
-		return nil // don't write lock in dry-run / plan-only mode
+	if o.PlanJSON {
+		// Emit the collected plans as a single JSON array so PR
+		// comment bots / CI summary jobs can parse with a single
+		// invocation. Per copilot review on PR #128.
+		if err := env.RenderPlansJSON(o.IO.Out, planJSONOut); err != nil {
+			return err
+		}
+		return nil
+	}
+	if o.DryRun {
+		return nil // don't write lock in dry-run mode
 	}
 
-	return lock.WriteLock(lockDir, lk, o.bVersion)
+	if err := lock.WriteLock(lockDir, lk, o.bVersion); err != nil {
+		return err
+	}
+	if len(refusedEnvs) > 0 {
+		// Per copilot review on PR #128: any safety refusal must
+		// produce a non-zero exit code so CI pipelines actually
+		// notice. The lock for non-refused envs has already been
+		// written above so partial progress isn't lost.
+		return fmt.Errorf("safety refused %d env(s): %s", len(refusedEnvs), strings.Join(refusedEnvs, ", "))
+	}
+	return nil
 }
 
 // printConflictHint emits the legacy "needs manual resolution" footer for

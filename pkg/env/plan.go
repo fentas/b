@@ -79,10 +79,15 @@ func (p *Plan) CountByAction() map[PlanAction]int {
 // from a SyncEnv invocation (dry-run or real); the lock files' Status
 // field is the ground truth and is mapped to a PlanAction.
 //
+// `prev` is the lock entry from the *previous* sync (nil if first
+// sync). It's used to distinguish "new file" (PlanAdd) from "existing
+// file changed" (PlanUpdate) — SyncEnv reports both as "replaced" and
+// the previous-lock comparison is the only available signal here.
+//
 // The mapping intentionally collapses the dry-run-suffixed statuses
-// ("replaced (dry-run)", "kept (dry-run)", etc.) so the renderer doesn't
-// have to special-case them.
-func PlanFromResult(result *SyncResult) *Plan {
+// ("replaced (dry-run)", "kept (dry-run)", etc.) so the renderer
+// doesn't have to special-case them.
+func PlanFromResult(result *SyncResult, prev *lock.EnvEntry) *Plan {
 	if result == nil {
 		return &Plan{}
 	}
@@ -92,8 +97,20 @@ func PlanFromResult(result *SyncResult) *Plan {
 		Version: result.Version,
 		Commit:  result.Commit,
 	}
+	// Build a quick lookup of source paths that existed in the previous
+	// lock entry, so we can identify NEW files (PlanAdd) vs UPDATED
+	// files (PlanUpdate). Both come back from SyncEnv as Status:
+	// "replaced" today, so without this comparison everything would
+	// render as "update" and the "add" action would be unreachable —
+	// flagged by copilot review on PR #128.
+	prevPaths := make(map[string]bool)
+	if prev != nil {
+		for _, f := range prev.Files {
+			prevPaths[f.Path] = true
+		}
+	}
 	for _, f := range result.Files {
-		p.Rows = append(p.Rows, planRowFromLockFile(f))
+		p.Rows = append(p.Rows, planRowFromLockFile(f, prevPaths))
 	}
 	// Stable, deterministic ordering by destination path so callers can
 	// snapshot-test the rendering.
@@ -105,7 +122,12 @@ func PlanFromResult(result *SyncResult) *Plan {
 
 // planRowFromLockFile maps a lock.LockFile (which carries a free-form
 // status string) into a structured PlanRow.
-func planRowFromLockFile(f lock.LockFile) PlanRow {
+//
+// `prevPaths` is the set of source paths that existed in the previous
+// lock entry; it lets us tell apart "this file is new (Add)" from
+// "this file existed and changed (Update)" — SyncEnv reports both as
+// Status: "replaced".
+func planRowFromLockFile(f lock.LockFile, prevPaths map[string]bool) PlanRow {
 	status := strings.TrimSuffix(f.Status, " (dry-run)")
 	row := PlanRow{
 		Source: f.Path,
@@ -125,13 +147,26 @@ func planRowFromLockFile(f lock.LockFile) PlanRow {
 		row.Action = PlanOverwrite
 	case strings.HasPrefix(status, "replaced (merge failed"):
 		row.Action = PlanOverwrite
-		// Extract the parenthetical reason for the user.
-		row.Note = strings.TrimSuffix(strings.TrimPrefix(status, "replaced "), "")
+		// Extract the parenthetical reason for the user without the
+		// surrounding parentheses; the renderer wraps notes in parens
+		// itself, so leaving them in produces "((merge failed: ...))".
+		// Per copilot review on PR #128.
+		note := strings.TrimPrefix(status, "replaced ")
+		note = strings.TrimPrefix(note, "(")
+		note = strings.TrimSuffix(note, ")")
+		row.Note = note
 	case status == "replaced":
-		// "replaced" alone (no "local changes overwritten") means the
-		// file was new or identical-on-disk; treat as add/update rather
-		// than destructive.
-		row.Action = PlanUpdate
+		// "replaced" alone means the file was new or already in sync
+		// (identical on disk). Distinguish "new" from "existing
+		// changed" via the previous lock entry: if the source path
+		// wasn't in prev, it's an Add; otherwise it's an Update.
+		// Without this check, PlanAdd would be unreachable (per
+		// copilot review on PR #128).
+		if prevPaths != nil && !prevPaths[f.Path] {
+			row.Action = PlanAdd
+		} else {
+			row.Action = PlanUpdate
+		}
 	default:
 		row.Action = PlanUpdate
 		row.Note = status
@@ -166,18 +201,44 @@ func RenderPlanText(w io.Writer, p *Plan) {
 			fmt.Fprintf(w, "  %s %-9s %s\n", marker, label, r.Dest)
 		}
 	}
+	// Summary line: only emit non-zero counts so the common case
+	// reads "→ 3 update" instead of "→ 0 add, 3 update, 0 keep, 0
+	// overwrite, 0 merge, 0 conflict". Per reviewer note on PR #128.
 	counts := p.CountByAction()
-	fmt.Fprintf(w, "  → %d add, %d update, %d keep, %d overwrite, %d merge, %d conflict\n",
-		counts[PlanAdd], counts[PlanUpdate], counts[PlanKeep],
-		counts[PlanOverwrite], counts[PlanMerge], counts[PlanConflict])
+	order := []PlanAction{PlanAdd, PlanUpdate, PlanKeep, PlanOverwrite, PlanMerge, PlanConflict}
+	var parts []string
+	for _, a := range order {
+		if c := counts[a]; c > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", c, a))
+		}
+	}
+	if len(parts) == 0 {
+		fmt.Fprintln(w, "  → no changes")
+	} else {
+		fmt.Fprintf(w, "  → %s\n", strings.Join(parts, ", "))
+	}
 }
 
-// RenderPlanJSON writes the plan as JSON for machine consumers (PR
-// comment bots, CI summary jobs, etc).
+// RenderPlanJSON writes a single plan as a JSON document. Used by
+// callers that operate on one plan at a time.
 func RenderPlanJSON(w io.Writer, p *Plan) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(p)
+}
+
+// RenderPlansJSON writes a slice of plans as a single JSON array. This
+// is the format the CLI emits for `--plan-json` so consumers can parse
+// the entire run with one `jq .` invocation. Per copilot review on
+// PR #128: emitting one JSON document per env produced concatenated
+// docs that weren't valid JSON for standard parsers.
+func RenderPlansJSON(w io.Writer, plans []*Plan) error {
+	if plans == nil {
+		plans = []*Plan{}
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(plans)
 }
 
 // planMarker returns the (glyph, label) pair for a plan action. The glyph

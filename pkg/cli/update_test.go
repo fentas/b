@@ -665,10 +665,11 @@ func TestUpdateEnvs_Updated(t *testing.T) {
 		t.Fatalf("updateEnvs error = %v", err)
 	}
 	out := outBuf.String()
-	// Plan-format output: "replaced" status maps to action "update",
-	// "kept" maps to action "keep". Assert the new action labels.
-	if !strings.Contains(out, "update") {
-		t.Errorf("expected plan 'update' line, got: %s", out)
+	// Plan-format output: "replaced" status maps to action "add" when
+	// the file isn't in the previous lock entry (the lock starts empty
+	// in this test). "kept" maps to action "keep".
+	if !strings.Contains(out, "add") {
+		t.Errorf("expected plan 'add' line, got: %s", out)
 	}
 	if !strings.Contains(out, "keep") {
 		t.Errorf("expected plan 'keep' line, got: %s", out)
@@ -1801,8 +1802,14 @@ func TestUpdateEnvs_SafetyStrict_RefusesDestructive(t *testing.T) {
 	syncEnvFunc = syncFn
 
 	o, _, errBuf := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo", Safety: state.SafetyStrict})
-	if err := o.updateEnvs(nil); err != nil {
-		t.Fatalf("updateEnvs: %v", err)
+	err := o.updateEnvs(nil)
+	// Per copilot review on PR #128: strict refusal must produce a
+	// non-zero exit code, so updateEnvs must return an error.
+	if err == nil {
+		t.Fatal("updateEnvs should return an error when strict refuses")
+	}
+	if !strings.Contains(err.Error(), "safety refused") {
+		t.Errorf("expected aggregated safety error, got: %v", err)
 	}
 	// Strict refusal: the plan-first dry-run runs (1 call), gate
 	// rejects, no second apply call.
@@ -1863,8 +1870,14 @@ func TestUpdateEnvs_PromptDefault_NonTTY_BlocksDestructive(t *testing.T) {
 	syncEnvFunc = syncFn
 
 	o, _, errBuf := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo"}) // no safety set → default prompt
-	if err := o.updateEnvs(nil); err != nil {
-		t.Fatalf("updateEnvs: %v", err)
+	err := o.updateEnvs(nil)
+	// Per copilot review on PR #128: prompt-on-CI refusal must also
+	// produce a non-zero exit code so CI pipelines actually notice.
+	if err == nil {
+		t.Fatal("updateEnvs should return an error when non-TTY prompt refuses")
+	}
+	if !strings.Contains(err.Error(), "safety refused") {
+		t.Errorf("expected aggregated safety error, got: %v", err)
 	}
 	if len(*calls) != 1 {
 		t.Errorf("non-TTY prompt should refuse without applying, got %d calls", len(*calls))
@@ -1953,7 +1966,9 @@ func TestUpdateEnvs_DryRun_NewBehavior(t *testing.T) {
 	if len(*calls) != 1 {
 		t.Errorf("dry-run should call SyncEnv once, got %d", len(*calls))
 	}
-	if !strings.Contains(out.String(), "add,") {
+	// New summary format omits zero counts, so a single-add plan
+	// renders as "→ 1 add" rather than "→ 0 add, ...".
+	if !strings.Contains(out.String(), "→") || !strings.Contains(out.String(), "add") {
 		t.Errorf("dry-run plan summary missing, got:\n%s", out.String())
 	}
 }

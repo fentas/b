@@ -38,7 +38,15 @@ func TestPlanFromResult_StatusMapping(t *testing.T) {
 			{Path: "g.yaml", Dest: "g.yaml", Status: "replaced (dry-run)"},
 		},
 	}
-	plan := PlanFromResult(result)
+	// Pass a previous lock entry that includes a.yaml + g.yaml so they
+	// classify as Update (existed before, now changed) rather than Add.
+	prev := &lock.EnvEntry{
+		Files: []lock.LockFile{
+			{Path: "a.yaml"},
+			{Path: "g.yaml"},
+		},
+	}
+	plan := PlanFromResult(result, prev)
 	if len(plan.Rows) != 7 {
 		t.Fatalf("rows = %d, want 7", len(plan.Rows))
 	}
@@ -58,16 +66,73 @@ func TestPlanFromResult_StatusMapping(t *testing.T) {
 	}
 }
 
+// TestPlanFromResult_NewFileBecomesPlanAdd verifies the Add detection:
+// when a file was NOT in the previous lock entry, "replaced" should map
+// to PlanAdd (not PlanUpdate). Per copilot review on PR #128.
+func TestPlanFromResult_NewFileBecomesPlanAdd(t *testing.T) {
+	result := &SyncResult{
+		Files: []lock.LockFile{
+			{Path: "new.yaml", Dest: "new.yaml", Status: "replaced"},
+			{Path: "old.yaml", Dest: "old.yaml", Status: "replaced"},
+		},
+	}
+	prev := &lock.EnvEntry{Files: []lock.LockFile{{Path: "old.yaml"}}}
+	plan := PlanFromResult(result, prev)
+	for _, r := range plan.Rows {
+		switch r.Dest {
+		case "new.yaml":
+			if r.Action != PlanAdd {
+				t.Errorf("new.yaml: action = %q, want add", r.Action)
+			}
+		case "old.yaml":
+			if r.Action != PlanUpdate {
+				t.Errorf("old.yaml: action = %q, want update", r.Action)
+			}
+		}
+	}
+}
+
+// TestPlanFromResult_MergeFailedNoteHasNoDoubleParens verifies the
+// note extraction strips outer parens so the renderer doesn't double-
+// wrap. Per copilot review on PR #128.
+func TestPlanFromResult_MergeFailedNoteHasNoDoubleParens(t *testing.T) {
+	result := &SyncResult{
+		Files: []lock.LockFile{{
+			Path:   "a.yaml",
+			Dest:   "a.yaml",
+			Status: "replaced (merge failed: no previous commit)",
+		}},
+	}
+	prev := &lock.EnvEntry{Files: []lock.LockFile{{Path: "a.yaml"}}}
+	plan := PlanFromResult(result, prev)
+	if len(plan.Rows) != 1 {
+		t.Fatal("expected 1 row")
+	}
+	r := plan.Rows[0]
+	if r.Action != PlanOverwrite {
+		t.Errorf("action = %q, want overwrite", r.Action)
+	}
+	if strings.HasPrefix(r.Note, "(") || strings.HasSuffix(r.Note, ")") {
+		t.Errorf("note has surrounding parens: %q", r.Note)
+	}
+	if !strings.Contains(r.Note, "merge failed") {
+		t.Errorf("note missing reason: %q", r.Note)
+	}
+}
+
 func TestPlanFromResult_DestructiveAndCounts(t *testing.T) {
 	result := &SyncResult{
 		Files: []lock.LockFile{
-			{Dest: "a", Status: "replaced"},
-			{Dest: "b", Status: "replaced (local changes overwritten)"},
-			{Dest: "c", Status: "kept"},
-			{Dest: "d", Status: "conflict"},
+			{Path: "a", Dest: "a", Status: "replaced"},
+			{Path: "b", Dest: "b", Status: "replaced (local changes overwritten)"},
+			{Path: "c", Dest: "c", Status: "kept"},
+			{Path: "d", Dest: "d", Status: "conflict"},
 		},
 	}
-	p := PlanFromResult(result)
+	// Pass `prev` containing `a` so it counts as Update (not Add) and
+	// the existing assertion stays meaningful.
+	prev := &lock.EnvEntry{Files: []lock.LockFile{{Path: "a"}}}
+	p := PlanFromResult(result, prev)
 	if !p.HasDestructive() {
 		t.Error("plan with overwrite + conflict should be destructive")
 	}
@@ -84,7 +149,7 @@ func TestPlanFromResult_NonDestructive(t *testing.T) {
 			{Dest: "b", Status: "kept"},
 		},
 	}
-	if PlanFromResult(result).HasDestructive() {
+	if PlanFromResult(result, nil).HasDestructive() {
 		t.Error("non-destructive plan flagged as destructive")
 	}
 }
@@ -160,7 +225,7 @@ func TestPlanFromResult_DeterministicOrdering(t *testing.T) {
 			{Dest: "m.yaml", Status: "replaced"},
 		},
 	}
-	p := PlanFromResult(result)
+	p := PlanFromResult(result, nil)
 	if p.Rows[0].Dest != "a.yaml" || p.Rows[1].Dest != "m.yaml" || p.Rows[2].Dest != "z.yaml" {
 		t.Errorf("rows not sorted: %+v", p.Rows)
 	}

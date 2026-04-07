@@ -490,12 +490,12 @@ func TestUpdateEnvs_DryRun_SkipsLockWrite(t *testing.T) {
 		t.Errorf("expected 0 envs in lock after dry-run, got %d", len(lk.Envs))
 	}
 
-	// New plan-based output: dry-run produces a plan summary line ending
-	// in "→ N add, ..." rather than a literal "dry-run" tag in the
-	// header. The lock-not-written assertion above is the load-bearing
-	// behavior contract.
-	if !strings.Contains(out.String(), "add,") {
-		t.Errorf("output should contain plan summary, got: %q", out.String())
+	// New plan-based output: dry-run emits a plan summary line ("→ 1
+	// add") rather than a literal "dry-run" tag in the header. The
+	// lock-not-written assertion above is the load-bearing behavior
+	// contract; this just sanity-checks the plan is rendered.
+	if !strings.Contains(out.String(), "→") {
+		t.Errorf("output should contain plan summary arrow, got: %q", out.String())
 	}
 }
 

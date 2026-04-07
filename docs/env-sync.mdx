@@ -293,6 +293,15 @@ b update --dry-run
 b update --plan-json
 ```
 
+`--plan-json` writes a single JSON array of plan objects (one per env) so you can parse the entire run with one `jq .` invocation:
+
+```jsonc
+[
+  { "ref": "github.com/org/infra", "commit": "def4567", "rows": [ ... ] },
+  { "ref": "github.com/org/other", "commit": "abc1234", "rows": [ ... ] }
+]
+```
+
 ### Rollback
 
 ```bash
@@ -304,15 +313,22 @@ b update --rollback github.com/org/infra
 
 ## Safety tiers
 
-Every `b update` produces a **plan** before applying — a per-file table of additions, updates, keeps, overwrites, merges, and conflicts. The `safety` setting controls what `b` does with that plan:
+Every `b update` produces a **plan** — a per-file table of additions, updates, keeps, overwrites, merges, and conflicts. There are two flows depending on the safety setting:
 
-| Mode       | Interactive (TTY)              | Non-interactive (CI)              | Use when                                |
-|------------|--------------------------------|-----------------------------------|-----------------------------------------|
-| `strict`   | Refuses any destructive plan   | Refuses any destructive plan      | Locked-down repos, untrusted upstreams  |
-| `prompt`*  | Shows plan, asks `[y/N]`       | Refuses destructive (= strict)    | Default — safe everywhere               |
-| `auto`     | Applies without prompting      | Applies without prompting         | Trusted upstream, fully automated runs  |
+- **Plan-first** (`strict`, `prompt`): `b` runs a dry-run sync to compute the plan, prints it, then either applies (after passing the safety gate) or refuses.
+- **Apply-first** (`auto`, `--yes`): `b` applies directly and renders the plan from the apply result. The plan still appears in the output but the writes have already happened by the time you see it.
+
+The `safety` setting controls which flow `b` uses and what it does with destructive changes:
+
+| Mode       | Interactive (TTY)              | Non-interactive (CI)              | `--yes` effect            |
+|------------|--------------------------------|-----------------------------------|---------------------------|
+| `strict`   | Refuses any destructive plan   | Refuses any destructive plan      | **No effect** — still refuses |
+| `prompt`*  | Shows plan, asks `[y/N]`       | Refuses destructive               | Acts like `auto`          |
+| `auto`     | Applies without prompting      | Applies without prompting         | (no-op)                   |
 
 \* `prompt` is the default. It is the safe option both interactively and in CI.
+
+`--yes` is the CI escape hatch for `prompt`. It does NOT override `strict`: if you want a permanent override use `safety: auto` in `b.yaml` or `--safety=auto` on the command line. A safety refusal causes `b update` to exit non-zero so CI pipelines actually notice.
 
 **A plan row is "destructive" when it would lose user-owned content** — currently that means `overwrite` (a non-merge strategy is about to clobber locally modified files) or `conflict` (a 3-way merge produced markers and the file needs manual resolution).
 
