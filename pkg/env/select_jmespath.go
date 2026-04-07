@@ -155,22 +155,98 @@ func runJMESPathSelectors(
 	return marshal(merged)
 }
 
-// wrapKeyFor picks a top-level key under which to place a non-map JMESPath
-// result. For simple dot-paths it's the last segment; for complex
-// expressions it falls back to "result".
+// wrapKeyFor picks a top-level key under which to place a non-map
+// JMESPath result. The fallback chain is:
+//
+//  1. The expression STARTS with an identifier followed by JMESPath
+//     grammar like `[`, `|`, ` `, or `.*` (e.g. `binaries[?...]`,
+//     `binaries | [0]`, `binaries[*].name`): use the leading
+//     identifier. The leading identifier is almost always the
+//     conceptual "thing" the user is filtering. This step also
+//     wins over the trailing-identifier step for projection
+//     expressions like `binaries[*].name`, where `binaries` is a
+//     better wrap key than `name`.
+//
+//     Function calls (`items(binaries)`) DO NOT count as a leading
+//     identifier — the leading text is the function name, not a
+//     conceptual top-level key. Such expressions fall through to
+//     step 4.
+//
+//  2. The expression is a simple dot-path that ends in `.identifier`
+//     (e.g. `database.host`): use the trailing identifier. The
+//     intuition is "this expression drills DOWN to a leaf field;
+//     the leaf is what the user wanted".
+//
+//  3. The whole expression is a simple identifier (e.g. `binaries`):
+//     use it.
+//
+//  4. Otherwise → "result".
+//
+// Step 1 was added in response to copilot review: previously a filter
+// expression like `binaries[?contains(value.groups, 'core')]` returned
+// a flat array and got wrapped under "result", which is surprising for
+// users who'd expect "binaries". The leading-identifier extraction
+// handles those cases without changing behavior for users who
+// explicitly wrap with a multi-select hash.
 func wrapKeyFor(sel string) string {
 	s := strings.TrimPrefix(sel, ".")
 	if s == "" {
 		return "result"
 	}
-	// If the expression ends in `.identifier`, use that identifier.
-	if i := strings.LastIndex(s, "."); i >= 0 && isSimpleDotPath(s[i+1:]) {
-		return s[i+1:]
+
+	// (1) Leading identifier followed by JMESPath grammar (NOT a
+	// function call). Walk forward from index 0 collecting an
+	// identifier prefix, then look at the next character to decide
+	// whether this looks like an expression we should wrap under
+	// the leading identifier.
+	leadingEnd := 0
+	for leadingEnd < len(s) {
+		c := s[leadingEnd]
+		isIdent := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+			(c >= '0' && c <= '9') || c == '_' || c == '-'
+		if !isIdent {
+			break
+		}
+		leadingEnd++
 	}
-	// If the whole expression is a simple identifier, use it.
+	if leadingEnd > 0 && leadingEnd < len(s) {
+		next := s[leadingEnd]
+		// `[` `|` ` ` are JMESPath operators that take the leading
+		// identifier as their input. `(` is a function call —
+		// the leading identifier is a function name, not a key.
+		// `.` ends in step 2 / 3 unless followed by `*` (projection).
+		isOperator := next == '[' || next == '|' || next == ' ' || next == '\t'
+		// `database.*` projection — the leading identifier IS the
+		// thing being projected.
+		if !isOperator && next == '.' && leadingEnd+1 < len(s) && s[leadingEnd+1] == '*' {
+			isOperator = true
+		}
+		// `binaries[*].name` — the leading identifier is `binaries`,
+		// followed by `[`, which is the projection bracket.
+		if isOperator {
+			leading := s[:leadingEnd]
+			// Reject digit-leading (would be confusing as a key)
+			// and the case where the whole expression is a simple
+			// identifier (caught by step 3 below for nicer reading).
+			if leading[0] < '0' || leading[0] > '9' {
+				return leading
+			}
+		}
+	}
+
+	// (2) Trailing identifier after the last dot, only if the
+	// expression is a simple dot-path (no JMESPath grammar in the
+	// middle). isSimpleDotPath(s) == true implies the whole thing
+	// is dot-paths only, so the last segment is a meaningful key.
 	if isSimpleDotPath(s) {
+		if i := strings.LastIndex(s, "."); i >= 0 {
+			return s[i+1:]
+		}
+		// (3) Whole expression is a simple identifier.
 		return s
 	}
+
+	// (4) Fallback for expressions we can't classify.
 	return "result"
 }
 

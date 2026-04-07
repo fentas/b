@@ -367,10 +367,21 @@ func TestWrapKeyFor(t *testing.T) {
 	cases := []struct {
 		sel, want string
 	}{
+		// (1) Whole expression is a simple identifier.
 		{"binaries", "binaries"},
 		{".binaries", "binaries"},
+		// (2) Trailing identifier after a dot.
 		{"database.host", "host"},
-		{"items(binaries)", "result"},
+		// (3) Leading identifier followed by JMESPath grammar.
+		// Before the round-7 fix these all fell through to "result".
+		{"binaries[?contains(value.groups, 'core')]", "binaries"},
+		{"binaries | [0]", "binaries"},
+		{"binaries[*].name", "binaries"},
+		{"binaries[0]", "binaries"},
+		{"my-key[?true]", "my-key"},
+		// (4) Fallbacks.
+		{"items(binaries)", "result"}, // starts with a function call, not an identifier
+		{"{a: b}", "result"},          // multi-select hash
 		{"", "result"},
 	}
 	for _, c := range cases {
