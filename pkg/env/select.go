@@ -14,7 +14,39 @@ import (
 // filterContent applies select filters to file content.
 // If selectors is empty, returns content unchanged.
 // Supports YAML (.yaml, .yml) and JSON (.json) files.
-// Selectors use dot-path notation for keys (e.g. "binaries", "database.host").
+//
+// Selector syntax is **hybrid**:
+//
+//   - Simple dot-paths are routed to the comment-preserving Node API
+//     path for YAML. The classifier accepts any selector that does not
+//     contain JMESPath grammar characters (brackets, parens, braces,
+//     pipe, star, ampersand, comma, quotes, comparison ops, backtick,
+//     backslash, question mark, whitespace) and does not contain
+//     empty path segments. The classifier is intentionally STRICTER
+//     than the legacy `filterYAML` validator (which only rejects
+//     `[]`/`\` and empty segments), but the empty-segment rule is
+//     shared so the classification stays consistent with downstream
+//     YAML validation. The end result is that plain top-level keys
+//     with characters like `/`, `+`, and `#`, plus keys containing
+//     `@` mid-key, keep using the comment-preserving path without
+//     quoting (backward-compat for pre-#124 callers). Selectors for
+//     keys that start with `@` are treated as complex and must use
+//     the JMESPath path with quoted identifiers.
+//
+//   - Complex expressions — filter predicates, projections, functions,
+//     multi-select hashes, array indexing — are routed to the JMESPath
+//     path (jmespath-community fork, which supports items/from_items).
+//     JMESPath operates on the decoded data structure, so comments and
+//     layout are NOT preserved for complex expressions. That trade-off is
+//     only paid when the caller explicitly writes a complex query.
+//
+//   - Mixing simple and complex selectors on the same file is supported:
+//     simple ones extract via Node API (comments kept), complex ones run
+//     via JMESPath (comments lost for their output), and the results are
+//     merged top-level into the final document. Any key present in both
+//     results has the JMESPath version take precedence (authoritative).
+//
+// See docs/env-sync.mdx for examples and the comment-preservation matrix.
 func filterContent(content []byte, selectors []string, filePath string) ([]byte, error) {
 	if len(selectors) == 0 {
 		return content, nil
@@ -23,12 +55,171 @@ func filterContent(content []byte, selectors []string, filePath string) ([]byte,
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
 	case ".yaml", ".yml":
-		return filterYAML(content, selectors)
+		return filterYAMLHybrid(content, selectors)
 	case ".json":
-		return filterJSON(content, selectors)
+		return filterJSONHybrid(content, selectors)
 	default:
 		return nil, fmt.Errorf("select is only supported for YAML/JSON files, got %s", ext)
 	}
+}
+
+// filterYAMLHybrid dispatches to the Node-API path or JMESPath based on
+// the shape of each selector.
+func filterYAMLHybrid(content []byte, selectors []string) ([]byte, error) {
+	simple, complex := splitSelectorsByComplexity(selectors)
+
+	// No complex expressions → fast path (Node API, comments preserved).
+	if len(complex) == 0 {
+		return filterYAML(content, simple)
+	}
+
+	// No simple paths → JMESPath only.
+	if len(simple) == 0 {
+		return filterYAMLJMESPath(content, complex)
+	}
+
+	// Mixed: run both paths, merge top-level keys. JMESPath wins on collisions.
+	simpleOut, err := filterYAML(content, simple)
+	if err != nil {
+		return nil, err
+	}
+	jmesOut, err := filterYAMLJMESPath(content, complex)
+	if err != nil {
+		return nil, err
+	}
+	return mergeYAMLTopLevel(simpleOut, jmesOut)
+}
+
+// filterJSONHybrid dispatches JSON to either the legacy gjson path or
+// JMESPath. Since JSON has no comments, the only benefit of the gjson
+// path is its slightly different semantics — but the hybrid classifier
+// keeps behavior uniform with YAML so users don't have to learn two
+// dialects.
+func filterJSONHybrid(content []byte, selectors []string) ([]byte, error) {
+	simple, complex := splitSelectorsByComplexity(selectors)
+
+	if len(complex) == 0 {
+		return filterJSON(content, simple)
+	}
+	if len(simple) == 0 {
+		return filterJSONJMESPath(content, complex)
+	}
+
+	// Mixed: run both and merge.
+	simpleOut, err := filterJSON(content, simple)
+	if err != nil {
+		return nil, err
+	}
+	jmesOut, err := filterJSONJMESPath(content, complex)
+	if err != nil {
+		return nil, err
+	}
+	return mergeJSONTopLevel(simpleOut, jmesOut)
+}
+
+// mergeYAMLTopLevel merges b's top-level keys into a's. Any key present
+// in b overrides a; other keys from a survive.
+//
+// This function operates on yaml.v3 Node trees so that comments and
+// layout attached to a's keys (which came from the comment-preserving
+// Node API path in filterYAML) survive the merge. A simpler
+// implementation that round-trips both inputs through
+// map[string]interface{} and re-marshals would silently drop comment,
+// style, and layout metadata, contradicting the documented contract
+// that simple-side selectors preserve comments in mixed-list mode.
+func mergeYAMLTopLevel(a, b []byte) ([]byte, error) {
+	aDoc, aRoot, err := parseYAMLMappingDoc(a, "simple")
+	if err != nil {
+		return nil, fmt.Errorf("merging YAML results: %w", err)
+	}
+	_, bRoot, err := parseYAMLMappingDoc(b, "jmespath")
+	if err != nil {
+		return nil, fmt.Errorf("merging YAML results: %w", err)
+	}
+
+	// Walk b's top-level pairs. For each, replace the matching pair in a
+	// (if any), or append. Comments / styles attached to a's untouched
+	// nodes are preserved because we never touch those nodes.
+	for i := 0; i+1 < len(bRoot.Content); i += 2 {
+		bKey := bRoot.Content[i]
+		bVal := bRoot.Content[i+1]
+		if idx := findYAMLTopLevelKey(aRoot, bKey.Value); idx >= 0 {
+			aRoot.Content[idx] = bKey
+			aRoot.Content[idx+1] = bVal
+			continue
+		}
+		aRoot.Content = append(aRoot.Content, bKey, bVal)
+	}
+
+	out, err := yaml.Marshal(aDoc)
+	if err != nil {
+		return nil, fmt.Errorf("encoding merged YAML: %w", err)
+	}
+	return out, nil
+}
+
+// parseYAMLMappingDoc parses YAML bytes into a Document node and returns
+// (doc, root mapping, err). Empty input is normalized to an empty
+// mapping document so callers don't have to special-case it. The source
+// label is included in error messages for diagnostics.
+func parseYAMLMappingDoc(data []byte, source string) (*yaml.Node, *yaml.Node, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, nil, fmt.Errorf("parsing %s YAML: %w", source, err)
+	}
+	if doc.Kind == 0 {
+		// Empty input — synthesize an empty document with an empty
+		// mapping so the caller can append into it.
+		doc = yaml.Node{
+			Kind: yaml.DocumentNode,
+			Content: []*yaml.Node{{
+				Kind: yaml.MappingNode,
+				Tag:  "!!map",
+			}},
+		}
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0] == nil {
+		return nil, nil, fmt.Errorf("parsing %s YAML: expected a document with a mapping root", source)
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return nil, nil, fmt.Errorf("parsing %s YAML: expected a top-level mapping, got kind %d", source, root.Kind)
+	}
+	return &doc, root, nil
+}
+
+// findYAMLTopLevelKey returns the index of the key node in a mapping
+// node's Content slice (so the matching value is at index+1), or -1 if
+// the key isn't present. Walks pairs in source order.
+func findYAMLTopLevelKey(mapping *yaml.Node, key string) int {
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i] != nil && mapping.Content[i].Value == key {
+			return i
+		}
+	}
+	return -1
+}
+
+// mergeJSONTopLevel is the JSON sibling of mergeYAMLTopLevel.
+func mergeJSONTopLevel(a, b []byte) ([]byte, error) {
+	var aData, bData map[string]interface{}
+	if err := json.Unmarshal(a, &aData); err != nil {
+		return nil, fmt.Errorf("merging JSON results: parsing simple: %w", err)
+	}
+	if err := json.Unmarshal(b, &bData); err != nil {
+		return nil, fmt.Errorf("merging JSON results: parsing jmespath: %w", err)
+	}
+	if aData == nil {
+		aData = make(map[string]interface{})
+	}
+	for k, v := range bData {
+		aData[k] = v
+	}
+	out, err := json.MarshalIndent(aData, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("encoding merged JSON: %w", err)
+	}
+	return append(out, '\n'), nil
 }
 
 // filterYAML extracts selected keys from YAML content using yaml.v3 Node API.

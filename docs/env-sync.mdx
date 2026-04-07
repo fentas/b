@@ -95,9 +95,71 @@ files:
       - .binaries
 ```
 
-Selectors use dot-path notation (e.g. `.binaries`, `.database.host`). Only the selected keys are written to the destination file. This is useful when an upstream file contains sections you don't want (like profiles or env definitions).
+Selectors use **hybrid syntax**:
 
-For YAML files, selecting whole top-level keys preserves their comments, ordering, and formatting faithfully. Nested dot-path selections (e.g. `.database.host`) are reconstructed and may not preserve comments or exact formatting for those nested paths. JSON files use [gjson](https://github.com/tidwall/gjson) paths for extraction.
+- **Simple dot-paths** like `binaries`, `.binaries`, `database.host`, or even plain keys with characters that the legacy validator accepts (`foo/bar`, `my+key`, `a@b` mid-key) are extracted via the YAML Node API. Whole top-level keys keep their comments, ordering, and block/flow style. (`#` is fine for the classifier itself, but in `b.yaml` you'd need to quote a selector starting with `#` like `"#tag"` so YAML doesn't treat it as a comment. Selectors starting with `@` are reserved for JMESPath's current-node operator and are routed to the complex path — see the callout below.)
+- **Complex JMESPath expressions** — anything containing brackets, parens, braces, pipes, multi-select hashes, or function calls (i.e. JMESPath grammar characters) — are routed to [JMESPath](https://jmespath.org/) (jmespath-community fork, supports `items` / `from_items`). Comments are NOT preserved for keys produced by the complex side.
+
+> **Selecting top-level keys with JMESPath grammar characters**
+>
+> If your YAML file has a top-level key that contains characters JMESPath
+> uses as grammar (`[`, `]`, `(`, `)`, `{`, `}`, `|`, `*`, `&`, `,`, `'`,
+> `"`, `<`, `>`, `=`, `!`, `?`, backtick, backslash, whitespace), the
+> simple dot-path classifier will route it to JMESPath. Use a quoted
+> identifier to access the key, for example `'"my key with spaces"'` or
+> `'"weird[name]"'`.
+>
+> **Important:** selecting the key directly this way does **not** preserve
+> the original top-level key name in the merged output. Object results
+> get merged at the top level (so the key name is consumed by the merge),
+> and scalar/array results get wrapped under `result`. If you need to
+> keep the original key name in the output, wrap it explicitly in the
+> JMESPath expression — for example
+> `'{"weird[name]": "weird[name]"}'` for a scalar/array, or just rename
+> it to a friendlier identifier with
+> `'{normal_name: "weird[name]"}'`.
+>
+> Plain keys with `/`, `+`, `#`, and `@` mid-key work without quoting
+> because the classifier passes them through to the Node API path.
+> **Leading `@`** (e.g. `@foo`, `.@.foo`) is the one exception:
+> JMESPath uses `@` for the current-node operator, so any selector
+> starting with `@` is treated as complex. Top-level keys whose name
+> starts with `@` need to be selected via JMESPath quoted identifiers
+> (e.g. `'"@foo"'`) instead of as bare dot-paths.
+- **Mixed lists** are supported: simple and complex selectors on the same file are evaluated independently and merged at the top level via the Node API. Simple-side comments and layout survive the merge; complex-side keys carry no comments. JMESPath wins on key collisions.
+
+> **⚠ `items()` returns tuples, not objects in the v1.1.1 Go fork**
+>
+> The jmespath-community v1.1.1 Go fork returns `[key, value]` **arrays**
+> from `items()` rather than the `{key, value}` objects shown in the
+> JMESPath website's tutorial. Access the value's fields with `[1].field`
+> rather than `value.field`. So a binaries-by-groups filter is written as:
+>
+> ```jmespath
+> from_items(items(binaries)[?contains([1].groups, 'core')])
+> ```
+>
+> not `from_items(items(binaries)[?contains(value.groups, 'core')])`.
+> If you copy an example from jmespath.org and get `null`, this is why.
+
+Example — pull only the binaries that have `core` in their `groups`, preserving the original keys:
+
+```yaml
+files:
+  .bin/b.yaml:
+    select:
+      - "{binaries: from_items(items(binaries)[?contains([1].groups, 'core')])}"
+```
+
+Mix simple and complex on the same file:
+
+```yaml
+files:
+  .bin/b.yaml:
+    select:
+      - envs                                              # simple, comments preserved
+      - "{binaries: from_items(items(binaries)[?...])}"   # complex, JMESPath
+```
 
 Supported file extensions: `.yaml`, `.yml`, `.json`.
 
