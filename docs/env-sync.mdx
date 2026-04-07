@@ -95,9 +95,32 @@ files:
       - .binaries
 ```
 
-Selectors use dot-path notation (e.g. `.binaries`, `.database.host`). Only the selected keys are written to the destination file. This is useful when an upstream file contains sections you don't want (like profiles or env definitions).
+Selectors use **hybrid syntax**:
 
-For YAML files, selecting whole top-level keys preserves their comments, ordering, and formatting faithfully. Nested dot-path selections (e.g. `.database.host`) are reconstructed and may not preserve comments or exact formatting for those nested paths. JSON files use [gjson](https://github.com/tidwall/gjson) paths for extraction.
+- **Simple dot-paths** like `binaries`, `.binaries`, or `database.host` are extracted via the YAML Node API. Whole top-level keys keep their comments, ordering, and block/flow style.
+- **Complex JMESPath expressions** — anything containing brackets, parens, pipes, multi-select hashes, or function calls — are routed to [JMESPath](https://jmespath.org/) (jmespath-community fork, supports `items` / `from_items`). Comments are NOT preserved for the complex output.
+- **Mixed lists** are supported: simple selectors and complex selectors on the same file are evaluated independently and merged at the top level. JMESPath wins on key collisions.
+
+Example — pull only the binaries that have `core` in their `groups`, preserving the original keys:
+
+```yaml
+files:
+  .bin/b.yaml:
+    select:
+      - "{binaries: from_items(items(binaries)[?contains([1].groups, 'core')])}"
+```
+
+Note: in the jmespath-community v1.1.1 Go fork, `items()` returns `[key, value]` **tuples**, so accessing the value's fields uses `[1].field` rather than `value.field`. This differs from the JMESPath spec website's examples but matches what the dependency actually ships.
+
+You can also mix simple and complex on the same file:
+
+```yaml
+files:
+  .bin/b.yaml:
+    select:
+      - envs                                              # simple, comments preserved
+      - "{binaries: from_items(items(binaries)[?...])}"   # complex, JMESPath
+```
 
 Supported file extensions: `.yaml`, `.yml`, `.json`.
 
