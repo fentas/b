@@ -153,10 +153,14 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 			// produce a state where every status check still
 			// flagged the file as locally modified.
 			newHash, hashErr := lock.SHA256File(absDest)
-			if hashErr == nil && newHash != "" {
-				f.SHA256 = newHash
-				lockChanged = true
+			if hashErr != nil {
+				return fmt.Errorf("rehashing %s after resolve: %w", f.Dest, hashErr)
 			}
+			if newHash == "" {
+				return fmt.Errorf("rehashing %s after resolve: empty digest", f.Dest)
+			}
+			f.SHA256 = newHash
+			lockChanged = true
 			totalResolved += n
 			side := "upstream"
 			if o.Ours {
@@ -184,11 +188,10 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 	return nil
 }
 
-// envKey returns the canonical "ref" or "ref#label" form for a user-
-// supplied env key. It's a no-op for keys that already include a label
-// or that don't need normalization; it exists so the filter matching
-// in Run can compare against the same canonical form the lock entries
-// produce.
+// envKey trims surrounding whitespace from a user-supplied env key.
+// The matching loop in Run already builds the canonical "ref" /
+// "ref#label" form from the lock entry side, so this helper only
+// needs to neutralize stray whitespace before comparing.
 func envKey(s string) string {
 	return strings.TrimSpace(s)
 }
