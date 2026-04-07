@@ -35,12 +35,14 @@ const PinAnnotation = "b.pin"
 //   - local has no pinned keys
 //   - pending parses cleanly but the pinned path isn't present
 //
-// Pin scope is intentionally per-key, not per-subtree: if `kubectl`
-// is pinned, the entire `kubectl:` map is preserved verbatim, but
-// pinning `kubectl.version` would only preserve the version field
-// (and the annotation alongside it). The implementation walks the
-// local tree once to collect annotated paths and then walks pending
-// to substitute, leaving everything else untouched.
+// Pin scope is per-map-node: if `kubectl` is pinned, the entire
+// `kubectl:` map is preserved verbatim. Deeper pins only apply when
+// the path is itself a nested map node that can carry the
+// `b.pin: true` annotation; scalar fields like a typical
+// `kubectl.version` value cannot be pinned directly because there is
+// nowhere to attach the annotation. The implementation walks the
+// local tree once to collect annotated map paths and then walks
+// pending to substitute, leaving everything else untouched.
 func applyPinsYAML(local, pending []byte, filePath string) ([]byte, error) {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	if ext != ".yaml" && ext != ".yml" {
@@ -89,7 +91,9 @@ func applyPinsYAML(local, pending []byte, filePath string) ([]byte, error) {
 	if err := enc.Encode(&pendingDoc); err != nil {
 		return nil, fmt.Errorf("re-emit pinned doc: %w", err)
 	}
-	_ = enc.Close()
+	if err := enc.Close(); err != nil {
+		return nil, fmt.Errorf("finalize pinned doc: %w", err)
+	}
 	return []byte(buf.String()), nil
 }
 

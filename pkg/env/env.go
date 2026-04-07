@@ -304,8 +304,15 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		applyPins := func(pending []byte) ([]byte, error) {
 			localFull, readErr := os.ReadFile(destPath)
 			if readErr != nil {
-				// File doesn't exist yet → no local pins to honor.
-				return pending, nil
+				if os.IsNotExist(readErr) {
+					// File doesn't exist yet → no local pins to honor.
+					return pending, nil
+				}
+				// Permission errors or other I/O failures must be
+				// surfaced — silently skipping pin restoration would
+				// hide a real problem and produce surprising sync
+				// output where pinned keys appear to be ignored.
+				return nil, fmt.Errorf("reading local for pin restoration %s: %w", destPath, readErr)
 			}
 			return applyPinsYAML(localFull, pending, m.SourcePath)
 		}
