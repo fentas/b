@@ -9,10 +9,12 @@ import (
 	"testing"
 )
 
-// TestHasConflictMarkers covers the local helper used by env status
-// to flag conflicted files. The check is line-anchored so a markdown
-// rule (`=======`) or stray `<<<<<<<` inside a string literal does
-// not trigger a false positive.
+// TestHasConflictMarkers exercises the standalone byte-slice
+// detector. env status itself uses hashAndScanConflicts (which
+// streams the file once and shares the same scanner state machine);
+// this test covers the underlying classification logic with the
+// same edge cases. Line-anchored so a markdown rule (`=======`) or
+// stray `<<<<<<<` inside a string literal can't false-positive.
 func TestHasConflictMarkers_StatusHelper(t *testing.T) {
 	cases := []struct {
 		name string
@@ -41,7 +43,10 @@ func TestHasConflictMarkers_StatusHelper(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := hasConflictMarkers([]byte(c.in)); got != c.want {
-				t.Errorf("hasConflictMarkers(%q) = %v, want %v", c.in, got, c.want)
+				// Print the case name (not the input) so the
+				// 200 KiB long-line case doesn't dump itself
+				// into the failure log.
+				t.Errorf("hasConflictMarkers case %q = %v, want %v", c.name, got, c.want)
 			}
 		})
 	}

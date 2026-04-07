@@ -32,9 +32,12 @@ import (
 // `\r` off the end of each candidate line before comparison.
 //
 // The scanner is intentionally state-machine based instead of using
-// bufio.Scanner so a single very long line cannot exceed the buffer
-// limit and panic / fall back silently — `b env status` is expected
-// to scan arbitrary user files including SOPS-encrypted blobs.
+// bufio.Scanner. Scanner.Scan() returns false with bufio.ErrTooLong
+// when a single line exceeds its buffer cap, and unless the caller
+// also checks scanner.Err() the result silently looks like
+// "no markers". `b env status` is expected to scan arbitrary user
+// files including SOPS-encrypted blobs and minified JSON, so we
+// avoid the per-line cap entirely.
 type conflictMarkerScanner struct {
 	hasStart, hasSep, hasEnd bool
 	// pending holds the bytes of the current line so far. We only
@@ -127,13 +130,14 @@ func hasConflictMarkers(b []byte) bool {
 // here — env.Status's existing missing-file branch checks os.Stat
 // before calling this helper.
 //
-// Implementation note: we deliberately don't use bufio.Scanner. Its
-// MaxScanTokenSize cap (default 64 KiB, configurable up to whatever
-// we set) would silently fall back on files with very long lines —
-// SOPS blobs, minified JSON, lockfiles. The conflictMarkerScanner
-// state machine has no per-line memory limit; a degenerate single
+// Implementation note: we deliberately don't use bufio.Scanner.
+// Scanner.Scan() returns false with bufio.ErrTooLong when a line
+// exceeds its buffer cap; if the caller forgets scanner.Err() the
+// result silently looks like "no markers". The conflictMarkerScanner
+// state machine has no per-line memory limit — a degenerate single
 // long line bounds at conflictPendingMax bytes regardless of file
-// size.
+// size — so SOPS blobs, minified JSON, and lockfiles all scan
+// correctly.
 func hashAndScanConflicts(path string) (string, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
