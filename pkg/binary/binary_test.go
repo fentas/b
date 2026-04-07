@@ -676,7 +676,10 @@ func TestBinary_DownloadViaProvider_ResolvedAsset(t *testing.T) {
 	if err := b.downloadViaProvider(); err != nil {
 		t.Fatalf("downloadViaProvider: %v", err)
 	}
-	data, _ := os.ReadFile(b.File)
+	data, err := os.ReadFile(b.File)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
 	if string(data) != "raw-bin" {
 		t.Errorf("got %q", data)
 	}

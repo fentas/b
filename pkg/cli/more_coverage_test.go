@@ -645,8 +645,13 @@ func TestCmdBinaryOptions_Run_CheckMode(t *testing.T) {
 	opts := &CmdBinaryOptions{IO: mkIO(), Binaries: mkBinaries()}
 	c := NewCmdBinary(opts)
 	opts.check = true
-	_ = opts.Complete(c, nil) // no ensure set; check mode with 0 locals → returns nil
-	_ = opts.Run()
+	// No ensure set; check mode with 0 locals is a no-op and should succeed.
+	if err := opts.Complete(c, nil); err != nil {
+		t.Errorf("Complete: %v", err)
+	}
+	if err := opts.Run(); err != nil {
+		t.Errorf("Run: %v", err)
+	}
 }
 
 func TestCmdBinaryOptions_Run_Available(t *testing.T) {
@@ -778,7 +783,9 @@ func TestExecute_Help(t *testing.T) {
 	oldArgs := os.Args
 	os.Args = []string{"b", "--help"}
 	defer func() { os.Args = oldArgs }()
-	_ = Execute(mkBinaries(), mkIO(), "dev", "")
+	if err := Execute(mkBinaries(), mkIO(), "dev", ""); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 }
 
 func TestSharedOptions_GetBinary(t *testing.T) {
