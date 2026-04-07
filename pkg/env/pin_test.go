@@ -128,10 +128,10 @@ func TestApplyPinsYAML_NestedPinAtArbitraryDepth(t *testing.T) {
 	}
 }
 
-// TestApplyPinsYAML_PinFalseIsNotApin documents that only true-ish
+// TestApplyPinsYAML_PinFalseIsNotAPin documents that only true-ish
 // values (true/yes/on) trigger the pin. `false` is treated as "no
 // pin set" so the upstream value can flow through.
-func TestApplyPinsYAML_PinFalseIsNotApin(t *testing.T) {
+func TestApplyPinsYAML_PinFalseIsNotAPin(t *testing.T) {
 	local := []byte(`binaries:
   kubectl:
     version: v1.30.0

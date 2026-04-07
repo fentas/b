@@ -302,6 +302,15 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		// regardless of whether a select filter is in play. YAML only
 		// for now; non-YAML files pass through unchanged.
 		applyPins := func(pending []byte) ([]byte, error) {
+			// Pinning is YAML-only today. Short-circuit non-YAML
+			// destinations BEFORE the os.ReadFile call so the I/O
+			// path can't fail (and surprise users) on JSON / text
+			// files that the helper would always pass through
+			// anyway.
+			ext := strings.ToLower(filepath.Ext(m.SourcePath))
+			if ext != ".yaml" && ext != ".yml" {
+				return pending, nil
+			}
 			localFull, readErr := os.ReadFile(destPath)
 			if readErr != nil {
 				if os.IsNotExist(readErr) {
