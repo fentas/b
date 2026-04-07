@@ -490,8 +490,12 @@ func TestUpdateEnvs_DryRun_SkipsLockWrite(t *testing.T) {
 		t.Errorf("expected 0 envs in lock after dry-run, got %d", len(lk.Envs))
 	}
 
-	if !strings.Contains(out.String(), "dry-run") {
-		t.Errorf("output should contain 'dry-run', got: %q", out.String())
+	// New plan-based output: dry-run emits a plan summary line ("→ 1
+	// add") rather than a literal "dry-run" tag in the header. The
+	// lock-not-written assertion above is the load-bearing behavior
+	// contract; this just sanity-checks the plan is rendered.
+	if !strings.Contains(out.String(), "→") {
+		t.Errorf("output should contain plan summary arrow, got: %q", out.String())
 	}
 }
 
@@ -527,7 +531,7 @@ func TestUpdateEnvs_GroupFilter(t *testing.T) {
 	shared.loadedConfigPath = filepath.Join(tmpDir, "b.yaml")
 	shared.bVersion = "v1.0"
 
-	o := &UpdateOptions{SharedOptions: shared, Group: "dev"}
+	o := &UpdateOptions{SharedOptions: shared, Group: "dev", Yes: true}
 	if err := o.updateEnvs(nil); err != nil {
 		t.Fatalf("updateEnvs error: %v", err)
 	}
@@ -580,7 +584,7 @@ func TestUpdateEnvs_Rollback(t *testing.T) {
 	shared.loadedConfigPath = filepath.Join(tmpDir, "b.yaml")
 	shared.bVersion = "v1.0"
 
-	o := &UpdateOptions{SharedOptions: shared, Rollback: true}
+	o := &UpdateOptions{SharedOptions: shared, Rollback: true, Yes: true}
 	if err := o.updateEnvs(nil); err != nil {
 		t.Fatalf("updateEnvs error: %v", err)
 	}
@@ -588,9 +592,10 @@ func TestUpdateEnvs_Rollback(t *testing.T) {
 	if forcedCommit != "previous456" {
 		t.Errorf("ForceCommit = %q, want %q", forcedCommit, "previous456")
 	}
-	if !strings.Contains(out.String(), "rollback") {
-		t.Errorf("output should contain 'rollback', got: %q", out.String())
-	}
+	// Plan output no longer carries a literal "(rollback)" tag — the
+	// behavior contract is that ForceCommit got set to the previous
+	// commit, which is asserted above.
+	_ = out
 }
 
 func TestUpdateEnvs_Rollback_NoPrevious(t *testing.T) {
@@ -663,7 +668,10 @@ func TestUpdateEnvs_ListConflictedFiles(t *testing.T) {
 	shared.loadedConfigPath = filepath.Join(tmpDir, "b.yaml")
 	shared.bVersion = "v1.0"
 
-	o := &UpdateOptions{SharedOptions: shared}
+	// Yes:true short-circuits the safety prompt so the conflict listing
+	// path is exercised. Without --yes the non-TTY default safety
+	// (prompt → strict on non-TTY) would refuse to apply.
+	o := &UpdateOptions{SharedOptions: shared, Yes: true}
 	o.updateEnvs(nil)
 
 	errStr := errOut.String()

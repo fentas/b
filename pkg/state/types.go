@@ -23,10 +23,45 @@ type EnvEntry struct {
 	Version     string                         `yaml:"version,omitempty"`
 	Ignore      []string                       `yaml:"ignore,omitempty"`
 	Strategy    string                         `yaml:"strategy,omitempty"`
+	Safety      string                         `yaml:"safety,omitempty"` // strict | prompt (default) | auto — see issue #125
 	Group       string                         `yaml:"group,omitempty"`
 	OnPreSync   string                         `yaml:"onPreSync,omitempty"`
 	OnPostSync  string                         `yaml:"onPostSync,omitempty"`
 	Files       map[string]envmatch.GlobConfig `yaml:"-"` // populated via custom EnvList unmarshal
+}
+
+// Safety levels for env updates. The default is SafetyPrompt.
+const (
+	// SafetyStrict refuses to apply any destructive change. As of
+	// Phase 1 of #125, "destructive" means a plan row whose action is
+	// `overwrite` (a non-merge strategy is about to clobber locally
+	// modified files) or `conflict` (a 3-way merge produced markers).
+	// Future phases may add `delete` to this set when skipped-delete
+	// tracking lands. The plan is printed; if it contains any
+	// destructive row the sync exits non-zero with no changes written
+	// for the offending env.
+	SafetyStrict = "strict"
+	// SafetyPrompt prints the plan and asks the user to confirm before
+	// applying. On non-TTY (CI/CD) it falls back to strict behavior.
+	SafetyPrompt = "prompt"
+	// SafetyAuto applies the plan without prompting. Equivalent to the
+	// pre-#125 default behavior. Use only when you trust the upstream.
+	SafetyAuto = "auto"
+)
+
+// NormalizeSafety returns the canonical safety value. Empty string and
+// unknown values both fall back to SafetyPrompt — the safe default.
+//
+// User input is normalized: surrounding whitespace is trimmed and the
+// value is lowercased before comparison, so `safety: Auto` and
+// `safety: auto ` in b.yaml both resolve to SafetyAuto.
+func NormalizeSafety(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case SafetyStrict, SafetyPrompt, SafetyAuto:
+		return strings.ToLower(strings.TrimSpace(s))
+	default:
+		return SafetyPrompt
+	}
 }
 
 // EnvList is a list of env entries parsed from the envs map.
@@ -47,6 +82,7 @@ func (list *EnvList) UnmarshalYAML(unmarshal func(interface{}) error) error {
 			e.Version = r.Version
 			e.Ignore = r.Ignore
 			e.Strategy = r.Strategy
+			e.Safety = r.Safety
 			e.Group = r.Group
 			e.OnPreSync = r.OnPreSync
 			e.OnPostSync = r.OnPostSync
@@ -76,6 +112,51 @@ func (list *EnvList) MarshalYAML() (interface{}, error) {
 		}
 		if e.Strategy != "" && e.Strategy != "replace" {
 			cfg["strategy"] = e.Strategy
+		}
+		// Safety serialization rules:
+		//
+		//   - Empty value: omit so the user's b.yaml stays terse.
+		//   - Canonical default (lowercased trimmed value == "prompt"):
+		//     omit (default behavior).
+		//   - Known non-default values (`auto`, `strict`): emit the
+		//     normalized form so non-canonical inputs like `Auto` or
+		//     ` STRICT ` round-trip cleanly.
+		//   - Unknown non-empty values: emit the trimmed/lowercased
+		//     original instead of dropping it. Without this, a future
+		//     `b` version with a new safety mode written to b.yaml
+		//     would have its safety silently erased the next time an
+		//     older `b` rewrote the file. Forward-compat: preserve
+		//     what we don't understand.
+		if rawSafety := strings.ToLower(strings.TrimSpace(e.Safety)); rawSafety != "" {
+			// Distinguish "known" from "unknown" by direct comparison
+			// to the canonical values, NOT by going through
+			// NormalizeSafety. NormalizeSafety folds unknown values
+			// to "prompt" for runtime safety, but for serialization
+			// we need to know whether the raw value was actually
+			// recognized so we can decide between (a) emitting the
+			// normalized form, (b) omitting as default, or
+			// (c) preserving an unknown value verbatim.
+			//
+			// Special case for inheritance: when the entry uses
+			// `includes:`, an explicit `safety: prompt` value is an
+			// override of whatever the included profile sets, so we
+			// MUST emit it — otherwise SaveConfig drops it and the
+			// included profile's non-default safety wins on next
+			// load.
+			switch rawSafety {
+			case SafetyPrompt:
+				if len(e.Includes) > 0 {
+					cfg["safety"] = SafetyPrompt
+				}
+				// otherwise canonical default → omit
+			case SafetyAuto, SafetyStrict:
+				cfg["safety"] = rawSafety
+			default:
+				// Unknown non-empty value: preserve verbatim
+				// (lowercased + trimmed) so SaveConfig doesn't
+				// erase a forward-compat safety mode.
+				cfg["safety"] = rawSafety
+			}
 		}
 		if e.Group != "" {
 			cfg["group"] = e.Group
@@ -146,6 +227,7 @@ type envEntryRaw struct {
 	Version     string                 `yaml:"version,omitempty"`
 	Ignore      []string               `yaml:"ignore,omitempty"`
 	Strategy    string                 `yaml:"strategy,omitempty"`
+	Safety      string                 `yaml:"safety,omitempty"`
 	Group       string                 `yaml:"group,omitempty"`
 	OnPreSync   string                 `yaml:"onPreSync,omitempty"`
 	OnPostSync  string                 `yaml:"onPostSync,omitempty"`
@@ -154,7 +236,7 @@ type envEntryRaw struct {
 
 // parseFilesMap converts the raw files map into typed GlobConfig entries.
 // Values can be: null → GlobConfig{}, string → GlobConfig{Dest: s},
-// map → GlobConfig{Dest: ..., Ignore: [...]}
+// map → GlobConfig{Dest: .., Ignore: [..]}
 func parseFilesMap(raw map[string]interface{}) map[string]envmatch.GlobConfig {
 	if raw == nil {
 		return nil

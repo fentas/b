@@ -20,6 +20,7 @@ import (
 	"github.com/fentas/b/pkg/env"
 	"github.com/fentas/b/pkg/gitcache"
 	"github.com/fentas/b/pkg/lock"
+	"github.com/fentas/b/pkg/state"
 )
 
 // Test hooks — production code uses the defaults; tests can override.
@@ -40,7 +41,10 @@ type UpdateOptions struct {
 	specifiedBinaries []*binary.Binary             // resolved binaries from CLI args
 	specifiedEnvRefs  []string                     // resolved env refs from CLI args
 	Strategy          string                       // strategy flag override: replace, client, merge
+	Safety            string                       // safety flag override: strict, prompt, auto
 	DryRun            bool                         // show what would change without writing
+	PlanJSON          bool                         // emit machine-readable plan and exit (implies dry-run)
+	Yes               bool                         // skip prompt confirmations (treat prompt as auto)
 	Rollback          bool                         // rollback to previous commit from lock
 	Group             string                       // only update envs in this group
 	stdinReader       io.Reader                    // overridden by tests; nil means os.Stdin
@@ -89,7 +93,10 @@ func NewUpdateCmd(shared *SharedOptions) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&o.Strategy, "strategy", "", "Conflict strategy: replace (default), client, merge")
+	cmd.Flags().StringVar(&o.Safety, "safety", "", "Override per-env safety: strict, prompt, auto")
 	cmd.Flags().BoolVar(&o.DryRun, "dry-run", false, "Show what would change without writing files")
+	cmd.Flags().BoolVar(&o.PlanJSON, "plan-json", false, "Emit a machine-readable plan as JSON (implies --dry-run)")
+	cmd.Flags().BoolVarP(&o.Yes, "yes", "y", false, "Skip prompt confirmation (treat prompt as auto)")
 	cmd.Flags().BoolVar(&o.Rollback, "rollback", false, "Rollback envs to previous commit from lock")
 	cmd.Flags().StringVar(&o.Group, "group", "", "Only update envs in this group")
 
@@ -151,6 +158,20 @@ func (o *UpdateOptions) Validate() error {
 			return fmt.Errorf("invalid strategy %q: must be replace, client, or merge", o.Strategy)
 		}
 	}
+	// `--safety` materially changes non-TTY behavior, so a typo (e.g.
+	// `--safety=autp`) must error rather than silently fall back to
+	// prompt. Validation is case-insensitive and trims whitespace,
+	// matching the NormalizeSafety contract used by config-loaded
+	// values.
+	if o.Safety != "" {
+		switch strings.ToLower(strings.TrimSpace(o.Safety)) {
+		case state.SafetyAuto, state.SafetyPrompt, state.SafetyStrict:
+			// valid
+		default:
+			return fmt.Errorf("invalid --safety value %q: must be %s, %s, or %s",
+				o.Safety, state.SafetyStrict, state.SafetyPrompt, state.SafetyAuto)
+		}
+	}
 	return nil
 }
 
@@ -164,9 +185,11 @@ func (o *UpdateOptions) Run() error {
 
 // runAll updates all binaries and envs from config.
 func (o *UpdateOptions) runAll() error {
-	// Update binaries
+	// Update binaries — but NOT in plan-json mode, where binary
+	// progress output would corrupt the JSON document on stdout.
+	//.
 	binariesToUpdate := o.GetBinariesFromConfig()
-	if len(binariesToUpdate) > 0 {
+	if len(binariesToUpdate) > 0 && !o.PlanJSON {
 		if err := o.callUpdateBinaries(binariesToUpdate); err != nil {
 			return err
 		}
@@ -180,6 +203,12 @@ func (o *UpdateOptions) runAll() error {
 	}
 
 	if len(binariesToUpdate) == 0 && (o.Config == nil || len(o.Config.Envs) == 0) {
+		// In plan-json mode the human-readable line would corrupt
+		// the JSON output. Emit an empty array instead so consumers
+		// always get valid JSON.
+		if o.PlanJSON {
+			return env.RenderPlansJSON(o.IO.Out, nil)
+		}
 		fmt.Fprintln(o.IO.Out, "No binaries or envs to update")
 	}
 
@@ -189,7 +218,15 @@ func (o *UpdateOptions) runAll() error {
 // runSpecified updates only the specified binaries/envs.
 func (o *UpdateOptions) runSpecified() error {
 	if len(o.specifiedBinaries) > 0 {
-		if err := o.callUpdateBinaries(o.specifiedBinaries); err != nil {
+		// Same as runAll: in plan-json mode binary progress would
+		// corrupt stdout. Skip binaries entirely; if the user
+		// explicitly listed binaries, warn on stderr so they know
+		// the binary args were ignored.
+		if o.PlanJSON {
+			fmt.Fprintf(o.IO.ErrOut,
+				"  warning: --plan-json suppresses binary updates; %d binary arg(s) ignored\n",
+				len(o.specifiedBinaries))
+		} else if err := o.callUpdateBinaries(o.specifiedBinaries); err != nil {
 			return err
 		}
 	}
@@ -227,6 +264,25 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		return err
 	}
 
+	// Tracks any per-env safety gate refusals so we can return a
+	// non-zero exit at the end.: silent
+	// refusal contradicts the documented "CI pipelines will fail"
+	// promise. Per-env apply work continues for non-refused envs so a
+	// single bad apple doesn't block the rest of the run.
+	var refusedEnvs []string
+
+	// Tracks per-env hard sync failures (network errors, missing
+	// previous commits for rollback, real apply errors, etc.) for the
+	// same reason: any failure must turn into a non-zero exit so CI
+	// notices.
+	var failedEnvs []string
+
+	// Collected plans for --plan-json. Previously, emitting one JSON
+	// document per env produced concatenated output that isn't valid
+	// JSON for typical parsers. We now collect plans in this slice and
+	// emit a single JSON array at the end.
+	var planJSONOut []*env.Plan
+
 	for _, entry := range o.Config.Envs {
 		if refs != nil {
 			found := false
@@ -255,6 +311,24 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			strategy = o.Strategy
 		}
 
+		// Determine safety: CLI flag > config > default (prompt). Defaulted
+		// via state.NormalizeSafety so unknown values fall back safely.
+		safety := state.NormalizeSafety(entry.Safety)
+		if o.Safety != "" {
+			safety = state.NormalizeSafety(o.Safety)
+		}
+		// --plan-json implies --dry-run; the user only wants the plan.
+		isDryRun := o.DryRun || o.PlanJSON
+
+		// We only need a dry-run "plan" pass when the safety mode might
+		// reject the apply (strict, or prompt where the user has to be
+		// asked). For SafetyAuto and for explicit --yes we can go straight
+		// to the real apply and render the plan from its result — no
+		// double work, no second clone-cache hit.
+		needsPlanFirst := isDryRun ||
+			safety == state.SafetyStrict ||
+			(safety == state.SafetyPrompt && !o.Yes)
+
 		cfg := env.EnvConfig{
 			Ref:        ref,
 			Label:      label,
@@ -263,15 +337,18 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			Ignore:     entry.Ignore,
 			Strategy:   strategy,
 			Files:      entry.Files,
-			DryRun:     o.DryRun,
+			DryRun:     needsPlanFirst,
 			OnPreSync:  entry.OnPreSync,
 			OnPostSync: entry.OnPostSync,
 			Stdout:     o.IO.Out,
 			Stderr:     o.IO.ErrOut,
 		}
-
-		// Set up interactive conflict resolver for replace strategy on TTY
-		if (strategy == "" || strategy == env.StrategyReplace) && isTTYFunc() && !o.DryRun {
+		// Attach the interactive conflict resolver only when this very
+		// pass will actually apply to disk (auto / --yes path). The
+		// resolver is interactive — running it during a dry-run plan
+		// pass would prompt the user before they've even approved the
+		// plan. The plan-first path sets it on the second pass instead.
+		if !needsPlanFirst && (strategy == "" || strategy == env.StrategyReplace) && isTTYFunc() {
 			cfg.ResolveConflict = o.interactiveConflictResolver(ref, lk)
 		}
 
@@ -281,70 +358,251 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		if o.Rollback {
 			if lockEntry == nil || lockEntry.PreviousCommit == "" {
 				fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ no previous commit to rollback to\n", entry.Key)
+				failedEnvs = append(failedEnvs, entry.Key)
 				continue
 			}
 			cfg.ForceCommit = lockEntry.PreviousCommit
 		}
 
-		result, err := syncEnvFunc(cfg, projectRoot, "", lockEntry)
+		// First pass — dry-run when we need a plan to gate on, real
+		// apply when safety is auto / --yes.
+		firstResult, err := syncEnvFunc(cfg, projectRoot, "", lockEntry)
 		if err != nil {
 			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
+			failedEnvs = append(failedEnvs, entry.Key)
 			continue
 		}
 
-		if result.Skipped {
-			fmt.Fprintf(o.IO.Out, "  %-40s %s\n", entry.Key, result.Message)
+		if firstResult.Skipped {
+			// Plan-json mode: emit an explicit empty plan for the
+			// skipped env so consumers can distinguish "all envs are
+			// up to date" from "no envs configured" — both used to
+			// produce [].
+			// Plain dry-run / plan-text mode prints just the cheap
+			// "(up to date)" line; no plan table or summary is
+			// rendered for skipped envs in text mode.
+			if o.PlanJSON {
+				planJSONOut = append(planJSONOut, &env.Plan{
+					Ref:     ref,
+					Label:   label,
+					Version: entry.Version,
+					Commit:  firstResult.Commit,
+				})
+			} else {
+				fmt.Fprintf(o.IO.Out, "  %-40s %s\n", entry.Key, firstResult.Message)
+			}
 			continue // don't overwrite lock entry when up-to-date
 		}
 
-		modes := []string{}
-		if o.DryRun {
-			modes = append(modes, "dry-run")
-		}
-		if o.Rollback {
-			modes = append(modes, "rollback")
-		}
-		prefix := ""
-		if len(modes) > 0 {
-			prefix = fmt.Sprintf("(%s) ", strings.Join(modes, ", "))
+		plan := env.PlanFromResult(firstResult, lockEntry)
+
+		// --plan-json: collect the plan for batched JSON output below.
+		// We never apply in plan-json mode (it implies dry-run).
+		if o.PlanJSON {
+			planJSONOut = append(planJSONOut, plan)
+			continue
 		}
 
-		fmt.Fprintf(o.IO.Out, "  %s%-40s %s → %s (%s)\n", prefix, entry.Key, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)
-		for _, f := range result.Files {
-			o.printFileStatus(f)
-		}
+		// Header line + plan table.
+		fmt.Fprintf(o.IO.Out, "  %-40s %s → %s\n", entry.Key,
+			shortCommit(firstResult.PreviousCommit), shortCommit(firstResult.Commit))
+		env.RenderPlanText(o.IO.Out, plan)
 
-		if result.Conflicts > 0 {
-			fmt.Fprintf(o.IO.ErrOut, "    ⚠ %d file(s) have merge conflicts — resolve manually:\n", result.Conflicts)
-			for _, f := range result.Files {
-				if f.Status == "conflict" || f.Status == "conflict (dry-run)" {
-					destPath := f.Dest
-					if !filepath.IsAbs(destPath) {
-						destPath = filepath.Join(projectRoot, destPath)
-					}
-					fmt.Fprintf(o.IO.ErrOut, "      %s\n", destPath)
-				}
+		// If the first pass was already a real apply (auto / --yes path),
+		// just write the lock and move on. No gate, no second SyncEnv.
+		if !needsPlanFirst {
+			if firstResult.Conflicts > 0 {
+				printConflictHint(o.IO.ErrOut, firstResult, projectRoot)
 			}
-		}
-
-		// Don't update lock in dry-run mode
-		if !o.DryRun {
 			lk.UpsertEnv(lock.EnvEntry{
-				Ref:            result.Ref,
-				Label:          result.Label,
-				Version:        result.Version,
-				Commit:         result.Commit,
-				PreviousCommit: result.PreviousCommit,
-				Files:          result.Files,
+				Ref:            firstResult.Ref,
+				Label:          firstResult.Label,
+				Version:        firstResult.Version,
+				Commit:         firstResult.Commit,
+				PreviousCommit: firstResult.PreviousCommit,
+				Files:          firstResult.Files,
 			})
+			continue
+		}
+
+		// Plan-first path: gate on safety, then apply if approved.
+		apply, gateErr := o.gateApply(safety, plan, isDryRun)
+		if gateErr != nil {
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, gateErr)
+			refusedEnvs = append(refusedEnvs, entry.Key)
+			continue
+		}
+		if !apply {
+			// Dry-run or user declined the prompt — not an error,
+			// just nothing to do for this env.
+			continue
+		}
+
+		// Second pass: real apply. The gitcache is hot from the first
+		// pass, so only the actual file writes hit disk newly.
+		//
+		// Notably we do NOT attach the per-file
+		// interactiveConflictResolver here, even on TTY+replace.
+		// In the plan-first flow the user has already approved (or
+		// rejected) the entire plan via the safety gate. Attaching
+		// the legacy per-file resolver would (a) show a second
+		// round of interactive prompts after they already accepted
+		// the plan, and (b) create a plan-vs-reality skew because
+		// the dry-run pass that produced the plan ran without the
+		// resolver, so its destructiveness verdict (and the strict
+		// gate's decision) was based on "unconditional overwrite"
+		// while the apply pass would actually call the resolver
+		// and might pick keep/merge/diff per file.
+		//
+		// Auto / --yes mode is the only path where the legacy
+		// resolver is still attached (handled at the top of the
+		// loop where !needsPlanFirst).
+		applyCfg := cfg
+		applyCfg.DryRun = false
+		realResult, err := syncEnvFunc(applyCfg, projectRoot, "", lockEntry)
+		if err != nil {
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
+			failedEnvs = append(failedEnvs, entry.Key)
+			continue
+		}
+
+		if realResult.Conflicts > 0 {
+			printConflictHint(o.IO.ErrOut, realResult, projectRoot)
+		}
+
+		lk.UpsertEnv(lock.EnvEntry{
+			Ref:            realResult.Ref,
+			Label:          realResult.Label,
+			Version:        realResult.Version,
+			Commit:         realResult.Commit,
+			PreviousCommit: realResult.PreviousCommit,
+			Files:          realResult.Files,
+		})
+	}
+
+	if o.PlanJSON {
+		// Emit the collected plans as a single JSON array so PR
+		// comment bots / CI summary jobs can parse with a single
+		// invocation.
+		if err := env.RenderPlansJSON(o.IO.Out, planJSONOut); err != nil {
+			return err
+		}
+		// In plan-json mode we still need a non-zero exit when some
+		// envs were refused or failed, otherwise automation sees
+		// partial plan generation as success.
+		return aggregateEnvErrors(refusedEnvs, failedEnvs)
+	}
+	if o.DryRun {
+		// Don't write the lock in dry-run mode, but still surface
+		// any per-env refusals or failures so CI and users can
+		// detect that planning was only partially successful.
+		return aggregateEnvErrors(refusedEnvs, failedEnvs)
+	}
+
+	if err := lock.WriteLock(lockDir, lk, o.bVersion); err != nil {
+		return err
+	}
+	return aggregateEnvErrors(refusedEnvs, failedEnvs)
+}
+
+// aggregateEnvErrors returns a single error summarizing safety refusals
+// and hard sync failures, or nil when neither happened. Both lists are
+// reported when both are non-empty so the user sees the full story in
+// one error message. (refusals: round 1,
+// failures: round 5, plan-json path: round 6).
+func aggregateEnvErrors(refused, failed []string) error {
+	switch {
+	case len(refused) > 0 && len(failed) > 0:
+		return fmt.Errorf("safety refused %d env(s): %s; %d env(s) failed: %s",
+			len(refused), strings.Join(refused, ", "),
+			len(failed), strings.Join(failed, ", "))
+	case len(refused) > 0:
+		return fmt.Errorf("safety refused %d env(s): %s", len(refused), strings.Join(refused, ", "))
+	case len(failed) > 0:
+		return fmt.Errorf("%d env(s) failed: %s", len(failed), strings.Join(failed, ", "))
+	}
+	return nil
+}
+
+// printConflictHint emits the legacy "needs manual resolution" footer for
+// any files that came back with conflict status.
+func printConflictHint(w io.Writer, result *env.SyncResult, projectRoot string) {
+	fmt.Fprintf(w, "    ⚠ %d file(s) have merge conflicts — resolve manually:\n", result.Conflicts)
+	for _, f := range result.Files {
+		status := strings.TrimSuffix(f.Status, " (dry-run)")
+		if status == "conflict" {
+			destPath := f.Dest
+			if !filepath.IsAbs(destPath) {
+				destPath = filepath.Join(projectRoot, destPath)
+			}
+			fmt.Fprintf(w, "      %s\n", destPath)
 		}
 	}
+}
 
-	if o.DryRun {
-		return nil // don't write lock in dry-run mode
+// gateApply implements the #125 safety + plan flow. It returns
+// (applyNow, error). applyNow=false means "do not run the real sync for
+// this env, but the loop should continue".
+func (o *UpdateOptions) gateApply(safety string, plan *env.Plan, isDryRun bool) (bool, error) {
+	// Dry-run is the simplest case: never apply, never error. The plan
+	// has already been printed for the user.
+	if isDryRun {
+		return false, nil
 	}
 
-	return lock.WriteLock(lockDir, lk, o.bVersion)
+	destructive := plan.HasDestructive()
+
+	switch safety {
+	case state.SafetyAuto:
+		// Trust the upstream and apply silently.
+		return true, nil
+
+	case state.SafetyStrict:
+		// Refuse if any destructive row is present.
+		if destructive {
+			return false, fmt.Errorf("strict safety: plan contains destructive changes — use --safety=prompt or --safety=auto to apply")
+		}
+		return true, nil
+
+	case state.SafetyPrompt:
+		// --yes overrides the prompt and behaves like auto.
+		if o.Yes {
+			return true, nil
+		}
+		// On non-TTY, prompt collapses to strict — refuse on destructive.
+		if !isTTYFunc() {
+			if destructive {
+				return false, fmt.Errorf("prompt safety on non-TTY: plan contains destructive changes — re-run with --yes, --safety=auto, or --dry-run")
+			}
+			return true, nil
+		}
+		// Interactive prompt.
+		return o.confirmApply(destructive), nil
+	}
+
+	// Unknown safety value (shouldn't happen — NormalizeSafety covers it,
+	// but be defensive).
+	return false, fmt.Errorf("unknown safety value %q", safety)
+}
+
+// confirmApply prompts the user with a y/N question. Default is N (safer).
+func (o *UpdateOptions) confirmApply(destructive bool) bool {
+	r := o.stdinReader
+	if r == nil {
+		r = os.Stdin
+	}
+	reader := bufio.NewReader(r)
+	if destructive {
+		fmt.Fprint(o.IO.ErrOut, "  Plan contains destructive changes. Apply? [y/N] ")
+	} else {
+		fmt.Fprint(o.IO.ErrOut, "  Apply plan? [y/N] ")
+	}
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+	input = strings.TrimSpace(strings.ToLower(input))
+	return input == "y" || input == "yes"
 }
 
 // printFileStatus prints a single file's sync status.

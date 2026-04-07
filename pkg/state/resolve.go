@@ -46,6 +46,9 @@ func ResolveProfileIncludes(profile *EnvEntry, allProfiles EnvList) (*EnvEntry, 
 		if p.Strategy != "" {
 			merged.Strategy = p.Strategy
 		}
+		if p.Safety != "" {
+			merged.Safety = p.Safety
+		}
 		if p.Group != "" {
 			merged.Group = p.Group
 		}

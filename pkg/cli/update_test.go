@@ -618,11 +618,19 @@ func TestUpdateEnvs_SyncError(t *testing.T) {
 		},
 	}
 
-	if err := o.updateEnvs(nil); err != nil {
-		t.Fatalf("updateEnvs should not return error on per-env failure: %v", err)
+	// per-env sync failures
+	// MUST produce a non-zero exit code so CI pipelines actually
+	// notice. The error output is still printed inline; the return
+	// value now also reflects the failure as an aggregated error.
+	err := o.updateEnvs(nil)
+	if err == nil {
+		t.Fatal("updateEnvs should return an error when SyncEnv fails")
+	}
+	if !strings.Contains(err.Error(), "env(s) failed") {
+		t.Errorf("expected aggregated failure error, got: %v", err)
 	}
 	if !strings.Contains(errBuf.String(), "git clone failed") {
-		t.Errorf("expected error output, got: %s", errBuf.String())
+		t.Errorf("expected per-env error in stderr output, got: %s", errBuf.String())
 	}
 }
 
@@ -658,20 +666,21 @@ func TestUpdateEnvs_Updated(t *testing.T) {
 				Envs: state.EnvList{{Key: "github.com/org/repo"}},
 			},
 		},
+		Yes: true, // skip the #125 safety prompt so apply runs in tests
 	}
 
 	if err := o.updateEnvs(nil); err != nil {
 		t.Fatalf("updateEnvs error = %v", err)
 	}
 	out := outBuf.String()
-	if !strings.Contains(out, "2 files synced") {
-		t.Errorf("expected sync message, got: %s", out)
+	// Plan-format output: "replaced" status maps to action "add" when
+	// the file isn't in the previous lock entry (the lock starts empty
+	// in this test). "kept" maps to action "keep".
+	if !strings.Contains(out, "add") {
+		t.Errorf("expected plan 'add' line, got: %s", out)
 	}
-	if !strings.Contains(out, "replaced") {
-		t.Errorf("expected replaced file status, got: %s", out)
-	}
-	if !strings.Contains(out, "kept") {
-		t.Errorf("expected kept file status, got: %s", out)
+	if !strings.Contains(out, "keep") {
+		t.Errorf("expected plan 'keep' line, got: %s", out)
 	}
 
 	// Verify lock was written with the new entry
@@ -713,6 +722,10 @@ func TestUpdateEnvs_WithConflicts(t *testing.T) {
 				Envs: state.EnvList{{Key: "github.com/org/repo"}},
 			},
 		},
+		// Yes:true bypasses the new #125 safety prompt so the conflict
+		// warning path is reached. Without it, non-TTY default safety
+		// (prompt → strict on non-TTY) refuses to apply destructive plans.
+		Yes: true,
 	}
 
 	if err := o.updateEnvs(nil); err != nil {
@@ -820,6 +833,12 @@ func TestUpdateEnvs_TTYConflictResolver(t *testing.T) {
 			},
 		},
 		stdinReader: strings.NewReader("r\n"), // mock stdin
+		// Yes:true makes the first SyncEnv pass the real apply pass,
+		// so the conflict resolver is attached to the cfg the test
+		// inspects. Without --yes, the resolver is set on the second
+		// (apply) pass, which never runs because Skipped:true short-
+		// circuits the loop above the gate.
+		Yes: true,
 	}
 
 	o.updateEnvs(nil)
@@ -1689,6 +1708,363 @@ func TestPrintFileStatus_AllStatuses(t *testing.T) {
 		}
 		if tt.inErrOut != "" && !strings.Contains(errBuf.String(), tt.inErrOut) {
 			t.Errorf("printFileStatus(%q): errOut = %q, want %q", tt.status, errBuf.String(), tt.inErrOut)
+		}
+	}
+}
+
+// --- Issue #125: safety tiers + plan output ---
+//
+// These tests cover the new gateApply / plan flow added in #125. They
+// pin the public contract:
+//
+//   - default safety is "prompt"; on a non-TTY (CI) it collapses to
+//     strict and refuses destructive plans
+//   - --safety=auto applies without prompting (legacy behavior)
+//   - --safety=strict refuses ANY destructive plan, with or without TTY
+//   - --yes overrides the prompt and behaves like auto
+//   - --plan-json emits a single JSON array for the whole run and skips writes
+//   - the dry-run pass never updates the lock and always renders a plan
+//   - the auto / --yes paths only call SyncEnv ONCE — the plan-first
+//     paths call it twice (one dry-run for the plan + one apply)
+
+// makeUpdateOpts is a small helper that wires up an UpdateOptions with
+// in-memory streams and a single env. Returns the option struct, an
+// in-memory out buffer, and an in-memory err buffer.
+func makeUpdateOpts(t *testing.T, entry state.EnvEntry, opts ...func(*UpdateOptions)) (*UpdateOptions, *bytes.Buffer, *bytes.Buffer) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "b.yaml")
+	if err := os.WriteFile(configPath, []byte("binaries: {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := lock.WriteLock(tmpDir, &lock.Lock{Version: 1}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	out := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
+	o := &UpdateOptions{
+		SharedOptions: &SharedOptions{
+			IO:               &streams.IO{Out: out, ErrOut: errBuf},
+			ConfigPath:       configPath,
+			loadedConfigPath: configPath,
+			Config:           &state.State{Envs: state.EnvList{&entry}},
+		},
+	}
+	for _, opt := range opts {
+		opt(o)
+	}
+	return o, out, errBuf
+}
+
+// makeSyncFunc returns a syncEnvFunc stub that returns a fixed result and
+// records every call. The recorded slice lets tests assert how many
+// passes ran (1 for auto/--yes, 2 for plan-first).
+func makeSyncFunc(result *env.SyncResult) (func(env.EnvConfig, string, string, *lock.EnvEntry) (*env.SyncResult, error), *[]bool) {
+	calls := &[]bool{}
+	return func(cfg env.EnvConfig, _ string, _ string, _ *lock.EnvEntry) (*env.SyncResult, error) {
+		*calls = append(*calls, cfg.DryRun)
+		// Return a deep copy so tests that mutate Files between
+		// invocations don't accidentally share the underlying
+		// backing array.
+		clone := *result
+		if result.Files != nil {
+			clone.Files = append([]lock.LockFile(nil), result.Files...)
+		}
+		return &clone, nil
+	}, calls
+}
+
+// TestUpdateEnvs_SafetyAuto_AppliesAndCallsSyncOnce: when safety=auto the
+// CLI should run SyncEnv exactly once (real apply pass) and write the
+// lock. No dry-run preview pass.
+func TestUpdateEnvs_SafetyAuto_AppliesAndCallsSyncOnce(t *testing.T) {
+	saveHooks(t)
+	isTTYFunc = func() bool { return false }
+	syncFn, calls := makeSyncFunc(&env.SyncResult{
+		Ref:    "github.com/org/repo",
+		Commit: "abc",
+		Files:  []lock.LockFile{{Path: "a.yaml", Dest: "a.yaml", Status: "replaced"}},
+	})
+	syncEnvFunc = syncFn
+
+	o, _, _ := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo", Safety: state.SafetyAuto})
+	if err := o.updateEnvs(nil); err != nil {
+		t.Fatalf("updateEnvs: %v", err)
+	}
+	if len(*calls) != 1 {
+		t.Errorf("expected 1 SyncEnv call (auto path), got %d", len(*calls))
+	}
+	if (*calls)[0] != false {
+		t.Error("expected the single call to be a real apply (DryRun=false)")
+	}
+}
+
+// TestUpdateEnvs_SafetyStrict_RefusesDestructive: strict refuses any
+// plan that would overwrite local changes or produce a conflict. The
+// lock must NOT be updated.
+func TestUpdateEnvs_SafetyStrict_RefusesDestructive(t *testing.T) {
+	saveHooks(t)
+	isTTYFunc = func() bool { return false }
+	syncFn, calls := makeSyncFunc(&env.SyncResult{
+		Ref:    "github.com/org/repo",
+		Commit: "abc",
+		Files: []lock.LockFile{
+			{Path: "a.yaml", Dest: "a.yaml", Status: "replaced (local changes overwritten)"},
+		},
+	})
+	syncEnvFunc = syncFn
+
+	o, _, errBuf := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo", Safety: state.SafetyStrict})
+	err := o.updateEnvs(nil)
+	// strict refusal must produce a
+	// non-zero exit code, so updateEnvs must return an error.
+	if err == nil {
+		t.Fatal("updateEnvs should return an error when strict refuses")
+	}
+	if !strings.Contains(err.Error(), "safety refused") {
+		t.Errorf("expected aggregated safety error, got: %v", err)
+	}
+	// Strict refusal: the plan-first dry-run runs (1 call), gate
+	// rejects, no second apply call.
+	if len(*calls) != 1 {
+		t.Errorf("strict refusal should call SyncEnv once (dry-run only), got %d", len(*calls))
+	}
+	if !strings.Contains(errBuf.String(), "strict safety") {
+		t.Errorf("expected strict refusal message, got: %q", errBuf.String())
+	}
+}
+
+// TestUpdateEnvs_SafetyStrict_AppliesNonDestructive: strict ALLOWS plans
+// that have only safe actions (add, update, keep, merge).
+func TestUpdateEnvs_SafetyStrict_AppliesNonDestructive(t *testing.T) {
+	saveHooks(t)
+	isTTYFunc = func() bool { return false }
+	syncFn, calls := makeSyncFunc(&env.SyncResult{
+		Ref:    "github.com/org/repo",
+		Commit: "abc",
+		Files: []lock.LockFile{
+			{Path: "a.yaml", Dest: "a.yaml", Status: "replaced"}, // → update
+		},
+	})
+	syncEnvFunc = syncFn
+
+	o, _, errBuf := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo", Safety: state.SafetyStrict})
+	if err := o.updateEnvs(nil); err != nil {
+		t.Fatalf("updateEnvs: %v", err)
+	}
+	// Plan-first path: 1 dry-run + 1 apply = 2 calls.
+	if len(*calls) != 2 {
+		t.Errorf("strict + non-destructive should call SyncEnv twice (plan + apply), got %d", len(*calls))
+	}
+	if (*calls)[0] != true {
+		t.Error("first call should be dry-run")
+	}
+	if (*calls)[1] != false {
+		t.Error("second call should be real apply")
+	}
+	if strings.Contains(errBuf.String(), "strict safety") {
+		t.Errorf("strict should not refuse non-destructive plans, got: %q", errBuf.String())
+	}
+}
+
+// TestUpdateEnvs_PromptDefault_NonTTY_BlocksDestructive: the new default
+// (prompt) collapses to strict on non-TTY, so CI runs that hit a
+// destructive plan must be refused unless --yes / --safety=auto is set.
+func TestUpdateEnvs_PromptDefault_NonTTY_BlocksDestructive(t *testing.T) {
+	saveHooks(t)
+	isTTYFunc = func() bool { return false }
+	syncFn, calls := makeSyncFunc(&env.SyncResult{
+		Ref:    "github.com/org/repo",
+		Commit: "abc",
+		Files: []lock.LockFile{
+			{Path: "a.yaml", Dest: "a.yaml", Status: "conflict"},
+		},
+	})
+	syncEnvFunc = syncFn
+
+	o, _, errBuf := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo"}) // no safety set → default prompt
+	err := o.updateEnvs(nil)
+	// prompt-on-CI refusal must also
+	// produce a non-zero exit code so CI pipelines actually notice.
+	if err == nil {
+		t.Fatal("updateEnvs should return an error when non-TTY prompt refuses")
+	}
+	if !strings.Contains(err.Error(), "safety refused") {
+		t.Errorf("expected aggregated safety error, got: %v", err)
+	}
+	if len(*calls) != 1 {
+		t.Errorf("non-TTY prompt should refuse without applying, got %d calls", len(*calls))
+	}
+	if !strings.Contains(errBuf.String(), "non-TTY") {
+		t.Errorf("expected non-TTY refusal message, got: %q", errBuf.String())
+	}
+}
+
+// TestUpdateEnvs_Yes_OverridesPrompt: --yes is the CI escape hatch — it
+// makes the default prompt safety apply without confirming.
+func TestUpdateEnvs_Yes_OverridesPrompt(t *testing.T) {
+	saveHooks(t)
+	isTTYFunc = func() bool { return false }
+	syncFn, calls := makeSyncFunc(&env.SyncResult{
+		Ref:   "github.com/org/repo",
+		Files: []lock.LockFile{{Path: "a.yaml", Dest: "a.yaml", Status: "conflict"}},
+	})
+	syncEnvFunc = syncFn
+
+	o, _, _ := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo"},
+		func(o *UpdateOptions) { o.Yes = true })
+	if err := o.updateEnvs(nil); err != nil {
+		t.Fatalf("updateEnvs: %v", err)
+	}
+	// --yes takes the auto path: 1 SyncEnv call, real apply, no
+	// dry-run pass.
+	if len(*calls) != 1 {
+		t.Errorf("--yes auto path should call SyncEnv once, got %d", len(*calls))
+	}
+	if (*calls)[0] != false {
+		t.Error("--yes call should be real apply")
+	}
+}
+
+// TestUpdateEnvs_PlanJSON_IncludesSkippedEnvs verifies that an env
+// with `Skipped: true` (already up-to-date) still produces a plan
+// object in the JSON array — empty rows + ref/commit metadata — so
+// consumers can distinguish "no envs configured" from "all envs
+// up-to-date".
+func TestUpdateEnvs_PlanJSON_IncludesSkippedEnvs(t *testing.T) {
+	saveHooks(t)
+	syncFn, _ := makeSyncFunc(&env.SyncResult{
+		Ref:     "github.com/org/repo",
+		Commit:  "abc",
+		Skipped: true,
+		Message: "(up to date)",
+	})
+	syncEnvFunc = syncFn
+
+	o, out, _ := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo"},
+		func(o *UpdateOptions) { o.PlanJSON = true })
+	if err := o.updateEnvs(nil); err != nil {
+		t.Fatalf("updateEnvs: %v", err)
+	}
+	outStr := out.String()
+	// Output should be a JSON array with one entry, not [].
+	if !strings.Contains(outStr, `"github.com/org/repo"`) {
+		t.Errorf("expected skipped env in JSON output, got:\n%s", outStr)
+	}
+	// Sanity: must NOT contain the human "(up to date)" line that
+	// would corrupt the JSON.
+	if strings.Contains(outStr, "(up to date)") {
+		t.Errorf("plan-json should not include human-readable up-to-date line, got:\n%s", outStr)
+	}
+}
+
+// TestUpdateEnvs_PlanJSON_EmitsAndSkipsApply: --plan-json prints a JSON
+// plan and never applies.
+func TestUpdateEnvs_PlanJSON_EmitsAndSkipsApply(t *testing.T) {
+	saveHooks(t)
+	syncFn, calls := makeSyncFunc(&env.SyncResult{
+		Ref:    "github.com/org/repo",
+		Commit: "abc",
+		Files: []lock.LockFile{
+			{Path: "a.yaml", Dest: "a.yaml", Status: "replaced"},
+		},
+	})
+	syncEnvFunc = syncFn
+
+	o, out, _ := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo"},
+		func(o *UpdateOptions) { o.PlanJSON = true })
+	if err := o.updateEnvs(nil); err != nil {
+		t.Fatalf("updateEnvs: %v", err)
+	}
+	if len(*calls) != 1 {
+		t.Errorf("plan-json should call SyncEnv once (dry-run), got %d", len(*calls))
+	}
+	if (*calls)[0] != true {
+		t.Error("plan-json call should be dry-run")
+	}
+	if !strings.Contains(out.String(), `"action"`) {
+		t.Errorf("plan-json output should contain JSON 'action' field, got:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), `"github.com/org/repo"`) {
+		t.Errorf("plan-json output should contain ref, got:\n%s", out.String())
+	}
+}
+
+// TestUpdateEnvs_DryRun_SkipsLockWriteAndApply: --dry-run prints the
+// plan and never applies. The lock must remain at its original version.
+func TestUpdateEnvs_DryRun_NewBehavior(t *testing.T) {
+	saveHooks(t)
+	syncFn, calls := makeSyncFunc(&env.SyncResult{
+		Ref:    "github.com/org/repo",
+		Commit: "abc",
+		Files: []lock.LockFile{
+			{Path: "a.yaml", Dest: "a.yaml", Status: "replaced (dry-run)"},
+		},
+	})
+	syncEnvFunc = syncFn
+
+	o, out, _ := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo"},
+		func(o *UpdateOptions) { o.DryRun = true })
+	if err := o.updateEnvs(nil); err != nil {
+		t.Fatalf("updateEnvs: %v", err)
+	}
+	if len(*calls) != 1 {
+		t.Errorf("dry-run should call SyncEnv once, got %d", len(*calls))
+	}
+	// New summary format omits zero counts, so a single-add plan
+	// renders as "→ 1 add" rather than "→ 0 add, ..".
+	if !strings.Contains(out.String(), "→") || !strings.Contains(out.String(), "add") {
+		t.Errorf("dry-run plan summary missing, got:\n%s", out.String())
+	}
+}
+
+// TestUpdateEnvs_DryRun_PropagatesFailures verifies that --dry-run
+// surfaces aggregated failure errors so CI can detect partial
+// planning failures. Without this, a SyncEnv error in dry-run
+// mode would print to stderr but updateEnvs would return nil and
+// the CI exit code would be 0.
+func TestUpdateEnvs_DryRun_PropagatesFailures(t *testing.T) {
+	saveHooks(t)
+	syncEnvFunc = func(cfg env.EnvConfig, _, _ string, _ *lock.EnvEntry) (*env.SyncResult, error) {
+		return nil, fmt.Errorf("simulated clone failure")
+	}
+
+	o, _, errBuf := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo"},
+		func(o *UpdateOptions) { o.DryRun = true })
+	err := o.updateEnvs(nil)
+	if err == nil {
+		t.Fatal("dry-run with sync failure should return aggregated error")
+	}
+	if !strings.Contains(err.Error(), "env(s) failed") {
+		t.Errorf("expected aggregated failure, got: %v", err)
+	}
+	if !strings.Contains(errBuf.String(), "simulated clone failure") {
+		t.Errorf("expected per-env error in stderr, got: %s", errBuf.String())
+	}
+}
+
+// TestNormalizeSafety covers the centralized safety-value coercion.
+// whitespace and casing
+// variants are normalized so users can write `safety: Auto` or
+// `safety: auto ` in b.yaml without the value silently falling back
+// to prompt.
+func TestNormalizeSafety_DefaultsToPrompt(t *testing.T) {
+	cases := map[string]string{
+		"":         state.SafetyPrompt,
+		"strict":   state.SafetyStrict,
+		"prompt":   state.SafetyPrompt,
+		"auto":     state.SafetyAuto,
+		"nonsense": state.SafetyPrompt, // unknown → safe default
+		// Casing and whitespace normalization (#128 round 2).
+		"Auto":       state.SafetyAuto,
+		"AUTO":       state.SafetyAuto,
+		" auto ":     state.SafetyAuto,
+		"\tStrict\n": state.SafetyStrict,
+		"Prompt":     state.SafetyPrompt,
+	}
+	for in, want := range cases {
+		if got := state.NormalizeSafety(in); got != want {
+			t.Errorf("NormalizeSafety(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

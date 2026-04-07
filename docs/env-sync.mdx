@@ -280,14 +280,20 @@ When upstream files change and you've also modified the local copy, the **strate
 
 ### `replace` (default)
 
-Overwrites local files with upstream content. In an interactive terminal, prompts per-file:
+Overwrites local files with upstream content. The behavior depends on the **safety** mode:
 
-```
-  system/config.yaml has local changes.
-    [r]eplace  [k]eep  [m]erge  [d]iff > _
-```
+- **`safety: auto`** (or `--yes`) on a TTY: still uses the legacy per-file interactive resolver, which prompts:
 
-In non-interactive mode (CI/CD), overwrites without prompting.
+  ```
+    system/config.yaml has local changes.
+      [r]eplace  [k]eep  [m]erge  [d]iff > _
+  ```
+
+  This lets you make per-file decisions during apply.
+
+- **`safety: strict` / `safety: prompt`** (default): uses the **plan-based gate** instead of the legacy per-file resolver. You see the full plan up-front, then approve or reject the whole batch — there are no per-file prompts during apply, because the plan you approved IS the apply contract. If you need per-file granularity, switch the env to `safety: auto`.
+
+- **CI / non-TTY**: overwrites without prompting under `auto`; refused under `strict` or `prompt` (the latter falls back to strict on non-TTY). See [Safety tiers](#safety-tiers) below.
 
 ### `client`
 
@@ -380,12 +386,88 @@ b env remove --delete-files github.com/org/infra
 b update --dry-run
 ```
 
+`--dry-run` prints a per-file plan for any env that has changes and never writes. Envs that are already up-to-date with the lock print a single `(up to date)` line instead of an empty plan table — that's the cheap path. In `--plan-json` mode, every env gets an entry in the array (even up-to-date ones, with `rows: []`) so consumers can distinguish "no envs configured" from "all envs up-to-date". Combine with `--plan-json` to emit a machine-readable plan for PR comment bots and CI summary jobs:
+
+```bash
+b update --plan-json
+```
+
+`--plan-json` writes a single JSON array of plan objects (one per env) so you can parse the entire run with one `jq .` invocation:
+
+```jsonc
+[
+  { "ref": "github.com/org/infra", "commit": "def4567", "rows": [ ... ] },
+  { "ref": "github.com/org/other", "commit": "abc1234", "rows": [ ... ] }
+]
+```
+
 ### Rollback
 
 ```bash
 b update --rollback
 b update --rollback github.com/org/infra
 ```
+
+---
+
+## Safety tiers
+
+Every `b update` produces a **plan** — a per-file table of additions, updates, keeps, overwrites, merges, and conflicts. There are two flows depending on the safety setting:
+
+- **Plan-first** (`strict`, `prompt`): `b` runs a dry-run sync to compute the plan, prints it, then either applies (after passing the safety gate) or refuses.
+- **Apply-first** (`auto`, `--yes`): `b` applies directly and renders the plan from the apply result. The plan still appears in the output but the writes have already happened by the time you see it.
+
+The `safety` setting controls which flow `b` uses and what it does with destructive changes:
+
+| Mode       | Interactive (TTY)              | Non-interactive (CI)              | `--yes` effect            |
+|------------|--------------------------------|-----------------------------------|---------------------------|
+| `strict`   | Refuses any destructive plan   | Refuses any destructive plan      | **No effect** — still refuses |
+| `prompt`*  | Shows plan, asks `[y/N]`       | Refuses destructive               | Acts like `auto`          |
+| `auto`     | Applies without prompting      | Applies without prompting         | (no-op)                   |
+
+\* `prompt` is the default. It is the safe option both interactively and in CI.
+
+`--yes` is the CI escape hatch for `prompt`. It does NOT override `strict`: if you want a permanent override use `safety: auto` in `b.yaml` or `--safety=auto` on the command line. A safety refusal causes `b update` to exit non-zero so CI pipelines actually notice.
+
+**A plan row is "destructive" when it would lose user-owned content** — currently that means `overwrite` (a non-merge strategy is about to clobber locally modified files) or `conflict` (a 3-way merge produced markers and the file needs manual resolution).
+
+Configure per-env in `b.yaml`:
+
+```yaml
+envs:
+  github.com/locked-down/repo:
+    safety: strict   # CI fails on any overwrite or conflict
+  github.com/trusted/upstream:
+    safety: auto     # apply silently, no prompts
+  github.com/normal/repo:
+    # safety omitted → defaults to "prompt"
+```
+
+Or override on the command line:
+
+```bash
+b update --safety=auto              # apply everything without prompting
+b update --safety=strict            # fail loudly on any destructive change
+b update -y                         # one-time --yes: skip the prompt for this run
+b update --plan-json                # emit JSON plan, never apply
+```
+
+### Plan output
+
+```
+  github.com/org/infra                     abc1234 → def4567
+  + add       hetzner/control-plane.yaml
+  ~ update    hetzner/load-balancer.yaml
+  = keep      hetzner/firewall.yaml        (local changes preserved)
+  ! overwrite hetzner/legacy.yaml
+  ⊕ merge     hetzner/network.yaml
+  ✗ conflict  hetzner/secrets.yaml
+  → 1 add, 1 update, 1 keep, 1 overwrite, 1 merge, 1 conflict
+```
+
+### Performance note
+
+When `safety` is `auto` (or `--yes` is set), `b` runs `SyncEnv` exactly **once**: it applies and renders the plan from the apply result. When `safety` is `strict` or `prompt`, `b` runs `SyncEnv` twice — once in dry-run to compute the plan for the gate, then once in real apply mode if approved. The second pass benefits from a hot git cache, but it does still re-read and re-merge files. If you need every cycle, use `safety: auto` for fully-automated runs.
 
 ---
 

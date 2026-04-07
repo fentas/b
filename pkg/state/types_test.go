@@ -107,6 +107,78 @@ func TestEnvConfigMarshal(t *testing.T) {
 	}
 }
 
+// TestEnvConfigMarshal_PromptOverrideWithIncludes verifies that an
+// explicit `safety: prompt` is emitted (not omitted as default) when
+// the entry uses `includes:`. Otherwise SaveConfig would drop the
+// override and the included profile's non-default safety would win
+// on the next load.
+func TestEnvConfigMarshal_PromptOverrideWithIncludes(t *testing.T) {
+	// Without includes: prompt is omitted as default.
+	noInc := &State{Envs: EnvList{{Key: "github.com/org/a", Safety: "prompt"}}}
+	data, err := yaml.Marshal(noInc)
+	if err != nil {
+		t.Fatalf("marshal noInc: %v", err)
+	}
+	if contains(string(data), "safety:") {
+		t.Errorf("safety: prompt should be omitted when no includes, got:\n%s", data)
+	}
+
+	// With includes: prompt MUST be emitted as an explicit override.
+	withInc := &State{Envs: EnvList{{
+		Key:      "github.com/org/b",
+		Safety:   "prompt",
+		Includes: []string{"core"},
+	}}}
+	data, err = yaml.Marshal(withInc)
+	if err != nil {
+		t.Fatalf("marshal withInc: %v", err)
+	}
+	if !contains(string(data), "safety: prompt") {
+		t.Errorf("safety: prompt should be emitted as override when includes are set, got:\n%s", data)
+	}
+}
+
+// TestEnvConfigMarshal_PreservesUnknownSafety verifies that
+// MarshalYAML doesn't silently drop a safety value it doesn't
+// recognize. Forward-compat: a future b version with a new safety
+// mode written to b.yaml must round-trip cleanly through an older
+// b that rewrites the file.
+func TestEnvConfigMarshal_PreservesUnknownSafety(t *testing.T) {
+	cases := []struct {
+		name   string
+		input  string
+		wantIn bool   // expect "safety:" line in output
+		want   string // expected normalized value (when wantIn is true)
+	}{
+		{"empty omitted", "", false, ""},
+		{"prompt omitted", "prompt", false, ""},
+		{"Prompt omitted (case)", "Prompt", false, ""},
+		{"auto preserved normalized", "Auto", true, "auto"},
+		{"strict preserved normalized", " STRICT ", true, "strict"},
+		{"unknown preserved verbatim (lowercased)", "FutureMode", true, "futuremode"},
+		{"unknown with whitespace trimmed", " QUARANTINE ", true, "quarantine"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &State{Envs: EnvList{{Key: "github.com/org/repo", Safety: c.input}}}
+			data, err := yaml.Marshal(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := string(data)
+			if c.wantIn {
+				if !contains(out, "safety: "+c.want) {
+					t.Errorf("missing 'safety: %s' in output, got:\n%s", c.want, out)
+				}
+			} else {
+				if contains(out, "safety:") {
+					t.Errorf("unexpected safety line in output, got:\n%s", out)
+				}
+			}
+		})
+	}
+}
+
 func TestEnvListGet(t *testing.T) {
 	list := EnvList{
 		{Key: "github.com/org/a"},
@@ -181,7 +253,7 @@ func TestLoadConfigFromPath_RelativeFilePaths(t *testing.T) {
 	}
 	content := `binaries:
   kubectl:
-    file: ../bin/kubectl
+    file: ./bin/kubectl
 `
 	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -197,7 +269,7 @@ func TestLoadConfigFromPath_RelativeFilePaths(t *testing.T) {
 		t.Fatal("expected kubectl binary")
 	}
 	// File path should be resolved relative to config dir
-	if kb.File == "../bin/kubectl" {
+	if kb.File == "./bin/kubectl" {
 		t.Error("expected file path to be resolved, got relative path")
 	}
 }
