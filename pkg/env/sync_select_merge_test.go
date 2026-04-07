@@ -272,7 +272,7 @@ envs:
 // out instead of silently dropping sibling fields. The splice operates
 // at top-level granularity, so a nested selector would replace the
 // whole `database` top-level node with the truncated `{host: ...}`
-// view..
+// view.
 func TestSyncEnv_NestedSelector_MergeErrors(t *testing.T) {
 	repo := setupMergeRepo(t)
 	project := t.TempDir()
@@ -299,13 +299,13 @@ func TestSyncEnv_NestedSelector_MergeErrors(t *testing.T) {
 	}
 }
 
-// TestSyncEnv_SelectMerge_NoLocalChanges_PreservesEnvs is the regression
-// test fora subtle regression: after a successful sync, the
-// consumer's local file matches the previously-recorded lock entry, so
-// the next sync sees `localChanged=false` and used to take the
-// "no local changes — safe to replace" branch which wrote the *filtered*
-// upstream content directly. That re-introduced the data loss the splice
-// path was supposed to fix.
+// TestSyncEnv_SelectMerge_NoLocalChanges_PreservesEnvs pins a subtle
+// regression: after a successful sync, the consumer's local file
+// matches the previously-recorded lock entry, so the next sync sees
+// `localChanged=false`. A naive implementation would then take the
+// "no local changes — safe to replace" branch and write the *filtered*
+// upstream content directly, re-introducing the #122 data loss the
+// splice path is supposed to fix.
 //
 // The fix is to splice in the no-local-changes branch too. This test
 // pins it: consumer has envs:, lock matches local file, sync runs with

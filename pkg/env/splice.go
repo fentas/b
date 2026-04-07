@@ -302,14 +302,11 @@ func computeLineOffsets(source []byte) []int {
 	return offsets
 }
 
-// lineStart returns the byte offset at which the 1-based line begins.
-// `srcLen` is the length of the source the offsets were computed from.
-// If line is <= 0 it returns 0; if line is past the last recorded line
-// it clamps to srcLen (true EOF), not the start of the last line.
-//
-// The srcLen parameter
-// out-of-range lines, which is the start of the LAST line, not EOF —
-// contradicting the doc comment.
+// lineStart returns the byte offset at which the given 1-based line
+// begins. `srcLen` must be the length of the source used to compute
+// `offsets`. If `line` is <= 0, it returns 0. If `line` is past the
+// last recorded line, it clamps to `srcLen` (true EOF), not the start
+// of the last line.
 func lineStart(offsets []int, line int, srcLen int) int {
 	if line <= 0 {
 		return 0
