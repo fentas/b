@@ -426,6 +426,12 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 							return nil, fmt.Errorf("updating permissions for %s: %w", destPath, chmodErr)
 						}
 					}
+					// Reflect reality in the plan: nothing
+					// changed on disk, so the row is
+					// unchanged, not replaced. Common when
+					// upstream changes only affect pinned
+					// subtrees.
+					status = "unchanged"
 				}
 			}
 		} else {
