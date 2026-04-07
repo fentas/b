@@ -185,9 +185,11 @@ func (o *UpdateOptions) Run() error {
 
 // runAll updates all binaries and envs from config.
 func (o *UpdateOptions) runAll() error {
-	// Update binaries
+	// Update binaries — but NOT in plan-json mode, where binary
+	// progress output would corrupt the JSON document on stdout.
+	// Per copilot review on PR #128 round 6.
 	binariesToUpdate := o.GetBinariesFromConfig()
-	if len(binariesToUpdate) > 0 {
+	if len(binariesToUpdate) > 0 && !o.PlanJSON {
 		if err := o.callUpdateBinaries(binariesToUpdate); err != nil {
 			return err
 		}
@@ -368,9 +370,9 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			// skipped env so consumers can distinguish "all envs are
 			// up to date" from "no envs configured" — both used to
 			// produce []. Per copilot review on PR #128 round 3.
-			// In dry-run/plan-text mode also emit the empty plan
-			// (header + "no changes" summary) so the docs claim
-			// "every b update produces a plan" is accurate.
+			// Plain dry-run / plan-text mode prints just the cheap
+			// "(up to date)" line; no plan table or summary is
+			// rendered for skipped envs in text mode.
 			if o.PlanJSON {
 				planJSONOut = append(planJSONOut, &env.Plan{
 					Ref:     ref,
@@ -463,7 +465,11 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		if err := env.RenderPlansJSON(o.IO.Out, planJSONOut); err != nil {
 			return err
 		}
-		return nil
+		// In plan-json mode we still need a non-zero exit when some
+		// envs were refused or failed, otherwise automation sees
+		// partial plan generation as success. Per copilot review on
+		// PR #128 round 6.
+		return aggregateEnvErrors(refusedEnvs, failedEnvs)
 	}
 	if o.DryRun {
 		return nil // don't write lock in dry-run mode
@@ -472,21 +478,24 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 	if err := lock.WriteLock(lockDir, lk, o.bVersion); err != nil {
 		return err
 	}
-	// Per copilot review on PR #128: any per-env safety refusal OR
-	// hard sync failure must produce a non-zero exit code so CI
-	// pipelines actually notice. The lock for successful envs has
-	// already been written above so partial progress isn't lost.
-	// Refusals are listed before failures so the safety story is
-	// clearly attributed when both happen.
+	return aggregateEnvErrors(refusedEnvs, failedEnvs)
+}
+
+// aggregateEnvErrors returns a single error summarizing safety refusals
+// and hard sync failures, or nil when neither happened. Both lists are
+// reported when both are non-empty so the user sees the full story in
+// one error message. Per copilot review on PR #128 (refusals: round 1,
+// failures: round 5, plan-json path: round 6).
+func aggregateEnvErrors(refused, failed []string) error {
 	switch {
-	case len(refusedEnvs) > 0 && len(failedEnvs) > 0:
+	case len(refused) > 0 && len(failed) > 0:
 		return fmt.Errorf("safety refused %d env(s): %s; %d env(s) failed: %s",
-			len(refusedEnvs), strings.Join(refusedEnvs, ", "),
-			len(failedEnvs), strings.Join(failedEnvs, ", "))
-	case len(refusedEnvs) > 0:
-		return fmt.Errorf("safety refused %d env(s): %s", len(refusedEnvs), strings.Join(refusedEnvs, ", "))
-	case len(failedEnvs) > 0:
-		return fmt.Errorf("%d env(s) failed: %s", len(failedEnvs), strings.Join(failedEnvs, ", "))
+			len(refused), strings.Join(refused, ", "),
+			len(failed), strings.Join(failed, ", "))
+	case len(refused) > 0:
+		return fmt.Errorf("safety refused %d env(s): %s", len(refused), strings.Join(refused, ", "))
+	case len(failed) > 0:
+		return fmt.Errorf("%d env(s) failed: %s", len(failed), strings.Join(failed, ", "))
 	}
 	return nil
 }

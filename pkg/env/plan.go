@@ -170,12 +170,14 @@ func planRowFromLockFile(f lock.LockFile, prevPaths map[string]bool) PlanRow {
 		note = strings.TrimSuffix(note, ")")
 		row.Note = note
 	case status == "replaced":
-		// "replaced" alone means the file was new or already in sync
-		// (identical on disk). Distinguish "new" from "existing
-		// changed" via the previous lock entry: if the source path
-		// wasn't in prev, it's an Add; otherwise it's an Update.
-		// Without this check, PlanAdd would be unreachable (per
-		// copilot review on PR #128).
+		// "replaced" alone means upstream content was written. Use
+		// the previous lock entry to distinguish a newly tracked
+		// file from an existing tracked file that was updated: if
+		// the source path wasn't in prev, it's an Add; otherwise
+		// it's an Update. Identical tracked files are reported as
+		// "unchanged", not "replaced" (so they hit the PlanKeep
+		// branch above, not this one). Without this check, PlanAdd
+		// would be unreachable. Per copilot review on PR #128.
 		if prevPaths != nil && !prevPaths[f.Path] {
 			row.Action = PlanAdd
 		} else {
