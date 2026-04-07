@@ -267,6 +267,46 @@ func TestSpliceSelectedScope_JSONErrors(t *testing.T) {
 	}
 }
 
+// TestSpliceYAMLText_PreservesCommentAttributedToNextKey verifies the
+// boundary attribution fix from PR #126 round 5: a comment block sitting
+// between an in-scope key and an out-of-scope key must be preserved when
+// the in-scope key is replaced. Before the fix, topLevelKeyRanges set
+// the in-scope key's endByte to the start of the next key's line, so
+// the comment block ended up inside the in-scope key's range and got
+// silently dropped during the splice.
+func TestSpliceYAMLText_PreservesCommentAttributedToNextKey(t *testing.T) {
+	local := []byte(`binaries:
+  a: {}
+
+# This comment belongs to envs:, not binaries:
+# It must survive a binaries-only splice.
+envs:
+  github.com/keep/me: {}
+`)
+	merged := []byte(`binaries:
+<<<<<<< local
+  a: {}
+=======
+  a: {}
+  b: {}
+>>>>>>> upstream
+`)
+	out, err := spliceSelectedScope(local, merged, []string{"binaries"}, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "This comment belongs to envs") {
+		t.Errorf("comment block above envs: was dropped during binaries splice, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "It must survive") {
+		t.Errorf("second comment line was dropped, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "github.com/keep/me") {
+		t.Errorf("envs scope itself was dropped, got:\n%s", outStr)
+	}
+}
+
 // TestSpliceYAMLText_AddsScopedKeyMissingInLocal verifies the text
 // splice's "additions" path: a scoped key present in `merged` but
 // absent from `local` must be appended to the output (not silently

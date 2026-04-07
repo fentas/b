@@ -231,6 +231,14 @@ type keyByteRange struct {
 // the byte range of each key's full "key: value" block in the source text.
 // Ranges are returned in source order. Uses yaml.v3 Node Line metadata
 // combined with a line→byte-offset table built from the raw source.
+//
+// Boundary attribution: blank lines and unindented `#` comment lines
+// immediately preceding the next top-level key are attributed to that
+// next key, not to the previous one. This matters for the text-splice
+// path: if a comment block sits between an in-scope key and an
+// out-of-scope key, that comment belongs (semantically) to the
+// out-of-scope key and must not be replaced when the in-scope key's
+// range is rewritten. Per copilot review on PR #126 round 5.
 func topLevelKeyRanges(source []byte, root *yaml.Node) []keyByteRange {
 	lineOffsets := computeLineOffsets(source)
 	total := len(root.Content)
@@ -240,10 +248,14 @@ func topLevelKeyRanges(source []byte, root *yaml.Node) []keyByteRange {
 		startByte := lineStart(lineOffsets, keyNode.Line, len(source))
 
 		// End of this entry = start of the next top-level key, or EOF.
+		// For non-final entries, walk backwards from the next key's
+		// line to skip blank/comment lines and attribute them to the
+		// next key instead.
 		var endByte int
 		if i+2 < total-1 {
 			nextKey := root.Content[i+2]
 			endByte = lineStart(lineOffsets, nextKey.Line, len(source))
+			endByte = trimTrailingBlankAndCommentLines(source, startByte, endByte)
 		} else {
 			endByte = len(source)
 		}
@@ -285,6 +297,71 @@ func lineStart(offsets []int, line int, srcLen int) int {
 		return srcLen
 	}
 	return offsets[line-1]
+}
+
+// trimTrailingBlankAndCommentLines walks backwards from `end` toward
+// `floor` and returns the new end such that any trailing blank or
+// unindented `#` comment lines (i.e. lines that "belong" to the
+// following block) are excluded from the previous key's range. The
+// floor is the start of the current key's range so we never trim
+// before that. Per copilot review on PR #126 round 5.
+func trimTrailingBlankAndCommentLines(source []byte, floor, end int) int {
+	if end <= floor {
+		return end
+	}
+	cur := end
+	for cur > floor {
+		// Find the start of the previous line.
+		lineEnd := cur - 1
+		// `lineEnd` should now be a `\n`. If `cur` is right after
+		// a key line (no trailing newline) handle that too.
+		if lineEnd >= 0 && source[lineEnd] != '\n' {
+			// Already at a non-newline byte; nothing to trim.
+			return cur
+		}
+		// Step back over the newline to find the previous line's end.
+		prevEnd := lineEnd
+		// Find prev line start.
+		prevStart := prevEnd
+		for prevStart > floor && source[prevStart-1] != '\n' {
+			prevStart--
+		}
+		// Inspect the previous line: source[prevStart:prevEnd]
+		line := source[prevStart:prevEnd]
+		if !isBlankOrUnindentedComment(line) {
+			return cur
+		}
+		// This blank/comment line belongs to the next key. Move
+		// `cur` back so it's excluded from the previous key's range.
+		cur = prevStart
+	}
+	return cur
+}
+
+// isBlankOrUnindentedComment reports whether a line (without its
+// trailing newline) is blank or an unindented `#`-comment. Indented
+// comments are NOT considered, because indented content is part of
+// the previous key's value.
+func isBlankOrUnindentedComment(line []byte) bool {
+	if len(line) == 0 {
+		return true
+	}
+	// All-whitespace line.
+	allWS := true
+	for _, b := range line {
+		if b != ' ' && b != '\t' && b != '\r' {
+			allWS = false
+			break
+		}
+	}
+	if allWS {
+		return true
+	}
+	// Unindented comment.
+	if line[0] == '#' {
+		return true
+	}
+	return false
 }
 
 // spliceYAMLText is the conflict-preserving fallback: parse only `local`
@@ -429,9 +506,13 @@ func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error)
 //
 // Limitations:
 //   - Doesn't handle quoted keys, multi-line keys, or keys containing
-//     special characters. These are rare in YAML files used as b config
-//     and the cost of misclassification is "merged content gets dropped
-//     into the first scoped range as a fallback" — not data loss.
+//     special characters. These are rare in YAML files used as b
+//     config, but misclassification can cause text-splice omissions:
+//     a scoped key whose name the scanner fails to detect is treated
+//     as absent from `merged` and gets removed from local (deletion
+//     path), and merged keys the scanner fails to detect are simply
+//     not emitted as additions. There is no fallback that relocates
+//     such content. Per copilot review on PR #126 round 5.
 //   - Doesn't handle YAML documents starting with `---` directives.
 func scanTopLevelKeyRanges(src []byte) map[string][]byte {
 	m, _ := scanTopLevelKeyRangesOrdered(src)
