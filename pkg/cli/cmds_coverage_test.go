@@ -75,7 +75,9 @@ func TestNewRootCmd_AllSubcommands(t *testing.T) {
 
 	// Execute help to cover the custom usage template
 	root.SetArgs([]string{"--help"})
-	_ = root.Execute()
+	if err := root.Execute(); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 }
 
 func TestNewCmdBinary_Nil(t *testing.T) {
@@ -96,7 +98,9 @@ func TestNewCmdBinary_WithOptions(t *testing.T) {
 	}
 	// Trigger AddFlags path via help
 	c.SetArgs([]string{"--help"})
-	_ = c.Execute()
+	if err := c.Execute(); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 }
 
 func TestInit_Run_CreatesFiles(t *testing.T) {
@@ -145,7 +149,9 @@ func TestNewInitCmd_Help(t *testing.T) {
 	shared := NewSharedOptions(mkIO(), nil)
 	c := NewInitCmd(shared)
 	c.SetArgs([]string{"--help"})
-	_ = c.Execute()
+	if err := c.Execute(); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 }
 
 func TestNewCacheCmd_Subcommands(t *testing.T) {
@@ -156,9 +162,13 @@ func TestNewCacheCmd_Subcommands(t *testing.T) {
 	}
 	// Exercise clean and path help
 	c.SetArgs([]string{"path"})
-	_ = c.Execute()
+	if err := c.Execute(); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 	c.SetArgs([]string{"clean", "--help"})
-	_ = c.Execute()
+	if err := c.Execute(); err != nil {
+		t.Errorf("Execute: %v", err)
+	}
 }
 
 func TestFirstLine(t *testing.T) {

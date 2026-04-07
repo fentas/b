@@ -70,17 +70,8 @@ func TestE2E_InitWorkflow(t *testing.T) {
 		t.Fatalf("Failed to build CLI: %v\nOutput: %s", err, output)
 	}
 
-	// Change to temp directory
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current directory: %v", err)
-	}
-	defer func() { _ = os.Chdir(originalDir) }()
-
-	err = os.Chdir(tempDir)
-	if err != nil {
-		t.Fatalf("Failed to change to temp directory: %v", err)
-	}
+	// Change to temp directory (auto-restored on test end)
+	t.Chdir(tempDir)
 
 	// Run init command (isolate from the host repo's git root via PATH_BIN)
 	cmd = exec.Command(binaryPath, "init")
@@ -168,16 +159,8 @@ binaries:
 		t.Fatalf("Failed to build CLI: %v\nOutput: %s", err, output)
 	}
 
-	// Change to subdirectory
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current directory: %v", err)
-	}
-	defer func() { _ = os.Chdir(originalDir) }()
-
-	if err = os.Chdir(projectDir); err != nil {
-		t.Fatalf("Failed to change to project subdirectory: %v", err)
-	}
+	// Change to subdirectory (auto-restored on test end)
+	t.Chdir(projectDir)
 
 	// Run list command to test config discovery
 	cmd = exec.Command(binaryPath, "list")
@@ -265,16 +248,7 @@ func TestE2E_ErrorHandling(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current directory: %v", err)
-	}
-	defer func() { _ = os.Chdir(originalDir) }()
-
-	err = os.Chdir(tempDir)
-	if err != nil {
-		t.Fatalf("Failed to change to temp directory: %v", err)
-	}
+	t.Chdir(tempDir)
 
 	cmd = exec.Command(binaryPath, "list")
 	output, _ = cmd.CombinedOutput()

@@ -25,6 +25,10 @@ on:
 jobs:
   test:
     name: Test
+    # Skip the run that the bot's coverage commit triggers — there's nothing
+    # new to test and the refresh-coverage job would just rewrite the same
+    # files.
+    if: github.actor != 'github-actions[bot]'
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest] #, windows-latest
@@ -58,7 +62,7 @@ jobs:
   # NOT block PRs on a diff of these files — the badge tracks main.
   refresh-coverage:
     name: Refresh coverage badge (main)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.actor != 'github-actions[bot]'
     needs: test
     runs-on: ubuntu-latest
     permissions:
