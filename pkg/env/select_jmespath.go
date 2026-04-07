@@ -108,6 +108,15 @@ func splitSelectorsByComplexity(selectors []string) (simple, complex []string) {
 //
 //   - Nil results are ignored (JMESPath spec: missing paths return null).
 //
+// Limitation (per copilot review on PR #127): a quoted-identifier
+// expression like `'"weird[name]"'` returns the *value* of that key,
+// not a {key: value} pair, so the original key name is lost in the
+// merged output. Object values get merged at the top level; scalar/
+// array values get wrapped under "result". Users who need to preserve
+// the original key name must wrap it explicitly in a multi-select hash
+// like `'{"weird[name]": "weird[name]"}'`. The docs callout in
+// docs/env-sync.mdx explains this trade-off to users.
+//
 // The merged map is then passed to marshal() to produce the final output
 // bytes.
 func runJMESPathSelectors(

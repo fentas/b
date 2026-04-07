@@ -105,11 +105,22 @@ Selectors use **hybrid syntax**:
 > If your YAML file has a top-level key that contains characters JMESPath
 > uses as grammar (`[`, `]`, `(`, `)`, `{`, `}`, `|`, `*`, `&`, `,`, `'`,
 > `"`, `<`, `>`, `=`, `!`, `?`, backtick, backslash, whitespace), the
-> simple dot-path classifier will route it to JMESPath where you'll need
-> to use a quoted identifier in the JMESPath expression:
-> `'"my key with spaces"'` or `'"weird[name]"'`. Plain keys with `/`,
-> `+`, `@`, `#`, etc. work without quoting because the classifier passes
-> them through to the Node API path.
+> simple dot-path classifier will route it to JMESPath. Use a quoted
+> identifier to access the key, for example `'"my key with spaces"'` or
+> `'"weird[name]"'`.
+>
+> **Important:** selecting the key directly this way does **not** preserve
+> the original top-level key name in the merged output. Object results
+> get merged at the top level (so the key name is consumed by the merge),
+> and scalar/array results get wrapped under `result`. If you need to
+> keep the original key name in the output, wrap it explicitly in the
+> JMESPath expression — for example
+> `'{"weird[name]": "weird[name]"}'` for a scalar/array, or just rename
+> it to a friendlier identifier with
+> `'{normal_name: "weird[name]"}'`.
+>
+> Plain keys with `/`, `+`, `@`, `#`, etc. work without quoting because
+> the classifier passes them through to the Node API path.
 - **Mixed lists** are supported: simple and complex selectors on the same file are evaluated independently and merged at the top level via the Node API. Simple-side comments and layout survive the merge; complex-side keys carry no comments. JMESPath wins on key collisions.
 
 > **⚠ `items()` returns tuples, not objects in the v1.1.1 Go fork**
