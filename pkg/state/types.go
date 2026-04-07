@@ -54,8 +54,7 @@ const (
 //
 // User input is normalized: surrounding whitespace is trimmed and the
 // value is lowercased before comparison, so `safety: Auto` and
-// `safety: auto ` in b.yaml both resolve to SafetyAuto. Per copilot
-// review on PR #128 round 2.
+// `safety: auto ` in b.yaml both resolve to SafetyAuto.
 func NormalizeSafety(s string) string {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case SafetyStrict, SafetyPrompt, SafetyAuto:
@@ -114,8 +113,7 @@ func (list *EnvList) MarshalYAML() (interface{}, error) {
 		if e.Strategy != "" && e.Strategy != "replace" {
 			cfg["strategy"] = e.Strategy
 		}
-		// Safety serialization rules (per copilot reviews on PR #128
-		// rounds 3 and 7):
+		// Safety serialization rules:
 		//
 		//   - Empty value: omit so the user's b.yaml stays terse.
 		//   - Canonical default (lowercased trimmed value == "prompt"):
@@ -144,7 +142,7 @@ func (list *EnvList) MarshalYAML() (interface{}, error) {
 			// override of whatever the included profile sets, so we
 			// MUST emit it — otherwise SaveConfig drops it and the
 			// included profile's non-default safety wins on next
-			// load. Per copilot review on PR #128 round 8.
+			// load.
 			switch rawSafety {
 			case SafetyPrompt:
 				if len(e.Includes) > 0 {
@@ -238,7 +236,7 @@ type envEntryRaw struct {
 
 // parseFilesMap converts the raw files map into typed GlobConfig entries.
 // Values can be: null → GlobConfig{}, string → GlobConfig{Dest: s},
-// map → GlobConfig{Dest: ..., Ignore: [...]}
+// map → GlobConfig{Dest: .., Ignore: [..]}
 func parseFilesMap(raw map[string]interface{}) map[string]envmatch.GlobConfig {
 	if raw == nil {
 		return nil

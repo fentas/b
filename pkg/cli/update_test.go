@@ -618,7 +618,7 @@ func TestUpdateEnvs_SyncError(t *testing.T) {
 		},
 	}
 
-	// Per copilot review on PR #128 round 5: per-env sync failures
+	// per-env sync failures
 	// MUST produce a non-zero exit code so CI pipelines actually
 	// notice. The error output is still printed inline; the return
 	// value now also reflects the failure as an aggregated error.
@@ -1765,7 +1765,7 @@ func makeSyncFunc(result *env.SyncResult) (func(env.EnvConfig, string, string, *
 		*calls = append(*calls, cfg.DryRun)
 		// Return a deep copy so tests that mutate Files between
 		// invocations don't accidentally share the underlying
-		// backing array. Per copilot review on PR #128 round 2.
+		// backing array.
 		clone := *result
 		if result.Files != nil {
 			clone.Files = append([]lock.LockFile(nil), result.Files...)
@@ -1816,7 +1816,7 @@ func TestUpdateEnvs_SafetyStrict_RefusesDestructive(t *testing.T) {
 
 	o, _, errBuf := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo", Safety: state.SafetyStrict})
 	err := o.updateEnvs(nil)
-	// Per copilot review on PR #128: strict refusal must produce a
+	// strict refusal must produce a
 	// non-zero exit code, so updateEnvs must return an error.
 	if err == nil {
 		t.Fatal("updateEnvs should return an error when strict refuses")
@@ -1884,7 +1884,7 @@ func TestUpdateEnvs_PromptDefault_NonTTY_BlocksDestructive(t *testing.T) {
 
 	o, _, errBuf := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo"}) // no safety set → default prompt
 	err := o.updateEnvs(nil)
-	// Per copilot review on PR #128: prompt-on-CI refusal must also
+	// prompt-on-CI refusal must also
 	// produce a non-zero exit code so CI pipelines actually notice.
 	if err == nil {
 		t.Fatal("updateEnvs should return an error when non-TTY prompt refuses")
@@ -1930,7 +1930,7 @@ func TestUpdateEnvs_Yes_OverridesPrompt(t *testing.T) {
 // with `Skipped: true` (already up-to-date) still produces a plan
 // object in the JSON array — empty rows + ref/commit metadata — so
 // consumers can distinguish "no envs configured" from "all envs
-// up-to-date". Per copilot review on PR #128 round 3.
+// up-to-date".
 func TestUpdateEnvs_PlanJSON_IncludesSkippedEnvs(t *testing.T) {
 	saveHooks(t)
 	syncFn, _ := makeSyncFunc(&env.SyncResult{
@@ -2012,17 +2012,17 @@ func TestUpdateEnvs_DryRun_NewBehavior(t *testing.T) {
 		t.Errorf("dry-run should call SyncEnv once, got %d", len(*calls))
 	}
 	// New summary format omits zero counts, so a single-add plan
-	// renders as "→ 1 add" rather than "→ 0 add, ...".
+	// renders as "→ 1 add" rather than "→ 0 add, ..".
 	if !strings.Contains(out.String(), "→") || !strings.Contains(out.String(), "add") {
 		t.Errorf("dry-run plan summary missing, got:\n%s", out.String())
 	}
 }
 
 // TestUpdateEnvs_DryRun_PropagatesFailures verifies that --dry-run
-// surfaces aggregated failure errors. Before the round-8 fix, a
-// dry-run with a SyncEnv error would print to stderr but return
-// nil — CI couldn't tell that planning had partially failed. Per
-// copilot review on PR #128 round 8.
+// surfaces aggregated failure errors so CI can detect partial
+// planning failures. Without this, a SyncEnv error in dry-run
+// mode would print to stderr but updateEnvs would return nil and
+// the CI exit code would be 0.
 func TestUpdateEnvs_DryRun_PropagatesFailures(t *testing.T) {
 	saveHooks(t)
 	syncEnvFunc = func(cfg env.EnvConfig, _, _ string, _ *lock.EnvEntry) (*env.SyncResult, error) {
@@ -2044,7 +2044,7 @@ func TestUpdateEnvs_DryRun_PropagatesFailures(t *testing.T) {
 }
 
 // TestNormalizeSafety covers the centralized safety-value coercion.
-// Per copilot review on PR #128 round 2: whitespace and casing
+// whitespace and casing
 // variants are normalized so users can write `safety: Auto` or
 // `safety: auto ` in b.yaml without the value silently falling back
 // to prompt.

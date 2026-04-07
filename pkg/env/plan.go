@@ -58,8 +58,7 @@ type Plan struct {
 // MarshalJSON ensures Plan.Rows is encoded as `[]` rather than `null`
 // when the slice is nil. The plan-json contract advertised in
 // docs/env-sync.mdx promises `rows: []` for up-to-date envs, and
-// consumers that index into the array would break on `null`. Per
-// copilot review on PR #128 round 4.
+// consumers that index into the array would break on `null`.
 func (p Plan) MarshalJSON() ([]byte, error) {
 	type planAlias Plan
 	out := planAlias(p)
@@ -115,8 +114,7 @@ func PlanFromResult(result *SyncResult, prev *lock.EnvEntry) *Plan {
 	// lock entry, so we can identify NEW files (PlanAdd) vs UPDATED
 	// files (PlanUpdate). Both come back from SyncEnv as Status:
 	// "replaced" today, so without this comparison everything would
-	// render as "update" and the "add" action would be unreachable —
-	// flagged by copilot review on PR #128.
+	// render as "update" and the "add" action would be unreachable.
 	prevPaths := make(map[string]bool)
 	if prev != nil {
 		for _, f := range prev.Files {
@@ -163,8 +161,8 @@ func planRowFromLockFile(f lock.LockFile, prevPaths map[string]bool) PlanRow {
 		row.Action = PlanOverwrite
 		// Extract the parenthetical reason for the user without the
 		// surrounding parentheses; the renderer wraps notes in parens
-		// itself, so leaving them in produces "((merge failed: ...))".
-		// Per copilot review on PR #128.
+		// itself, so leaving them in produces "((merge failed: ..))".
+		//.
 		note := strings.TrimPrefix(status, "replaced ")
 		note = strings.TrimPrefix(note, "(")
 		note = strings.TrimSuffix(note, ")")
@@ -177,7 +175,7 @@ func planRowFromLockFile(f lock.LockFile, prevPaths map[string]bool) PlanRow {
 		// it's an Update. Identical tracked files are reported as
 		// "unchanged", not "replaced" (so they hit the PlanKeep
 		// branch above, not this one). Without this check, PlanAdd
-		// would be unreachable. Per copilot review on PR #128.
+		// would be unreachable.
 		if prevPaths != nil && !prevPaths[f.Path] {
 			row.Action = PlanAdd
 		} else {
@@ -220,7 +218,7 @@ func RenderPlanText(w io.Writer, p *Plan) {
 	}
 	// Summary line: only emit non-zero counts so the common case
 	// reads "→ 3 update" instead of "→ 0 add, 3 update, 0 keep, 0
-	// overwrite, 0 merge, 0 conflict". Per reviewer note on PR #128.
+	// overwrite, 0 merge, 0 conflict".
 	counts := p.CountByAction()
 	order := []PlanAction{PlanAdd, PlanUpdate, PlanKeep, PlanOverwrite, PlanMerge, PlanConflict}
 	var parts []string
@@ -246,8 +244,7 @@ func RenderPlanJSON(w io.Writer, p *Plan) error {
 
 // RenderPlansJSON writes a slice of plans as a single JSON array. This
 // is the format the CLI emits for `--plan-json` so consumers can parse
-// the entire run with one `jq .` invocation. Per copilot review on
-// PR #128: emitting one JSON document per env produced concatenated
+// the entire run with one `jq .` invocation. Per emitting one JSON document per env produced concatenated
 // docs that weren't valid JSON for standard parsers.
 func RenderPlansJSON(w io.Writer, plans []*Plan) error {
 	if plans == nil {

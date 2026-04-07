@@ -111,7 +111,7 @@ func TestEnvConfigMarshal(t *testing.T) {
 // explicit `safety: prompt` is emitted (not omitted as default) when
 // the entry uses `includes:`. Otherwise SaveConfig would drop the
 // override and the included profile's non-default safety would win
-// on the next load. Per copilot review on PR #128 round 8.
+// on the next load.
 func TestEnvConfigMarshal_PromptOverrideWithIncludes(t *testing.T) {
 	// Without includes: prompt is omitted as default.
 	noInc := &State{Envs: EnvList{{Key: "github.com/org/a", Safety: "prompt"}}}
@@ -142,7 +142,7 @@ func TestEnvConfigMarshal_PromptOverrideWithIncludes(t *testing.T) {
 // MarshalYAML doesn't silently drop a safety value it doesn't
 // recognize. Forward-compat: a future b version with a new safety
 // mode written to b.yaml must round-trip cleanly through an older
-// b that rewrites the file. Per copilot review on PR #128 round 7.
+// b that rewrites the file.
 func TestEnvConfigMarshal_PreservesUnknownSafety(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -253,7 +253,7 @@ func TestLoadConfigFromPath_RelativeFilePaths(t *testing.T) {
 	}
 	content := `binaries:
   kubectl:
-    file: ../bin/kubectl
+    file: ./bin/kubectl
 `
 	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -269,7 +269,7 @@ func TestLoadConfigFromPath_RelativeFilePaths(t *testing.T) {
 		t.Fatal("expected kubectl binary")
 	}
 	// File path should be resolved relative to config dir
-	if kb.File == "../bin/kubectl" {
+	if kb.File == "./bin/kubectl" {
 		t.Error("expected file path to be resolved, got relative path")
 	}
 }

@@ -68,7 +68,7 @@ func TestPlanFromResult_StatusMapping(t *testing.T) {
 
 // TestPlanFromResult_NewFileBecomesPlanAdd verifies the Add detection:
 // when a file was NOT in the previous lock entry, "replaced" should map
-// to PlanAdd (not PlanUpdate). Per copilot review on PR #128.
+// to PlanAdd (not PlanUpdate).
 func TestPlanFromResult_NewFileBecomesPlanAdd(t *testing.T) {
 	result := &SyncResult{
 		Files: []lock.LockFile{
@@ -94,7 +94,7 @@ func TestPlanFromResult_NewFileBecomesPlanAdd(t *testing.T) {
 
 // TestPlanFromResult_MergeFailedNoteHasNoDoubleParens verifies the
 // note extraction strips outer parens so the renderer doesn't double-
-// wrap. Per copilot review on PR #128.
+// wrap.
 func TestPlanFromResult_MergeFailedNoteHasNoDoubleParens(t *testing.T) {
 	result := &SyncResult{
 		Files: []lock.LockFile{{
@@ -235,8 +235,7 @@ func TestPlanFromResult_DeterministicOrdering(t *testing.T) {
 // Plan with nil Rows encodes as `"rows":[]` rather than
 // `"rows":null`. The plan-json contract advertised in
 // docs/env-sync.mdx promises `[]` for up-to-date envs, and
-// consumers indexing into the array would break on `null`. Per
-// copilot review on PR #128 round 4.
+// consumers indexing into the array would break on `null`.
 func TestPlan_MarshalJSON_NilRowsEncodesAsEmptyArray(t *testing.T) {
 	p := Plan{Ref: "github.com/org/repo", Commit: "abc"}
 	out, err := json.Marshal(p)

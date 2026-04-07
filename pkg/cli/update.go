@@ -162,7 +162,7 @@ func (o *UpdateOptions) Validate() error {
 	// `--safety=autp`) must error rather than silently fall back to
 	// prompt. Validation is case-insensitive and trims whitespace,
 	// matching the NormalizeSafety contract used by config-loaded
-	// values. Per copilot review on PR #128 (round 2).
+	// values.
 	if o.Safety != "" {
 		switch strings.ToLower(strings.TrimSpace(o.Safety)) {
 		case state.SafetyAuto, state.SafetyPrompt, state.SafetyStrict:
@@ -187,7 +187,7 @@ func (o *UpdateOptions) Run() error {
 func (o *UpdateOptions) runAll() error {
 	// Update binaries — but NOT in plan-json mode, where binary
 	// progress output would corrupt the JSON document on stdout.
-	// Per copilot review on PR #128 round 6.
+	//.
 	binariesToUpdate := o.GetBinariesFromConfig()
 	if len(binariesToUpdate) > 0 && !o.PlanJSON {
 		if err := o.callUpdateBinaries(binariesToUpdate); err != nil {
@@ -205,7 +205,7 @@ func (o *UpdateOptions) runAll() error {
 	if len(binariesToUpdate) == 0 && (o.Config == nil || len(o.Config.Envs) == 0) {
 		// In plan-json mode the human-readable line would corrupt
 		// the JSON output. Emit an empty array instead so consumers
-		// always get valid JSON. Per copilot review on PR #128 round 2.
+		// always get valid JSON.
 		if o.PlanJSON {
 			return env.RenderPlansJSON(o.IO.Out, nil)
 		}
@@ -221,8 +221,7 @@ func (o *UpdateOptions) runSpecified() error {
 		// Same as runAll: in plan-json mode binary progress would
 		// corrupt stdout. Skip binaries entirely; if the user
 		// explicitly listed binaries, warn on stderr so they know
-		// the binaries weren't touched. Per copilot review on
-		// PR #128 round 7.
+		// the binary args were ignored.
 		if o.PlanJSON {
 			fmt.Fprintf(o.IO.ErrOut,
 				"  warning: --plan-json suppresses binary updates; %d binary arg(s) ignored\n",
@@ -266,7 +265,7 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 	}
 
 	// Tracks any per-env safety gate refusals so we can return a
-	// non-zero exit at the end. Per copilot review on PR #128: silent
+	// non-zero exit at the end.: silent
 	// refusal contradicts the documented "CI pipelines will fail"
 	// promise. Per-env apply work continues for non-refused envs so a
 	// single bad apple doesn't block the rest of the run.
@@ -275,10 +274,10 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 	// Tracks per-env hard sync failures (network errors, missing
 	// previous commits for rollback, real apply errors, etc.) for the
 	// same reason: any failure must turn into a non-zero exit so CI
-	// notices. Per copilot review on PR #128 round 5.
+	// notices.
 	var failedEnvs []string
 
-	// Collected plans for --plan-json. Per copilot review on PR #128:
+	// Collected plans for --plan-json.:
 	// emitting one JSON document per env produced concatenated docs
 	// that aren't valid JSON for typical parsers. We now collect plans
 	// in this slice and emit a single JSON array at the end.
@@ -378,7 +377,7 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			// Plan-json mode: emit an explicit empty plan for the
 			// skipped env so consumers can distinguish "all envs are
 			// up to date" from "no envs configured" — both used to
-			// produce []. Per copilot review on PR #128 round 3.
+			// produce [].
 			// Plain dry-run / plan-text mode prints just the cheap
 			// "(up to date)" line; no plan table or summary is
 			// rendered for skipped envs in text mode.
@@ -453,8 +452,7 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		// resolver, so its destructiveness verdict (and the strict
 		// gate's decision) was based on "unconditional overwrite"
 		// while the apply pass would actually call the resolver
-		// and might pick keep/merge/diff per file. Per copilot
-		// review on PR #128 round 9.
+		// and might pick keep/merge/diff per file.
 		//
 		// Auto / --yes mode is the only path where the legacy
 		// resolver is still attached (handled at the top of the
@@ -485,21 +483,19 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 	if o.PlanJSON {
 		// Emit the collected plans as a single JSON array so PR
 		// comment bots / CI summary jobs can parse with a single
-		// invocation. Per copilot review on PR #128.
+		// invocation.
 		if err := env.RenderPlansJSON(o.IO.Out, planJSONOut); err != nil {
 			return err
 		}
 		// In plan-json mode we still need a non-zero exit when some
 		// envs were refused or failed, otherwise automation sees
-		// partial plan generation as success. Per copilot review on
-		// PR #128 round 6.
+		// partial plan generation as success.
 		return aggregateEnvErrors(refusedEnvs, failedEnvs)
 	}
 	if o.DryRun {
 		// Don't write the lock in dry-run mode, but still surface
 		// any per-env refusals or failures so CI and users can
-		// detect that planning was only partially successful. Per
-		// copilot review on PR #128 round 8.
+		// detect that planning was only partially successful.
 		return aggregateEnvErrors(refusedEnvs, failedEnvs)
 	}
 
@@ -512,7 +508,7 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 // aggregateEnvErrors returns a single error summarizing safety refusals
 // and hard sync failures, or nil when neither happened. Both lists are
 // reported when both are non-empty so the user sees the full story in
-// one error message. Per copilot review on PR #128 (refusals: round 1,
+// one error message. (refusals: round 1,
 // failures: round 5, plan-json path: round 6).
 func aggregateEnvErrors(refused, failed []string) error {
 	switch {
