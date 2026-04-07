@@ -1,8 +1,15 @@
 package cli
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/fentas/goodies/streams"
+
+	"github.com/fentas/b/pkg/lock"
 )
 
 // TestResolveConflictMarkers_Diff3KeepOurs handles the diff3-format
@@ -107,6 +114,105 @@ func TestResolveConflictMarkers_Unterminated(t *testing.T) {
 	_, _, err := resolveConflictMarkers(in, true)
 	if err == nil {
 		t.Error("expected error for unterminated region")
+	}
+}
+
+// TestEnvResolveRun_RewritesFileAndUpdatesLock is the end-to-end
+// test the round-2 reviewer asked for. It writes a fake lockfile
+// pointing at a temp project file containing diff3 conflict
+// markers, runs `env resolve --theirs`, and checks that:
+//   - the file on disk no longer contains the markers
+//   - the lock entry's SHA was updated to match the new on-disk hash
+func TestEnvResolveRun_RewritesFileAndUpdatesLock(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("PATH_BASE", tmp)
+	conflicted := []byte("a\n<<<<<<< local\nour\n=======\nther\n>>>>>>> upstream\nz\n")
+	destRel := "configs/a.yaml"
+	destAbs := filepath.Join(tmp, destRel)
+	if err := os.MkdirAll(filepath.Dir(destAbs), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(destAbs, conflicted, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	lk := &lock.Lock{
+		Version: 1,
+		Envs: []lock.EnvEntry{{
+			Ref: "github.com/org/infra",
+			Files: []lock.LockFile{
+				{Path: "configs/a.yaml", Dest: destRel, SHA256: "stale-sha"},
+			},
+		}},
+	}
+	if err := lock.WriteLock(tmp, lk, "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	o := &EnvResolveOptions{
+		SharedOptions: &SharedOptions{
+			IO:               &streams.IO{Out: &out, ErrOut: &bytes.Buffer{}},
+			loadedConfigPath: filepath.Join(tmp, "b.yaml"),
+		},
+		Theirs: true,
+	}
+	if err := o.Run(nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	got, err := os.ReadFile(destAbs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasConflictMarkers(got) {
+		t.Errorf("conflict markers not stripped:\n%s", got)
+	}
+	if !strings.Contains(string(got), "ther") {
+		t.Errorf("upstream side missing:\n%s", got)
+	}
+
+	lk2, err := lock.ReadLock(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lk2.Envs[0].Files[0].SHA256 == "stale-sha" {
+		t.Errorf("lock SHA was not updated")
+	}
+}
+
+// TestEnvResolveRun_PathTraversalRejected verifies that a malicious
+// lock entry pointing outside the project root is rejected before
+// any file I/O happens.
+func TestEnvResolveRun_PathTraversalRejected(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("PATH_BASE", tmp)
+	lk := &lock.Lock{
+		Version: 1,
+		Envs: []lock.EnvEntry{{
+			Ref: "github.com/org/infra",
+			Files: []lock.LockFile{
+				{Path: "evil", Dest: "../../etc/passwd", SHA256: "x"},
+			},
+		}},
+	}
+	if err := lock.WriteLock(tmp, lk, "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	o := &EnvResolveOptions{
+		SharedOptions: &SharedOptions{
+			IO:               &streams.IO{Out: &out, ErrOut: &bytes.Buffer{}},
+			loadedConfigPath: filepath.Join(tmp, "b.yaml"),
+		},
+	}
+	err := o.Run(nil)
+	if err == nil {
+		t.Fatal("expected path-traversal error")
+	}
+	if !strings.Contains(err.Error(), "path traversal") {
+		t.Errorf("error should mention path traversal, got: %v", err)
 	}
 }
 

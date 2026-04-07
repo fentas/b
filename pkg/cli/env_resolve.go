@@ -32,16 +32,14 @@ import (
 //	>>>>>>> upstream
 //
 // `--ours` keeps the local block, `--theirs` keeps the upstream block.
-// `--list` (default when no resolution flag is given) just enumerates
-// the affected files so the user can decide. Phase 4 of #125 also
-// covers in-place YAML comment markers; that conversion is a separate
-// PR — this command speaks the marker format that's actually written
-// today.
+// With neither flag set, the command just enumerates the affected
+// files so the user can decide. Phase 4 of #125 also covers in-place
+// YAML comment markers; that conversion is a separate PR — this
+// command speaks the marker format that's actually written today.
 type EnvResolveOptions struct {
 	*SharedOptions
 	Ours   bool
 	Theirs bool
-	List   bool
 }
 
 // NewEnvResolveCmd creates the env resolve subcommand.
@@ -73,7 +71,6 @@ scope to those envs; with no args all envs in the lock are checked.`,
 	}
 	cmd.Flags().BoolVar(&o.Ours, "ours", false, "rewrite each conflict by keeping the local side")
 	cmd.Flags().BoolVar(&o.Theirs, "theirs", false, "rewrite each conflict by keeping the upstream side")
-	cmd.Flags().BoolVar(&o.List, "list", false, "list conflicted files (default when no rewrite flag is set)")
 	return cmd
 }
 
