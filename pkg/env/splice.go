@@ -101,6 +101,14 @@ func topLevelKeysFromSelectors(selectors []string) map[string]bool {
 	return keys
 }
 
+// usesCRLF reports whether the file appears to use Windows-style CRLF
+// line endings. We check for `\r\n` rather than just `\n` so a stray
+// `\n` doesn't fool us. The byte-level splice uses this to keep
+// emitted regions consistent with the local file's line endings.
+func usesCRLF(b []byte) bool {
+	return bytes.Contains(b, []byte("\r\n"))
+}
+
 // containsConflictMarkers checks if a byte slice contains git merge-file
 // conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`). We detect the full
 // set; a partial match could be legitimate content (e.g. a markdown
@@ -117,7 +125,9 @@ func containsConflictMarkers(b []byte) bool {
 //  1. Byte-level splice (best fidelity): when `merged` is valid YAML
 //     AND the local file parses cleanly into a top-level mapping,
 //     copy out-of-scope byte ranges from `local` verbatim and re-emit
-//     each in-scope top-level `key: value` pair via yaml.Marshal.
+//     each in-scope top-level `key: value` pair via the
+//     marshalSingleTopLevelKey helper (which builds a one-key
+//     synthetic document and runs it through yaml.v3's encoder).
 //     Bytes outside the scoped ranges are preserved exactly, but
 //     formatting WITHIN those ranges can change because yaml.v3
 //     re-encodes the whole entry — including key quoting/style and
@@ -229,6 +239,29 @@ func spliceYAMLByteLevel(local, merged []byte, scope map[string]bool) ([]byte, e
 	if len(ranges) == 0 {
 		return nil, fmt.Errorf("byte splice: no top-level key ranges in local")
 	}
+	// Validate that the byte ranges are sane before we start
+	// slicing. yaml.v3 Line/Column metadata is occasionally missing
+	// or stale (flow-style mappings, multiple keys on the same
+	// line, single-line documents). Without this check a slice like
+	// local[cursor:r.endByte] can panic at runtime instead of
+	// returning an error and letting spliceYAML fall back to the
+	// structural / text path.
+	prevEnd := 0
+	for i, r := range ranges {
+		if r.startByte < 0 || r.endByte < 0 ||
+			r.startByte > len(local) || r.endByte > len(local) ||
+			r.startByte > r.endByte ||
+			r.startByte < prevEnd {
+			return nil, fmt.Errorf("byte splice: invalid range for key %q (start=%d end=%d prevEnd=%d len=%d)",
+				r.key, r.startByte, r.endByte, prevEnd, len(local))
+		}
+		// At least one of the ranges must make forward progress, or
+		// the splice loop would emit nothing useful.
+		if i == 0 && r.endByte == 0 {
+			return nil, fmt.Errorf("byte splice: zero-length first range for key %q", r.key)
+		}
+		prevEnd = r.endByte
+	}
 
 	// Walk local byte-by-byte. For each top-level key:
 	//   - in-scope, in merged   → emit serialized merged value
@@ -276,6 +309,13 @@ func spliceYAMLByteLevel(local, merged []byte, scope map[string]bool) ([]byte, e
 		if serErr != nil {
 			return nil, fmt.Errorf("byte splice: marshal %q: %w", r.key, serErr)
 		}
+		// yaml.v3 always emits LF line endings. If local uses CRLF
+		// we'd otherwise produce a mixed-ending file (CRLF in the
+		// preserved bytes, LF in the spliced regions), which is
+		// noisy in diffs and trips Windows-aware tooling.
+		if usesCRLF(local) {
+			serialized = bytes.ReplaceAll(serialized, []byte("\n"), []byte("\r\n"))
+		}
 		out.Write(serialized)
 		consumed[r.key] = true
 		cursor = r.endByte
@@ -297,14 +337,22 @@ func spliceYAMLByteLevel(local, merged []byte, scope map[string]bool) ([]byte, e
 		}
 	}
 	if len(additions) > 0 {
+		crlf := usesCRLF(local)
 		buf := out.Bytes()
 		if len(buf) > 0 && buf[len(buf)-1] != '\n' {
-			out.WriteByte('\n')
+			if crlf {
+				out.WriteString("\r\n")
+			} else {
+				out.WriteByte('\n')
+			}
 		}
 		for _, k := range additions {
 			serialized, serErr := marshalSingleTopLevelKey(k, mergedByKey[k])
 			if serErr != nil {
 				return nil, fmt.Errorf("byte splice: marshal addition %q: %w", k, serErr)
+			}
+			if crlf {
+				serialized = bytes.ReplaceAll(serialized, []byte("\n"), []byte("\r\n"))
 			}
 			out.Write(serialized)
 		}
