@@ -120,9 +120,11 @@ func filterJSONHybrid(content []byte, selectors []string) ([]byte, error) {
 //
 // This function operates on yaml.v3 Node trees so that comments and
 // layout attached to a's keys (which came from the comment-preserving
-// Node API path in filterYAML) survive the merge. The previous
-// implementation round-tripped through map[string]interface{} and
-// silently dropped all that information — see copilot review on PR #127.
+// Node API path in filterYAML) survive the merge. A simpler
+// implementation that round-trips both inputs through
+// map[string]interface{} and re-marshals would silently drop comment,
+// style, and layout metadata, contradicting the documented contract
+// that simple-side selectors preserve comments in mixed-list mode.
 func mergeYAMLTopLevel(a, b []byte) ([]byte, error) {
 	aDoc, aRoot, err := parseYAMLMappingDoc(a, "simple")
 	if err != nil {

@@ -58,10 +58,18 @@ func isSimpleDotPath(sel string) bool {
 	if s == "" {
 		return false
 	}
+	// A leading `@` is the JMESPath current-node operator. `@` or
+	// `@.foo` would otherwise pass the character blocklist below
+	// (since `@` is harmless mid-key) but those expressions need
+	// to evaluate against the JMESPath engine, not the legacy
+	// dot-path validator. Reject the leading case explicitly.
+	if s[0] == '@' {
+		return false
+	}
 	// Blocklist any character that introduces JMESPath grammar.
-	// Anything else passes through — including `/`, `+`, `@`, `#`,
-	// etc. — so plain top-level keys containing those characters keep
-	// using the comment-preserving Node API path.
+	// Anything else passes through — including `/`, `+`, `#`, and
+	// `@` mid-key — so plain top-level keys containing those
+	// characters keep using the comment-preserving Node API path.
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
 		case '[', ']', '(', ')', '{', '}',
@@ -110,13 +118,13 @@ func splitSelectorsByComplexity(selectors []string) (simple, complex []string) {
 //
 //   - Nil results are ignored (JMESPath spec: missing paths return null).
 //
-// Limitation (per copilot review on PR #127): a quoted-identifier
-// expression like `'"weird[name]"'` returns the *value* of that key,
-// not a {key: value} pair, so the original key name is lost in the
-// merged output. Object values get merged at the top level; scalar/
-// array values get wrapped under "result". Users who need to preserve
-// the original key name must wrap it explicitly in a multi-select hash
-// like `'{"weird[name]": "weird[name]"}'`. The docs callout in
+// Limitation: a quoted-identifier expression like `'"weird[name]"'`
+// returns the *value* of that key, not a {key: value} pair, so the
+// original key name is lost in the merged output. Object values get
+// merged at the top level; scalar/array values get wrapped under
+// "result". Users who need to preserve the original key name must
+// wrap it explicitly in a multi-select hash like
+// `'{"weird[name]": "weird[name]"}'`. The docs callout in
 // docs/env-sync.mdx explains this trade-off to users.
 //
 // The merged map is then passed to marshal() to produce the final output

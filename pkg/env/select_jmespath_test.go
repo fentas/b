@@ -22,16 +22,20 @@ func TestIsSimpleDotPath(t *testing.T) {
 		{"a.b.c.d", true},
 		// Plain keys with non-identifier characters that the legacy
 		// dot-path validator accepts. The classifier must NOT route
-		// these to JMESPath where they'd hit a parse error. Per
-		// copilot review on PR #127 round 2.
+		// these to JMESPath where they'd hit a parse error.
 		{"foo/bar", true},
 		{"my+key", true},
-		{"a@b", true},
+		{"a@b", true}, // `@` mid-key is fine — only leading `@` is reserved
 		// complex
+		// Leading `@` is the JMESPath current-node operator, must
+		// be classified as complex even when it looks "simple".
+		{"@", false},
+		{"@.foo", false},
+		{".@.foo", false},
 		{"", false},
 		{".", false},
 		{"..", false},
-		{"..a", false}, // multiple leading dots — per copilot review on PR #127
+		{"..a", false}, // multiple leading dots are rejected by the segment validator
 		{"...a.b", false},
 		{"a..b", false},
 		{"a.", false},
@@ -212,13 +216,12 @@ func TestFilterContent_Hybrid_ComplexOnly(t *testing.T) {
 	}
 }
 
-// TestFilterContent_LegacyKeyWithSlash verifies the backward-compat
-// fix for the classifier: a top-level YAML key like `foo/bar` used to
-// work via the legacy filterYAML path, then PR #127 routed it to
-// JMESPath where it failed to parse. The widened classifier now
-// passes plain keys with `/`, `+`, `@`, `#`, etc. through to the
-// Node API path so they keep working. Per copilot review on PR #127
-// round 2.
+// TestFilterContent_LegacyKeyWithSlash verifies that a top-level YAML
+// key like `foo/bar` reaches the legacy filterYAML path rather than
+// being routed to JMESPath (where it would fail to parse). The
+// classifier accepts any character not in the JMESPath grammar
+// blocklist, so plain keys with `/`, `+`, `@` mid-key, `#`, etc. keep
+// working through the comment-preserving Node API path.
 func TestFilterContent_LegacyKeyWithSlash(t *testing.T) {
 	content := []byte(`foo/bar:
   value: 1
@@ -244,9 +247,9 @@ other:
 
 // TestFilterContent_Hybrid_Mixed_PreservesSimpleComments verifies that
 // when a mixed-list select runs, the simple-side keys keep their
-// comments. Per copilot review on PR #127: the previous map-roundtrip
-// implementation of mergeYAMLTopLevel silently dropped comments here,
-// contradicting the docs claim.
+// comments. A simpler map-roundtrip implementation of
+// mergeYAMLTopLevel would silently drop comments here, contradicting
+// the documented contract — this test pins the Node-tree merge.
 func TestFilterContent_Hybrid_Mixed_PreservesSimpleComments(t *testing.T) {
 	content := []byte(`# top-of-file comment
 binaries:
