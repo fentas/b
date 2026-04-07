@@ -24,6 +24,18 @@ import (
 // resolve manually. This is a deliberate scope limit, not a data-loss
 // risk: the caller never writes the partial result.
 func spliceJSON(local, merged []byte, selectors []string) ([]byte, error) {
+	// Reject complex JMESPath selectors. topLevelKeysFromSelectors
+	// is a literal-string operation, so an expression like
+	// `from_items(items(binaries))` would be treated as a key
+	// literally named "from_items(items(binaries))" and the splice
+	// would silently look for it (and skip the file). The JSON
+	// splice only supports simple dot-paths today; the caller
+	// should drop the select or move the data to YAML.
+	for _, s := range selectors {
+		if !isSimpleDotPath(s) {
+			return nil, fmt.Errorf("JSON splice: complex JMESPath selector %q is not supported (only simple dot-paths)", s)
+		}
+	}
 	scope := topLevelKeysFromSelectors(selectors)
 	if len(scope) == 0 {
 		// Selectors that reduce to no top-level keys (empty,
@@ -170,6 +182,13 @@ func decodeOrderedJSONObject(data []byte) (orderedJSONObject, error) {
 }
 
 func encodeOrderedJSONObject(o orderedJSONObject, indent string) ([]byte, error) {
+	// Match encoding/json's behavior for empty objects so a splice
+	// that drops every top-level key (e.g. all in-scope keys
+	// vanished upstream) emits "{}\n" instead of the noisy
+	// "{\n}\n".
+	if len(o.Keys) == 0 {
+		return []byte("{}\n"), nil
+	}
 	var buf bytes.Buffer
 	buf.WriteString("{\n")
 	for i, k := range o.Keys {
