@@ -193,7 +193,35 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		// base and local get filtered symmetrically. When no select is set,
 		// the closure is nil and doMerge skips filtering.
 		var filterFn func([]byte) ([]byte, error)
+		// allTopLevelSelectors decides whether the splice path is
+		// safe. The splice operates at top-level key granularity, so
+		// a nested selector like `database.host` would, when spliced,
+		// replace the entire `database` top-level node with the
+		// truncated `{host: ...}` view and silently drop siblings
+		// like `database.port`. Per copilot review on PR #126 round 6.
+		//
+		// When all selectors are top-level, splice is correct and we
+		// use it. When any selector is nested, splice is unsafe — for
+		// `merge` we error out (the merge result is unrecoverable
+		// without the splice), and for `replace` we fall back to the
+		// pre-#126 behavior of writing the filtered content directly
+		// (legacy `select` semantics: extract a subset, overwrite the
+		// destination — out-of-scope content is intentionally
+		// dropped because the user opted into it via `select`).
+		allTopLevelSelectors := true
 		if len(m.Select) > 0 {
+			for _, sel := range m.Select {
+				key := strings.TrimPrefix(sel, ".")
+				if strings.Contains(key, ".") {
+					allTopLevelSelectors = false
+					break
+				}
+			}
+			if !allTopLevelSelectors && strategy == StrategyMerge {
+				return nil, fmt.Errorf(
+					"nested selector on %s is not supported with strategy: merge — use a top-level selector or strategy: replace",
+					m.SourcePath)
+			}
 			sel := m.Select
 			src := m.SourcePath
 			filterFn = func(raw []byte) ([]byte, error) {
@@ -227,6 +255,15 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		// content on every sync after a merge had run.
 		computeTargetBytes := func() ([]byte, error) {
 			if filterFn == nil {
+				return content, nil
+			}
+			// Nested selectors with non-merge strategies skip the
+			// splice entirely and write the filtered content
+			// directly. This preserves the legacy `select` semantics
+			// (extract a subset, overwrite the destination) for
+			// callers that explicitly opted into per-key extraction.
+			// Per copilot review on PR #126 round 6.
+			if !allTopLevelSelectors {
 				return content, nil
 			}
 			localFull, readErr := os.ReadFile(destPath)

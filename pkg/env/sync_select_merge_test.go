@@ -267,6 +267,38 @@ envs:
 	}
 }
 
+// TestSyncEnv_NestedSelector_MergeErrors verifies that a nested
+// selector like `database.host` combined with `strategy: merge` errors
+// out instead of silently dropping sibling fields. The splice operates
+// at top-level granularity, so a nested selector would replace the
+// whole `database` top-level node with the truncated `{host: ...}`
+// view. Per copilot review on PR #126 round 6.
+func TestSyncEnv_NestedSelector_MergeErrors(t *testing.T) {
+	repo := setupMergeRepo(t)
+	project := t.TempDir()
+	destFile := filepath.Join(project, ".bin", "b.yaml")
+	if err := os.MkdirAll(filepath.Dir(destFile), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(destFile, []byte("binaries:\n  kubectl: {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := EnvConfig{
+		Ref:      repo.bare,
+		Strategy: StrategyMerge,
+		Files: map[string]envmatch.GlobConfig{
+			repo.sourcePath: {Select: []string{"binaries.kubectl"}},
+		},
+	}
+	_, err := SyncEnv(cfg, project, t.TempDir(), nil)
+	if err == nil {
+		t.Fatal("expected error for nested selector with strategy: merge")
+	}
+	if !strings.Contains(err.Error(), "nested selector") {
+		t.Errorf("error should mention nested selector, got: %v", err)
+	}
+}
+
 // TestSyncEnv_SelectMerge_NoLocalChanges_PreservesEnvs is the regression
 // test for a bug copilot caught on PR #126: after a successful sync, the
 // consumer's local file matches the previously-recorded lock entry, so
