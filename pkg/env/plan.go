@@ -22,7 +22,7 @@ const (
 	PlanOverwrite PlanAction = "overwrite" // local changes will be replaced by upstream
 	PlanMerge     PlanAction = "merge"     // 3-way merge applied (or would be), no conflict
 	PlanConflict  PlanAction = "conflict"  // 3-way merge produced conflict markers; needs manual resolution
-	PlanDelete    PlanAction = "delete"    // file existed in previous lock but no longer in upstream; will be removed
+	PlanDelete    PlanAction = "delete"    // file existed in previous lock but no longer in upstream; flagged for removal (Phase 3 plumbing only — actual on-disk removal lands in a follow-up against the gateApply layer)
 )
 
 // IsDestructive reports whether an action would lose user-owned content.
@@ -156,6 +156,15 @@ func planRowFromLockFile(f lock.LockFile, prevPaths map[string]bool) PlanRow {
 	switch {
 	case status == "deleted":
 		row.Action = PlanDelete
+	case strings.HasPrefix(status, "delete-noop"):
+		// File was orphaned upstream AND already missing on disk
+		// → nothing to do, render as a non-destructive keep with
+		// a note so the user understands why it's listed at all.
+		row.Action = PlanKeep
+		note := strings.TrimPrefix(status, "delete-noop ")
+		note = strings.TrimPrefix(note, "(")
+		note = strings.TrimSuffix(note, ")")
+		row.Note = "already gone: " + note
 	case strings.HasPrefix(status, "delete-skipped"):
 		row.Action = PlanKeep
 		// Surface the reason (e.g. "local modified") so users can

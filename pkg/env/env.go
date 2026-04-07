@@ -520,18 +520,23 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			if cfg.DryRun {
 				deleteStatus = "deleted (dry-run)"
 			}
-			// If the consumer has modified the file relative to the
-			// recorded lock SHA, surface that as `delete-skipped`
-			// instead of `deleted` so the plan reflects the safer
-			// outcome. Distinguish a missing file (already gone, no
-			// problem) from a real read failure (permission denied,
-			// transient I/O) — the latter must NOT silently fall
-			// back to a destructive `deleted` row.
+			// Three branches:
+			//   - file already missing on disk → emit
+			//     "delete-noop (already gone)" so the planner
+			//     renders it as a non-destructive keep row;
+			//     the consumer doesn't need to do anything.
+			//   - file unreadable (permissions, transient I/O)
+			//     → emit "delete-skipped (unreadable)" so a real
+			//     read failure never silently maps to a
+			//     destructive deleted row.
+			//   - file present but modified relative to the
+			//     previous lock → emit "delete-skipped (local
+			//     modified)" so the consumer's edits are kept.
+			//   - otherwise → keep the default "deleted" status.
 			localHash, hashErr := lock.SHA256File(absDest)
 			switch {
 			case hashErr != nil && os.IsNotExist(hashErr):
-				// File already missing on disk → keep the default
-				// deleted status; nothing destructive to do.
+				deleteStatus = "delete-noop (already gone)"
 			case hashErr != nil:
 				deleteStatus = "delete-skipped (unreadable)"
 			case localHash != "" && localHash != prev.SHA256:

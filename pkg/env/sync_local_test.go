@@ -55,6 +55,95 @@ func setupLocalBareRepo(t *testing.T) (string, string) {
 	return bare, strings.TrimSpace(string(commitOut))
 }
 
+// TestSyncEnv_OrphanDetection_EmitsDeleteRows is the integration
+// test for the #125 phase 3 orphan plumbing. We construct a previous
+// lock entry with an extra file that no longer exists in upstream,
+// run SyncEnv, and verify:
+//   - the orphan shows up in result.Deleted (NOT result.Files, so the
+//     lock writer never persists it)
+//   - the deleted file's status is "deleted" / "deleted (dry-run)"
+//     when local is unmodified
+//   - a locally modified orphan flips to "delete-skipped (local
+//     modified)"
+//   - a missing-on-disk orphan flips to "delete-noop (already gone)"
+func TestSyncEnv_OrphanDetection_EmitsDeleteRows(t *testing.T) {
+	bare, _ := setupLocalBareRepo(t)
+	project := t.TempDir()
+
+	cfg := EnvConfig{
+		Ref:      bare,
+		Strategy: StrategyReplace,
+		Files: map[string]envmatch.GlobConfig{
+			"cfg/*.yaml": {Dest: "configs"},
+		},
+	}
+
+	// Build a previous lock entry that records THREE files: the two
+	// real ones plus an orphan that was once tracked but is no
+	// longer in upstream. The previous commit is intentionally set
+	// to a fake hash so SyncEnv doesn't take the up-to-date
+	// shortcut and actually walks the orphan-detection branch.
+	prev := &lock.EnvEntry{
+		Ref:    bare,
+		Commit: "0000000000000000000000000000000000000000",
+		Files: []lock.LockFile{
+			{Path: "cfg/a.yaml", Dest: "configs/a.yaml"},
+			{Path: "cfg/b.yaml", Dest: "configs/b.yaml"},
+			{Path: "cfg/orphan.yaml", Dest: "configs/orphan.yaml", SHA256: "deadbeef"},
+		},
+	}
+
+	// Sub-case 1: orphan file exists on disk and matches the
+	// recorded SHA → should be "deleted" (or "deleted (dry-run)").
+	orphanPath := filepath.Join(project, "configs", "orphan.yaml")
+	if err := os.MkdirAll(filepath.Dir(orphanPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Write content matching the recorded SHA. Since we used a
+	// fake "deadbeef" SHA, write something with no chance of
+	// matching, then exercise the local-modified branch instead.
+	if err := os.WriteFile(orphanPath, []byte("local edits\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg.DryRun = true
+	res, err := SyncEnv(cfg, project, t.TempDir(), prev)
+	if err != nil {
+		t.Fatalf("SyncEnv: %v", err)
+	}
+	if len(res.Deleted) != 1 {
+		t.Fatalf("want 1 orphan in result.Deleted, got %d: %+v", len(res.Deleted), res.Deleted)
+	}
+	if res.Deleted[0].Path != "cfg/orphan.yaml" {
+		t.Errorf("orphan path = %q", res.Deleted[0].Path)
+	}
+	if !strings.Contains(res.Deleted[0].Status, "delete-skipped") {
+		t.Errorf("locally modified orphan should be delete-skipped, got %q", res.Deleted[0].Status)
+	}
+	// And it must NOT have leaked into result.Files (the lock writer
+	// reads .Files and would otherwise persist the orphan).
+	for _, f := range res.Files {
+		if f.Path == "cfg/orphan.yaml" {
+			t.Errorf("orphan leaked into result.Files: %+v", f)
+		}
+	}
+
+	// Sub-case 2: orphan file removed from disk → "delete-noop".
+	if err := os.Remove(orphanPath); err != nil {
+		t.Fatal(err)
+	}
+	res2, err := SyncEnv(cfg, project, t.TempDir(), prev)
+	if err != nil {
+		t.Fatalf("SyncEnv: %v", err)
+	}
+	if len(res2.Deleted) != 1 {
+		t.Fatalf("want 1 orphan, got %d", len(res2.Deleted))
+	}
+	if !strings.Contains(res2.Deleted[0].Status, "delete-noop") {
+		t.Errorf("missing-file orphan should be delete-noop, got %q", res2.Deleted[0].Status)
+	}
+}
+
 func TestSyncEnv_LocalReplace(t *testing.T) {
 	bare, _ := setupLocalBareRepo(t)
 	project := t.TempDir()
