@@ -402,12 +402,21 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			if err != nil {
 				return nil, fmt.Errorf("applying pins: %w", err)
 			}
+			finalHash = fmt.Sprintf("%x", sha256.Sum256(target))
+			// Pin restoration intentionally produces a target that
+			// can equal the on-disk file even when the upstream hash
+			// differs (the pinned keys make the file diverge from
+			// upstream). Skip the write when target already matches
+			// on-disk so we don't churn mtime / file watchers on
+			// every sync of a pinned file.
 			if !cfg.DryRun {
-				if err := writeFile(destPath, target, fileMode); err != nil {
-					return nil, err
+				localHash, _ := lock.SHA256File(destPath)
+				if localHash != finalHash {
+					if err := writeFile(destPath, target, fileMode); err != nil {
+						return nil, err
+					}
 				}
 			}
-			finalHash = fmt.Sprintf("%x", sha256.Sum256(target))
 		} else {
 			switch fileStrategy {
 			case StrategyClient:

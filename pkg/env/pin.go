@@ -1,6 +1,7 @@
 package env
 
 import (
+	"bytes"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -51,6 +52,16 @@ func applyPinsYAML(local, pending []byte, filePath string) ([]byte, error) {
 	}
 	if len(local) == 0 {
 		// No local file → nothing pinned to honor.
+		return pending, nil
+	}
+	// Cheap pre-check: a file with no `b.pin` substring anywhere
+	// can't possibly carry a pin annotation, and we'd spend the
+	// yaml.Unmarshal cost on every sync of every YAML file just to
+	// learn that. Substring matches can produce false positives
+	// (e.g. a key literally named "b.pin" elsewhere), but those
+	// just trigger the slow path — the structural collectPinnedPaths
+	// is the source of truth.
+	if !bytes.Contains(local, []byte(PinAnnotation)) {
 		return pending, nil
 	}
 
