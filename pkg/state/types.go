@@ -32,9 +32,14 @@ type EnvEntry struct {
 
 // Safety levels for env updates. The default is SafetyPrompt.
 const (
-	// SafetyStrict refuses to apply any destructive change (overwrite,
-	// delete, conflict). The plan is printed; if it contains any
-	// destructive row the sync exits non-zero with no changes written.
+	// SafetyStrict refuses to apply any destructive change. As of
+	// Phase 1 of #125, "destructive" means a plan row whose action is
+	// `overwrite` (a non-merge strategy is about to clobber locally
+	// modified files) or `conflict` (a 3-way merge produced markers).
+	// Future phases may add `delete` to this set when skipped-delete
+	// tracking lands. The plan is printed; if it contains any
+	// destructive row the sync exits non-zero with no changes written
+	// for the offending env.
 	SafetyStrict = "strict"
 	// SafetyPrompt prints the plan and asks the user to confirm before
 	// applying. On non-TTY (CI/CD) it falls back to strict behavior.
@@ -46,10 +51,15 @@ const (
 
 // NormalizeSafety returns the canonical safety value. Empty string and
 // unknown values both fall back to SafetyPrompt — the safe default.
+//
+// User input is normalized: surrounding whitespace is trimmed and the
+// value is lowercased before comparison, so `safety: Auto` and
+// `safety: auto ` in b.yaml both resolve to SafetyAuto. Per copilot
+// review on PR #128 round 2.
 func NormalizeSafety(s string) string {
-	switch s {
+	switch strings.ToLower(strings.TrimSpace(s)) {
 	case SafetyStrict, SafetyPrompt, SafetyAuto:
-		return s
+		return strings.ToLower(strings.TrimSpace(s))
 	default:
 		return SafetyPrompt
 	}

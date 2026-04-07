@@ -160,9 +160,11 @@ func (o *UpdateOptions) Validate() error {
 	}
 	// `--safety` materially changes non-TTY behavior, so a typo (e.g.
 	// `--safety=autp`) must error rather than silently fall back to
-	// prompt. Per copilot review on PR #128.
+	// prompt. Validation is case-insensitive and trims whitespace,
+	// matching the NormalizeSafety contract used by config-loaded
+	// values. Per copilot review on PR #128 (round 2).
 	if o.Safety != "" {
-		switch o.Safety {
+		switch strings.ToLower(strings.TrimSpace(o.Safety)) {
 		case state.SafetyAuto, state.SafetyPrompt, state.SafetyStrict:
 			// valid
 		default:
@@ -199,6 +201,12 @@ func (o *UpdateOptions) runAll() error {
 	}
 
 	if len(binariesToUpdate) == 0 && (o.Config == nil || len(o.Config.Envs) == 0) {
+		// In plan-json mode the human-readable line would corrupt
+		// the JSON output. Emit an empty array instead so consumers
+		// always get valid JSON. Per copilot review on PR #128 round 2.
+		if o.PlanJSON {
+			return env.RenderPlansJSON(o.IO.Out, nil)
+		}
 		fmt.Fprintln(o.IO.Out, "No binaries or envs to update")
 	}
 
@@ -348,7 +356,14 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		}
 
 		if firstResult.Skipped {
-			fmt.Fprintf(o.IO.Out, "  %-40s %s\n", entry.Key, firstResult.Message)
+			// In plan-json mode the skipped notice would corrupt the
+			// JSON output (per copilot review on PR #128 round 2).
+			// Suppress the human-readable line and skip the env
+			// entirely — there's nothing to add to the plan array
+			// because no work was planned.
+			if !o.PlanJSON {
+				fmt.Fprintf(o.IO.Out, "  %-40s %s\n", entry.Key, firstResult.Message)
+			}
 			continue // don't overwrite lock entry when up-to-date
 		}
 

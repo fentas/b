@@ -1755,8 +1755,13 @@ func makeSyncFunc(result *env.SyncResult) (func(env.EnvConfig, string, string, *
 	calls := &[]bool{}
 	return func(cfg env.EnvConfig, _ string, _ string, _ *lock.EnvEntry) (*env.SyncResult, error) {
 		*calls = append(*calls, cfg.DryRun)
-		// Return a copy so callers can mutate Files between checks.
+		// Return a deep copy so tests that mutate Files between
+		// invocations don't accidentally share the underlying
+		// backing array. Per copilot review on PR #128 round 2.
 		clone := *result
+		if result.Files != nil {
+			clone.Files = append([]lock.LockFile(nil), result.Files...)
+		}
 		return &clone, nil
 	}, calls
 }
@@ -1974,6 +1979,10 @@ func TestUpdateEnvs_DryRun_NewBehavior(t *testing.T) {
 }
 
 // TestNormalizeSafety covers the centralized safety-value coercion.
+// Per copilot review on PR #128 round 2: whitespace and casing
+// variants are normalized so users can write `safety: Auto` or
+// `safety: auto ` in b.yaml without the value silently falling back
+// to prompt.
 func TestNormalizeSafety_DefaultsToPrompt(t *testing.T) {
 	cases := map[string]string{
 		"":         state.SafetyPrompt,
@@ -1981,6 +1990,12 @@ func TestNormalizeSafety_DefaultsToPrompt(t *testing.T) {
 		"prompt":   state.SafetyPrompt,
 		"auto":     state.SafetyAuto,
 		"nonsense": state.SafetyPrompt, // unknown → safe default
+		// Casing and whitespace normalization (#128 round 2).
+		"Auto":       state.SafetyAuto,
+		"AUTO":       state.SafetyAuto,
+		" auto ":     state.SafetyAuto,
+		"\tStrict\n": state.SafetyStrict,
+		"Prompt":     state.SafetyPrompt,
 	}
 	for in, want := range cases {
 		if got := state.NormalizeSafety(in); got != want {
