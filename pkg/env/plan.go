@@ -22,13 +22,14 @@ const (
 	PlanOverwrite PlanAction = "overwrite" // local changes will be replaced by upstream
 	PlanMerge     PlanAction = "merge"     // 3-way merge applied (or would be), no conflict
 	PlanConflict  PlanAction = "conflict"  // 3-way merge produced conflict markers; needs manual resolution
+	PlanDelete    PlanAction = "delete"    // file existed in previous lock but no longer in upstream; will be removed
 )
 
 // IsDestructive reports whether an action would lose user-owned content.
 // Strict safety mode refuses to apply a plan whose actions are destructive.
 func (a PlanAction) IsDestructive() bool {
 	switch a {
-	case PlanOverwrite, PlanConflict:
+	case PlanOverwrite, PlanConflict, PlanDelete:
 		return true
 	default:
 		return false
@@ -124,6 +125,13 @@ func PlanFromResult(result *SyncResult, prev *lock.EnvEntry) *Plan {
 	for _, f := range result.Files {
 		p.Rows = append(p.Rows, planRowFromLockFile(f, prevPaths))
 	}
+	// Orphan files (in previous lock but no longer in upstream) live
+	// on result.Deleted so the lock writer never persists them. They
+	// still belong in the plan as `delete` rows so the user sees what
+	// is going to happen and the safety gate can refuse them.
+	for _, f := range result.Deleted {
+		p.Rows = append(p.Rows, planRowFromLockFile(f, prevPaths))
+	}
 	// Stable, deterministic ordering by destination path so callers can
 	// snapshot-test the rendering.
 	sort.Slice(p.Rows, func(i, j int) bool {
@@ -146,6 +154,16 @@ func planRowFromLockFile(f lock.LockFile, prevPaths map[string]bool) PlanRow {
 		Dest:   f.Dest,
 	}
 	switch {
+	case status == "deleted":
+		row.Action = PlanDelete
+	case strings.HasPrefix(status, "delete-skipped"):
+		row.Action = PlanKeep
+		// Surface the reason (e.g. "local modified") so users can
+		// see why an upstream removal was not applied.
+		note := strings.TrimPrefix(status, "delete-skipped ")
+		note = strings.TrimPrefix(note, "(")
+		note = strings.TrimSuffix(note, ")")
+		row.Note = "delete skipped: " + note
 	case status == "unchanged":
 		row.Action = PlanKeep
 	case status == "kept":
@@ -220,7 +238,7 @@ func RenderPlanText(w io.Writer, p *Plan) {
 	// reads "→ 3 update" instead of "→ 0 add, 3 update, 0 keep, 0
 	// overwrite, 0 merge, 0 conflict".
 	counts := p.CountByAction()
-	order := []PlanAction{PlanAdd, PlanUpdate, PlanKeep, PlanOverwrite, PlanMerge, PlanConflict}
+	order := []PlanAction{PlanAdd, PlanUpdate, PlanKeep, PlanOverwrite, PlanMerge, PlanConflict, PlanDelete}
 	var parts []string
 	for _, a := range order {
 		if c := counts[a]; c > 0 {
@@ -272,6 +290,8 @@ func planMarker(a PlanAction) (string, string) {
 		return "⊕", "merge"
 	case PlanConflict:
 		return "✗", "conflict"
+	case PlanDelete:
+		return "-", "delete"
 	default:
 		return "?", string(a)
 	}

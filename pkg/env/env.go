@@ -54,9 +54,15 @@ type SyncResult struct {
 	Commit         string
 	PreviousCommit string
 	Files          []lock.LockFile
-	Skipped        bool   // true if already up-to-date
-	Message        string // human-readable status
-	Conflicts      int    // number of files with merge conflicts
+	// Deleted lists files that were in the previous lock but are no
+	// longer in upstream's manifest. They are kept separate from
+	// Files so the lock writer never persists them, while still
+	// being available to PlanFromResult so they show up as `delete`
+	// rows in the plan. See #125 phase 3.
+	Deleted   []lock.LockFile
+	Skipped   bool   // true if already up-to-date
+	Message   string // human-readable status
+	Conflicts int    // number of files with merge conflicts
 }
 
 // SyncEnv syncs environment files from an upstream git repo.
@@ -477,6 +483,62 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		})
 	}
 
+	// Detect orphans: files that were in the previous lock but no
+	// longer match upstream's current manifest. They are emitted as
+	// rows in result.Deleted so the planner shows them as `delete`
+	// actions and the safety gate can refuse the plan in strict mode.
+	//
+	// Phase 3 of #125: this PR adds the *plumbing* — detection and
+	// plan rendering. Wiring the actual on-disk removal through the
+	// gateApply layer is a deliberate follow-up: the existing flow
+	// runs SyncEnv once for dry-run and once for apply, and the
+	// "should I really delete?" decision belongs in the CLI layer
+	// next to the existing strict/prompt/auto safety logic.
+	var deletedFiles []lock.LockFile
+	if lockEntry != nil {
+		matchedSet := make(map[string]bool, len(matched))
+		for _, m := range matched {
+			matchedSet[m.SourcePath] = true
+		}
+		for _, prev := range lockEntry.Files {
+			if matchedSet[prev.Path] {
+				continue
+			}
+			absDest := prev.Dest
+			if !filepath.IsAbs(absDest) {
+				absDest = filepath.Join(projectRoot, absDest)
+			}
+			absDest = filepath.Clean(absDest)
+			// Path-traversal check on the previous-lock dest, just
+			// like the in-loop branch does for current files. A
+			// stale or malicious lock entry must not let SyncEnv
+			// surface paths outside the project root.
+			if err := ValidatePathUnderRoot(projectRoot, absDest); err != nil {
+				return nil, fmt.Errorf("path traversal rejected for orphan %s: %w", prev.Dest, err)
+			}
+			deleteStatus := "deleted"
+			if cfg.DryRun {
+				deleteStatus = "deleted (dry-run)"
+			}
+			// If the consumer has modified the file relative to the
+			// recorded lock SHA, surface that as `delete-skipped`
+			// instead of `deleted` so the plan reflects the safer
+			// outcome. The CLI's gateApply layer can use this to
+			// drop the row from "actually delete" candidates while
+			// still warning the user.
+			if localHash, _ := lock.SHA256File(absDest); localHash != "" && localHash != prev.SHA256 {
+				deleteStatus = "delete-skipped (local modified)"
+			}
+			deletedFiles = append(deletedFiles, lock.LockFile{
+				Path:   prev.Path,
+				Dest:   prev.Dest,
+				SHA256: "",
+				Mode:   prev.Mode,
+				Status: deleteStatus,
+			})
+		}
+	}
+
 	// Run post-sync hook (skip in dry-run mode)
 	if cfg.OnPostSync != "" && !cfg.DryRun {
 		if err := runHook(cfg.OnPostSync, projectRoot, hookStdout(cfg), hookStderr(cfg)); err != nil {
@@ -491,6 +553,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		Commit:         commit,
 		PreviousCommit: previousCommit,
 		Files:          lockFiles,
+		Deleted:        deletedFiles,
 		Message:        syncMessage(lockFiles, conflicts),
 		Conflicts:      conflicts,
 	}, nil
