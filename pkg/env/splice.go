@@ -300,10 +300,14 @@ func lineStart(offsets []int, line int, srcLen int) int {
 //     line where the next top-level key starts.
 //  3. For each scoped top-level key in local, replace its byte range with
 //     the corresponding range from merged. Out-of-scope ranges in local
-//     are left untouched. If we can't find a key in merged's ranges
-//     (e.g. because the scanner couldn't parse merged at all), the
-//     scoped local range is replaced with the entire merged blob — same
-//     as the previous behavior, used as a defensive fallback.
+//     are left untouched. If a scoped local key is NOT found in merged
+//     (either because the merge decided it should be removed, or
+//     because the heuristic scanner missed it for an exotic input —
+//     quoted keys, document directives, etc.), the local range is
+//     dropped (treated as a deletion). This matches the structural
+//     splice's "key absent in merged" behavior.
+//  4. Any keys present in `merged` but absent from `local` are
+//     appended at the end (additions, in merged source order).
 //
 // Per-key splicing was added in response to copilot review on PR #126,
 // which pointed out that the previous "insert once at the first scoped

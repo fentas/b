@@ -13,10 +13,19 @@ import (
 	"github.com/fentas/b/pkg/lock"
 )
 
-// filterSha computes what SyncEnv would have written to the lock for a file
-// at a given commit — i.e. the sha256 of filterContent(raw_upstream, select).
-// Tests use this to simulate the state a previous successful sync would have
-// left behind.
+// filterSha returns the sha256 of `filterContent(rawUpstream, selectors)`
+// — i.e. the hash of the filtered upstream scope, NOT the full spliced
+// target bytes that the post-fix SyncEnv now records in the lock.
+//
+// Tests use this to simulate the lock state a *pre-fix* sync would have
+// left behind (just the filtered upstream sha) so they can exercise
+// upgrade/regression scenarios where on-disk content drifts away from
+// what the lock claims. With the lock SHA mismatching the on-disk file,
+// SyncEnv's localChanged check fires and the merge/splice path runs.
+//
+// Per copilot review on PR #126 round 4: this helper is intentionally
+// computing the OLD lock-format SHA so the test fixtures can simulate
+// a pre-fix state. Don't "fix" it to match the new format.
 func filterSha(t *testing.T, rawUpstream []byte, selectors []string, sourcePath string) string {
 	t.Helper()
 	filtered, err := filterContent(rawUpstream, selectors, sourcePath)
