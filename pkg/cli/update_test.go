@@ -1832,6 +1832,17 @@ func TestUpdateEnvs_SafetyStrict_RefusesDestructive(t *testing.T) {
 	if !strings.Contains(errBuf.String(), "strict safety") {
 		t.Errorf("expected strict refusal message, got: %q", errBuf.String())
 	}
+	// The improved error message includes a count of destructive
+	// rows AND the first destructive row's path so users can find
+	// the offending file without scrolling. The fixture above uses
+	// "a.yaml" with "replaced (local changes overwritten)" which
+	// maps to PlanOverwrite. Per N1 from PR #128 reviewer feedback.
+	if !strings.Contains(errBuf.String(), "1 overwrite") {
+		t.Errorf("expected destructive count in error message, got: %q", errBuf.String())
+	}
+	if !strings.Contains(errBuf.String(), "first: a.yaml") {
+		t.Errorf("expected first destructive path in error message, got: %q", errBuf.String())
+	}
 }
 
 // TestUpdateEnvs_SafetyStrict_AppliesNonDestructive: strict ALLOWS plans

@@ -78,6 +78,21 @@ func (p *Plan) HasDestructive() bool {
 	return false
 }
 
+// DestructiveRows returns every plan row whose action is destructive
+// (currently `overwrite` or `conflict`). Rows are returned in the
+// same order they appear in Plan.Rows, which PlanFromResult sorts by
+// destination path — so callers that pin "the first destructive row"
+// for diagnostic messages get a stable, dest-sorted choice.
+func (p *Plan) DestructiveRows() []PlanRow {
+	var out []PlanRow
+	for _, r := range p.Rows {
+		if r.Action.IsDestructive() {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // CountByAction returns a map[action]count over the plan's rows. Useful
 // for summary lines like "12 add, 3 update, 1 conflict".
 func (p *Plan) CountByAction() map[PlanAction]int {
