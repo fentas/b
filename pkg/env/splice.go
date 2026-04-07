@@ -418,6 +418,14 @@ func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error)
 		// overwrite the local file with just the filtered scope (the
 		// #126 data-loss bug). Return an error so the caller surfaces
 		// it instead.
+		//
+		// Common cause: the local file already has unresolved
+		// `git merge-file` conflict markers from a previous sync.
+		// Detect that case and tell the user to resolve them first
+		// rather than just yelling about a YAML parse error.
+		if containsConflictMarkers(local) {
+			return nil, fmt.Errorf("text splice: local YAML has unresolved conflict markers from a previous sync — resolve them and re-run (yaml parse error: %w)", err)
+		}
 		return nil, fmt.Errorf("text splice: local YAML is not parseable: %w", err)
 	}
 	if localDoc.Kind != yaml.DocumentNode || len(localDoc.Content) == 0 {
