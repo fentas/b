@@ -34,9 +34,9 @@ import (
 // and empty segments — it accepts plain keys with characters like
 // `/`, `+`, `@`, `#`, etc. JSON selection (in filterJSON) does not
 // use that same validator and instead follows gjson/sjson path
-// semantics. To stay backward compatible (per copilot review on
-// PR #127 rounds 2 and 5), the classifier must NOT route those
-// legacy plain keys to JMESPath, where they'd hit a parse error.
+// semantics. To preserve backward compatibility for those legacy
+// plain keys, the classifier must NOT route them to JMESPath,
+// where such selectors may fail to parse as expressions.
 //
 // The blocklisted characters are exactly the ones that introduce
 // JMESPath grammar: brackets `[]`, parens `()`, braces `{}`, pipe `|`,
