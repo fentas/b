@@ -9,6 +9,8 @@ on:
       - 'test/**'
       - 'go.mod'
       - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/test.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
@@ -17,10 +19,16 @@ on:
       - 'test/**'
       - 'go.mod'
       - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/test.yml'
 
 jobs:
   test:
     name: Test
+    # Skip the run that the bot's coverage commit triggers — there's nothing
+    # new to test and the refresh-coverage job would just rewrite the same
+    # files.
+    if: github.actor != 'github-actions[bot]'
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest] #, windows-latest
@@ -38,22 +46,68 @@ jobs:
     - name: Download dependencies
       run: go mod download
 
-    - name: Run tests
-      run: go test -race -coverprofile="coverage.out" ./...
-
-    - name: Generate coverage report
-      run: go tool cover -func=coverage.out
+    - name: Run tests + regenerate coverage (badge/json)
+      run: make coverage
 
     - name: Upload coverage to Codecov
       if: matrix.os == 'ubuntu-latest'
       uses: codecov/codecov-action@v4
       with:
-        file: ./coverage.out
+        file: ./test/coverage/coverage.out
         flags: unittests
         name: codecov-umbrella
 
+    # Share the regenerated badge/JSON with the refresh-coverage job so it
+    # doesn't have to re-run the whole test suite on main.
+    - name: Upload coverage artifacts
+      if: matrix.os == 'ubuntu-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-files
+        path: |
+          test/coverage/badge.json
+          test/coverage/coverage.json
+          test/coverage/coverage.out
+        retention-days: 1
+
+  # Refresh test/coverage/{badge,coverage}.json on main only. Coverage is not
+  # bit-for-bit reproducible across runners/Go versions, so we deliberately do
+  # NOT block PRs on a diff of these files — the badge tracks main.
+  refresh-coverage:
+    name: Refresh coverage badge (main)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.actor != 'github-actions[bot]'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Reuse the badge/JSON produced by the matrix test job instead of
+    # re-running 'make coverage' (which would run the whole test suite again).
+    # upload-artifact@v4 preserves the uploaded paths relative to the
+    # workspace root, so we download to '.' to restore them to their original
+    # locations (e.g. 'test/coverage/badge.json').
+    - name: Download coverage artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: coverage-files
+        path: .
+
+    - name: Commit if changed
+      run: |
+        if ! git diff --quiet -- test/coverage/badge.json test/coverage/coverage.json; then
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add test/coverage/badge.json test/coverage/coverage.json
+          git commit -m "chore: update coverage badge [skip ci]"
+          git push
+        fi
+
   lint:
     name: Lint
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
 
     steps:
@@ -72,6 +126,7 @@ jobs:
 
   integration:
     name: Integration Tests
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
 
     steps:

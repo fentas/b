@@ -9,6 +9,21 @@ import (
 	"time"
 )
 
+// envWithPathBin returns a new env slice based on os.Environ() but with any
+// existing PATH_BIN= entries removed and the given path appended. This avoids
+// the duplicate-key ambiguity in some getenv implementations.
+func envWithPathBin(pathBin string) []string {
+	src := os.Environ()
+	out := make([]string, 0, len(src)+1)
+	for _, e := range src {
+		if strings.HasPrefix(e, "PATH_BIN=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return append(out, "PATH_BIN="+pathBin)
+}
+
 func TestE2E_CLIBuild(t *testing.T) {
 	// Test that the CLI can be built successfully
 	binaryPath := filepath.Join(os.TempDir(), "b-e2e-test")
@@ -55,20 +70,12 @@ func TestE2E_InitWorkflow(t *testing.T) {
 		t.Fatalf("Failed to build CLI: %v\nOutput: %s", err, output)
 	}
 
-	// Change to temp directory
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current directory: %v", err)
-	}
-	defer func() { _ = os.Chdir(originalDir) }()
+	// Change to temp directory (auto-restored on test end)
+	t.Chdir(tempDir)
 
-	err = os.Chdir(tempDir)
-	if err != nil {
-		t.Fatalf("Failed to change to temp directory: %v", err)
-	}
-
-	// Run init command
+	// Run init command (isolate from the host repo's git root via PATH_BIN)
 	cmd = exec.Command(binaryPath, "init")
+	cmd.Env = envWithPathBin(filepath.Join(tempDir, ".bin"))
 	output, err = cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Init command failed: %v\nOutput: %s", err, output)
@@ -152,19 +159,12 @@ binaries:
 		t.Fatalf("Failed to build CLI: %v\nOutput: %s", err, output)
 	}
 
-	// Change to subdirectory
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current directory: %v", err)
-	}
-	defer func() { _ = os.Chdir(originalDir) }()
-
-	if err = os.Chdir(projectDir); err != nil {
-		t.Fatalf("Failed to change to project subdirectory: %v", err)
-	}
+	// Change to subdirectory (auto-restored on test end)
+	t.Chdir(projectDir)
 
 	// Run list command to test config discovery
 	cmd = exec.Command(binaryPath, "list")
+	cmd.Env = envWithPathBin(configDir)
 	output, err = cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("List command failed: %v\nOutput: %s", err, output)
@@ -248,16 +248,7 @@ func TestE2E_ErrorHandling(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current directory: %v", err)
-	}
-	defer func() { _ = os.Chdir(originalDir) }()
-
-	err = os.Chdir(tempDir)
-	if err != nil {
-		t.Fatalf("Failed to change to temp directory: %v", err)
-	}
+	t.Chdir(tempDir)
 
 	cmd = exec.Command(binaryPath, "list")
 	output, _ = cmd.CombinedOutput()
