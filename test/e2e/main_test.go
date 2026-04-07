@@ -67,8 +67,9 @@ func TestE2E_InitWorkflow(t *testing.T) {
 		t.Fatalf("Failed to change to temp directory: %v", err)
 	}
 
-	// Run init command
+	// Run init command (isolate from the host repo's git root via PATH_BIN)
 	cmd = exec.Command(binaryPath, "init")
+	cmd.Env = append(os.Environ(), "PATH_BIN="+filepath.Join(tempDir, ".bin"))
 	output, err = cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Init command failed: %v\nOutput: %s", err, output)
@@ -165,6 +166,7 @@ binaries:
 
 	// Run list command to test config discovery
 	cmd = exec.Command(binaryPath, "list")
+	cmd.Env = append(os.Environ(), "PATH_BIN="+configDir)
 	output, err = cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("List command failed: %v\nOutput: %s", err, output)
