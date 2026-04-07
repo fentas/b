@@ -40,11 +40,16 @@ import (
 //     layout are NOT preserved for complex expressions. That trade-off is
 //     only paid when the caller explicitly writes a complex query.
 //
-//   - Mixing simple and complex selectors on the same file is supported:
-//     simple ones extract via Node API (comments kept), complex ones run
-//     via JMESPath (comments lost for their output), and the results are
-//     merged top-level into the final document. Any key present in both
-//     results has the JMESPath version take precedence (authoritative).
+//   - Mixing simple and complex selectors on the same file is supported
+//     **for YAML only**: simple ones extract via Node API (comments
+//     kept), complex ones run via JMESPath (comments lost for their
+//     output), and the results are merged top-level into the final
+//     document. Any key present in both results has the JMESPath
+//     version take precedence (authoritative). For JSON files,
+//     mixing simple and complex selectors on the same file is
+//     explicitly rejected by `filterJSONHybrid` because JSON has no
+//     comments to preserve and the merge logic only existed to
+//     keep YAML comments intact — see #135 follow-up.
 //
 // See docs/env-sync.mdx for examples and the comment-preservation matrix.
 func filterContent(content []byte, selectors []string, filePath string) ([]byte, error) {
