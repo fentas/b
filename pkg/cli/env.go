@@ -187,6 +187,7 @@ func NewEnvCmd(shared *SharedOptions) *cobra.Command {
 	cmd.AddCommand(NewEnvMatchCmd(shared))
 	cmd.AddCommand(NewEnvProfilesCmd(shared))
 	cmd.AddCommand(NewEnvAddCmd(shared))
+	cmd.AddCommand(NewEnvResolveCmd(shared))
 
 	return cmd
 }
