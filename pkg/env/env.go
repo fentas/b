@@ -198,7 +198,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		// a nested selector like `database.host` would, when spliced,
 		// replace the entire `database` top-level node with the
 		// truncated `{host: ...}` view and silently drop siblings
-		// like `database.port`..
+		// like `database.port`.
 		//
 		// When all selectors are top-level, splice is correct and we
 		// use it. When any selector is nested, splice is unsafe — for
