@@ -5,6 +5,54 @@ import (
 	"testing"
 )
 
+// TestMergeWithStructuralFallback_CleanTextMergePreservesBytes verifies
+// the doMerge wiring: when the text 3-way merge resolves cleanly, we
+// keep its byte-for-byte output and DO NOT round-trip through the
+// structural merge (which would reorder keys and drop comments).
+func TestMergeWithStructuralFallback_CleanTextMergePreservesBytes(t *testing.T) {
+	base := []byte("a: 1\n# stays\nb: 2\n")
+	local := []byte("a: 1\n# stays\nb: 2\nc: 3\n") // local adds c
+	upstream := []byte("a: 1\n# stays\nb: 2\n")    // upstream unchanged
+	out, hasConflict, err := mergeWithStructuralFallback(local, base, upstream, "b.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasConflict {
+		t.Errorf("expected no conflict")
+	}
+	if !strings.Contains(string(out), "# stays") {
+		t.Errorf("comment lost from clean text merge:\n%s", out)
+	}
+}
+
+// TestMergeWithStructuralFallback_AdjacentInsertsResolveStructurally
+// is the integration test for the doMerge structural fallback wiring:
+// the text merge would normally produce conflict markers when local
+// and upstream both add adjacent map entries, and we expect the
+// structural merge to take over and produce a clean result.
+func TestMergeWithStructuralFallback_AdjacentInsertsResolveStructurally(t *testing.T) {
+	base := []byte("binaries:\n  kubectl: {}\n")
+	local := []byte("binaries:\n  kubectl: {}\n  helm: {}\n")
+	upstream := []byte("binaries:\n  kubectl: {}\n  kustomize: {}\n")
+	out, hasConflict, err := mergeWithStructuralFallback(local, base, upstream, "b.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasConflict {
+		t.Errorf("expected structural merge to resolve adjacent inserts cleanly")
+	}
+	s := string(out)
+	for _, k := range []string{"kubectl", "helm", "kustomize"} {
+		if !strings.Contains(s, k) {
+			t.Errorf("missing %q in fallback output:\n%s", k, s)
+		}
+	}
+	// The output must NOT contain conflict markers.
+	if strings.Contains(s, "<<<<<<<") {
+		t.Errorf("conflict markers leaked into clean fallback output:\n%s", s)
+	}
+}
+
 // TestStructural_AdjacentInsertsNoConflict is the headline case: local and
 // upstream both add new entries inside the same map. The text-based
 // git merge-file path flags this as a conflict because the inserted lines

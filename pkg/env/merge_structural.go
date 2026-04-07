@@ -169,7 +169,9 @@ func serializeStructural(v any, format string) ([]byte, error) {
 		if err := enc.Encode(v); err != nil {
 			return nil, err
 		}
-		_ = enc.Close()
+		if err := enc.Close(); err != nil {
+			return nil, err
+		}
 		return buf.Bytes(), nil
 	}
 	return nil, fmt.Errorf("unknown format %q", format)
