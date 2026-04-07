@@ -87,6 +87,68 @@ envs:
 	}
 }
 
+// TestSpliceYAMLByteLevel_PreservesOutOfScopeBytesVerbatim verifies
+// that the format-preserving byte-level splice keeps out-of-scope
+// content byte-identical to the input. The previous structural
+// splice round-tripped the whole document through yaml.Marshal,
+// which would normalize whitespace, quoting, and field ordering
+// even for keys the splice didn't touch — producing noisy git
+// diffs on every successful merge sync.
+func TestSpliceYAMLByteLevel_PreservesOutOfScopeBytesVerbatim(t *testing.T) {
+	// Local file uses non-default formatting choices (4-space
+	// indent, double-quoted values, trailing comments) that the
+	// yaml.v3 emitter would normalize away.
+	local := []byte(`# Top of file
+binaries:
+    kubectl: {}
+    kustomize: {}
+
+envs:
+    "github.com/keep/me":     # an inline comment
+        files:
+            "a.yaml":  "docs/a.yaml"
+        # trailing comment inside envs
+`)
+	merged := []byte(`binaries:
+  kubectl: {}
+  kustomize: {}
+  tilt: {}
+`)
+	out, err := spliceSelectedScope(local, merged, []string{"binaries"}, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	outStr := string(out)
+
+	// 1) merged binaries content present.
+	if !strings.Contains(outStr, "tilt") {
+		t.Errorf("merged tilt missing, got:\n%s", outStr)
+	}
+
+	// 2) Out-of-scope envs section preserved BYTE-FOR-BYTE. Each of
+	// these would normally be reformatted by yaml.v3:
+	//   - 4-space indent → 2-space indent
+	//   - double-quoted keys → unquoted
+	//   - inline comment dropped
+	//   - "trailing comment inside envs" dropped
+	expectations := []string{
+		`"github.com/keep/me":     # an inline comment`,
+		`        files:`,
+		`            "a.yaml":  "docs/a.yaml"`,
+		`        # trailing comment inside envs`,
+	}
+	for _, exp := range expectations {
+		if !strings.Contains(outStr, exp) {
+			t.Errorf("byte-preservation lost line %q in output:\n%s", exp, outStr)
+		}
+	}
+
+	// 3) Top-of-file comment preserved.
+	if !strings.Contains(outStr, "# Top of file") {
+		t.Errorf("header comment lost: %s", outStr)
+	}
+}
+
 // TestSpliceYAMLStructural_NonContiguousScopedKeys verifies that the
 // structural splice handles two scoped keys separated by an out-of-scope
 // key in the local file, without reordering..

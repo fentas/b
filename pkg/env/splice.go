@@ -111,28 +111,233 @@ func containsConflictMarkers(b []byte) bool {
 		bytes.Contains(b, []byte(">>>>>>> "))
 }
 
-// spliceYAML dispatches between structural and text splice based on
-// whether `merged` is parseable YAML.
+// spliceYAML dispatches between three splice strategies, in order of
+// fidelity:
+//
+//  1. Byte-level splice (best fidelity): when `merged` is valid YAML
+//     AND the local file parses cleanly into a top-level mapping, copy
+//     out-of-scope byte ranges from `local` verbatim and only re-emit
+//     the in-scope keys' values via yaml.Marshal. This preserves
+//     whitespace, quoting style, and comment formatting on every
+//     unchanged byte. Out-of-scope content is byte-identical to the
+//     input — no spurious git-diff churn from yaml.v3 emitter
+//     normalization.
+//
+//  2. Structural splice (fallback for YAML quirks): when the byte-level
+//     path can't be used (rare — e.g. an unrecognised local-file
+//     shape), fall back to the Node-tree merge that round-trips the
+//     whole document through yaml.Marshal. Out-of-scope keys keep
+//     their content but lose exact whitespace.
+//
+//  3. Text splice (conflict path): when `merged` contains
+//     `git merge-file` conflict markers, it doesn't parse as YAML at
+//     all. Find the byte range of each scoped top-level key in `local`
+//     using yaml.v3 Node Line/Column metadata and substitute the
+//     conflicted text. Bytes outside the scoped ranges are preserved
+//     verbatim.
+//
+// (1) was added as the format-preserving emitter follow-up to PR #126.
+// Before it, every successful merge sync produced a noisy git diff
+// because yaml.Marshal would re-emit the entire document with its own
+// preferred whitespace and quoting style — even for keys the splice
+// didn't touch.
 func spliceYAML(local, merged []byte, selectors []string) ([]byte, error) {
 	scope := topLevelKeysFromSelectors(selectors)
 
-	// Fast path: merged is valid YAML. Do a structural splice that
-	// preserves the most layout information (comments on non-replaced
-	// keys).
+	// Path 1: byte-level splice. Requires valid YAML on both sides
+	// (no conflict markers in `merged`) and a parseable
+	// top-level-mapping `local`.
 	if !containsConflictMarkers(merged) {
-		out, err := spliceYAMLStructural(local, merged, scope)
+		out, err := spliceYAMLByteLevel(local, merged, scope)
 		if err == nil {
 			return out, nil
 		}
-		// If structural splicing fails for any reason, fall through to
-		// text splicing as a defensive fallback.
+		// Path 2: structural splice. Same parseability requirements
+		// but rebuilds the whole document via yaml.Marshal. Used when
+		// the byte-level splice can't handle the local shape (e.g.
+		// flow-style mapping where Line metadata isn't reliable).
+		out, err = spliceYAMLStructural(local, merged, scope)
+		if err == nil {
+			return out, nil
+		}
+		// Both structural paths failed. Fall through to the text
+		// splice, which can recover from more weirdness.
 	}
 
-	// Conflict path: find the byte ranges of the in-scope top-level keys
-	// in `local` and replace them with the merged text. This preserves
-	// out-of-scope content (envs:, profiles:, comments) byte-for-byte
-	// even when the merged output contains conflict markers.
+	// Path 3: text/conflict path.
 	return spliceYAMLText(local, merged, scope)
+}
+
+// spliceYAMLByteLevel is the format-preserving fast path. It walks
+// `local` byte-by-byte, copies out-of-scope ranges verbatim, and
+// substitutes in-scope ranges with the marshaled value subtree from
+// `merged`. The output preserves whitespace, quoting style, and
+// comments on every byte that wasn't touched.
+//
+// Returns an error (instead of falling through to a slower path) when
+// the local YAML can't be parsed or has a non-mapping root. The
+// caller is expected to fall back to spliceYAMLStructural / spliceYAMLText.
+func spliceYAMLByteLevel(local, merged []byte, scope map[string]bool) ([]byte, error) {
+	// Parse local — we need yaml.v3 Node metadata to find byte ranges.
+	var localDoc yaml.Node
+	if err := yaml.Unmarshal(local, &localDoc); err != nil {
+		return nil, fmt.Errorf("byte splice: parse local: %w", err)
+	}
+	// Empty document content: header-only file or whitespace. Defer
+	// to the structural-path empty-doc handling rather than
+	// duplicating it.
+	if localDoc.Kind == 0 || len(localDoc.Content) == 0 {
+		return nil, fmt.Errorf("byte splice: empty local document, defer to structural")
+	}
+	if localDoc.Kind != yaml.DocumentNode {
+		return nil, fmt.Errorf("byte splice: unexpected local YAML structure")
+	}
+	localRoot := localDoc.Content[0]
+	if localRoot.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("byte splice: local root is not a mapping (kind %d)", localRoot.Kind)
+	}
+
+	// Parse merged for the in-scope key values we're substituting in.
+	var mergedDoc yaml.Node
+	if err := yaml.Unmarshal(merged, &mergedDoc); err != nil {
+		return nil, fmt.Errorf("byte splice: parse merged: %w", err)
+	}
+	if mergedDoc.Kind != yaml.DocumentNode || len(mergedDoc.Content) == 0 {
+		return nil, fmt.Errorf("byte splice: merged has no content")
+	}
+	mergedRoot := mergedDoc.Content[0]
+	if mergedRoot.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("byte splice: merged root is not a mapping")
+	}
+
+	// Build merged key→valueNode lookup, preserving source order for
+	// deterministic addition placement.
+	mergedByKey := make(map[string]*yaml.Node, len(mergedRoot.Content)/2)
+	mergedOrder := make([]string, 0, len(mergedRoot.Content)/2)
+	for i := 0; i+1 < len(mergedRoot.Content); i += 2 {
+		k := mergedRoot.Content[i].Value
+		mergedByKey[k] = mergedRoot.Content[i+1]
+		mergedOrder = append(mergedOrder, k)
+	}
+
+	// Compute byte ranges for every top-level key in local. Reuses
+	// the existing topLevelKeyRanges helper that already handles the
+	// "blank/comment lines belong to the next key" attribution.
+	ranges := topLevelKeyRanges(local, localRoot)
+	if len(ranges) == 0 {
+		return nil, fmt.Errorf("byte splice: no top-level key ranges in local")
+	}
+
+	// Walk local byte-by-byte. For each top-level key:
+	//   - in-scope, in merged   → emit serialized merged value
+	//   - in-scope, not in merged → drop (deletion)
+	//   - out-of-scope          → copy verbatim
+	var out bytes.Buffer
+	cursor := 0
+	consumed := make(map[string]bool, len(mergedByKey))
+
+	for _, r := range ranges {
+		// Out-of-scope keys: copy from cursor to end of this range
+		// verbatim (this preserves both the key itself AND any
+		// preceding bytes between the previous key's end and this
+		// range's start, which is where leading comments/blanks for
+		// out-of-scope keys live).
+		if !scope[r.key] {
+			out.Write(local[cursor:r.endByte])
+			cursor = r.endByte
+			continue
+		}
+
+		// In-scope key. First copy any bytes between cursor and the
+		// start of this range (preserves any blank lines / comments
+		// that the boundary attribution placed BEFORE this key but
+		// AFTER the previous one). Then emit the substituted block.
+		if r.startByte > cursor {
+			out.Write(local[cursor:r.startByte])
+		}
+
+		mergedVal, ok := mergedByKey[r.key]
+		if !ok {
+			// Deletion: skip the range entirely. Don't emit
+			// anything; the cursor advance below skips local's
+			// version too.
+			cursor = r.endByte
+			continue
+		}
+
+		// Substitute: serialize the merged key:value pair as YAML
+		// and emit it. We use a small synthetic mapping with just
+		// this one key so the indentation comes out as a top-level
+		// entry. Re-emit produces clean YAML for this slice but
+		// leaves all other bytes untouched.
+		serialized, serErr := marshalSingleTopLevelKey(r.key, mergedVal)
+		if serErr != nil {
+			return nil, fmt.Errorf("byte splice: marshal %q: %w", r.key, serErr)
+		}
+		out.Write(serialized)
+		consumed[r.key] = true
+		cursor = r.endByte
+	}
+
+	// Tail bytes after the last top-level key (trailing whitespace,
+	// trailing comments).
+	if cursor < len(local) {
+		out.Write(local[cursor:])
+	}
+
+	// Additions: any merged keys that weren't already in local. Append
+	// them at the end in merged source order. Ensure a separating
+	// newline first so we don't fuse with the previous trailing line.
+	additions := make([]string, 0, len(mergedOrder))
+	for _, k := range mergedOrder {
+		if !consumed[k] && scope[k] {
+			additions = append(additions, k)
+		}
+	}
+	if len(additions) > 0 {
+		buf := out.Bytes()
+		if len(buf) > 0 && buf[len(buf)-1] != '\n' {
+			out.WriteByte('\n')
+		}
+		for _, k := range additions {
+			serialized, serErr := marshalSingleTopLevelKey(k, mergedByKey[k])
+			if serErr != nil {
+				return nil, fmt.Errorf("byte splice: marshal addition %q: %w", k, serErr)
+			}
+			out.Write(serialized)
+		}
+	}
+
+	return out.Bytes(), nil
+}
+
+// marshalSingleTopLevelKey serializes one key:value pair as a
+// top-level YAML mapping entry. The output starts with `key:` at
+// column 0 and includes a trailing newline. Used by the byte-level
+// splice to emit only the in-scope keys without re-emitting the
+// surrounding document.
+func marshalSingleTopLevelKey(key string, value *yaml.Node) ([]byte, error) {
+	doc := &yaml.Node{
+		Kind: yaml.DocumentNode,
+		Content: []*yaml.Node{{
+			Kind: yaml.MappingNode,
+			Tag:  "!!map",
+			Content: []*yaml.Node{
+				{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+				value,
+			},
+		}},
+	}
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(doc); err != nil {
+		return nil, err
+	}
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // spliceYAMLStructural is the fast path: parse both sides, rewrite the
