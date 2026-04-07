@@ -27,9 +27,11 @@ import (
 //     `[]`/`\` and empty segments), but the empty-segment rule is
 //     shared so the classification stays consistent with downstream
 //     YAML validation. The end result is that plain top-level keys
-//     with characters like `/`, `+`, `@`, `#` keep using the
-//     comment-preserving path without quoting (backward-compat for
-//     pre-#124 callers).
+//     with characters like `/`, `+`, and `#`, plus keys containing
+//     `@` mid-key, keep using the comment-preserving path without
+//     quoting (backward-compat for pre-#124 callers). Selectors for
+//     keys that start with `@` are treated as complex and must use
+//     the JMESPath path with quoted identifiers.
 //
 //   - Complex expressions — filter predicates, projections, functions,
 //     multi-select hashes, array indexing — are routed to the JMESPath
