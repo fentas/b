@@ -238,4 +238,10 @@ func TestHasConflictMarkers(t *testing.T) {
 	if hasConflictMarkers([]byte(">>>>>>> stray\n")) {
 		t.Error("stray closing marker should not be a conflict")
 	}
+	// Bare markers without a label suffix (hand-edited form)
+	// MUST be detected — resolveConflictMarkers uses the same
+	// loose prefix and will happily rewrite them.
+	if !hasConflictMarkers([]byte("<<<<<<<\nx\n=======\ny\n>>>>>>>\n")) {
+		t.Error("bare-marker conflict (no label suffix) should be detected")
+	}
 }

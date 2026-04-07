@@ -234,12 +234,16 @@ func hasConflictMarkers(b []byte) bool {
 		if n := len(line); n > 0 && line[n-1] == '\r' {
 			line = line[:n-1]
 		}
+		// Match the same loose prefix that resolveConflictMarkers
+		// uses: a bare `<<<<<<<` line (no label suffix) is valid
+		// hand-edited conflict and the resolver will rewrite it,
+		// so the detector must agree.
 		switch {
-		case bytes.HasPrefix(line, []byte("<<<<<<< ")):
+		case bytes.HasPrefix(line, []byte("<<<<<<<")):
 			hasStart = true
 		case bytes.Equal(line, []byte("=======")):
 			hasSep = true
-		case bytes.HasPrefix(line, []byte(">>>>>>> ")):
+		case bytes.HasPrefix(line, []byte(">>>>>>>")):
 			hasEnd = true
 		}
 	}
