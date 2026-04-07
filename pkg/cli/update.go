@@ -183,6 +183,17 @@ func (o *UpdateOptions) Run() error {
 	return o.runAll()
 }
 
+// effectiveDryRun reports whether this update invocation should treat
+// the run as dry-run for purposes of writing the lock and applying
+// changes. `--dry-run` is the obvious case. `--plan-json` implies
+// dry-run because the user only wants the plan output and any side
+// effects (lock writes, file writes, hooks) would be surprising. New
+// dry-run-like flags should be added here so the rest of the update
+// loop can stay agnostic.
+func (o *UpdateOptions) effectiveDryRun() bool {
+	return o.DryRun || o.PlanJSON
+}
+
 // runAll updates all binaries and envs from config.
 func (o *UpdateOptions) runAll() error {
 	// Update binaries — but NOT in plan-json mode, where binary
@@ -317,8 +328,10 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		if o.Safety != "" {
 			safety = state.NormalizeSafety(o.Safety)
 		}
-		// --plan-json implies --dry-run; the user only wants the plan.
-		isDryRun := o.DryRun || o.PlanJSON
+		// `--plan-json` implies `--dry-run` — the helper hides this
+		// dependency from the rest of the loop so future dry-run-like
+		// flags only need to be added in one place.
+		isDryRun := o.effectiveDryRun()
 
 		// We only need a dry-run "plan" pass when the safety mode might
 		// reject the apply (strict, or prompt where the user has to be
@@ -550,7 +563,8 @@ func (o *UpdateOptions) gateApply(safety string, plan *env.Plan, isDryRun bool) 
 		return false, nil
 	}
 
-	destructive := plan.HasDestructive()
+	destructiveRows := plan.DestructiveRows()
+	destructive := len(destructiveRows) > 0
 
 	switch safety {
 	case state.SafetyAuto:
@@ -560,7 +574,8 @@ func (o *UpdateOptions) gateApply(safety string, plan *env.Plan, isDryRun bool) 
 	case state.SafetyStrict:
 		// Refuse if any destructive row is present.
 		if destructive {
-			return false, fmt.Errorf("strict safety: plan contains destructive changes — use --safety=prompt or --safety=auto to apply")
+			return false, destructiveRefusalError("strict safety", destructiveRows,
+				"use --safety=prompt or --safety=auto to apply, or --dry-run to preview")
 		}
 		return true, nil
 
@@ -572,7 +587,8 @@ func (o *UpdateOptions) gateApply(safety string, plan *env.Plan, isDryRun bool) 
 		// On non-TTY, prompt collapses to strict — refuse on destructive.
 		if !isTTYFunc() {
 			if destructive {
-				return false, fmt.Errorf("prompt safety on non-TTY: plan contains destructive changes — re-run with --yes, --safety=auto, or --dry-run")
+				return false, destructiveRefusalError("prompt safety on non-TTY", destructiveRows,
+					"re-run with --yes, set safety: auto in b.yaml, or --dry-run to preview")
 			}
 			return true, nil
 		}
@@ -583,6 +599,49 @@ func (o *UpdateOptions) gateApply(safety string, plan *env.Plan, isDryRun bool) 
 	// Unknown safety value (shouldn't happen — NormalizeSafety covers it,
 	// but be defensive).
 	return false, fmt.Errorf("unknown safety value %q", safety)
+}
+
+// destructiveRefusalError builds the user-facing error string for a
+// safety gate refusal. The message has three parts to make CI failure
+// triage fast:
+//
+//  1. Which gate refused (so users know what to flip).
+//  2. A breakdown of WHAT is destructive: count by action type, plus
+//     the first row's path so the user has a concrete file to look at
+//     without scrolling back through the printed plan.
+//  3. The recovery hint (which flag/setting to use).
+//
+// Example:
+//
+//	strict safety: plan contains 2 overwrite, 1 conflict
+//	  (first: hetzner/legacy.yaml) — use --safety=prompt or
+//	  --safety=auto to apply, or --dry-run to preview
+//
+// Per N1 from PR #128 reviewer feedback.
+func destructiveRefusalError(gate string, rows []env.PlanRow, recovery string) error {
+	if len(rows) == 0 {
+		return fmt.Errorf("%s: plan contains destructive changes — %s", gate, recovery)
+	}
+	// Count by action.
+	var overwrite, conflict int
+	for _, r := range rows {
+		switch r.Action {
+		case env.PlanOverwrite:
+			overwrite++
+		case env.PlanConflict:
+			conflict++
+		}
+	}
+	var parts []string
+	if overwrite > 0 {
+		parts = append(parts, fmt.Sprintf("%d overwrite", overwrite))
+	}
+	if conflict > 0 {
+		parts = append(parts, fmt.Sprintf("%d conflict", conflict))
+	}
+	breakdown := strings.Join(parts, ", ")
+	first := rows[0].Dest
+	return fmt.Errorf("%s: plan contains %s (first: %s) — %s", gate, breakdown, first, recovery)
 }
 
 // confirmApply prompts the user with a y/N question. Default is N (safer).
