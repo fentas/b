@@ -337,8 +337,8 @@ func TestFilterContent_JSON_MixedSelectorsErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for mixed simple+complex selectors on JSON")
 	}
-	if !strings.Contains(err.Error(), "mixing") {
-		t.Errorf("error should mention mixing, got: %v", err)
+	if !strings.Contains(err.Error(), "use either dot-paths only or JMESPath only") {
+		t.Errorf("error should explain selector-mode guidance, got: %v", err)
 	}
 }
 
