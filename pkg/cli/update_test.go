@@ -618,11 +618,19 @@ func TestUpdateEnvs_SyncError(t *testing.T) {
 		},
 	}
 
-	if err := o.updateEnvs(nil); err != nil {
-		t.Fatalf("updateEnvs should not return error on per-env failure: %v", err)
+	// Per copilot review on PR #128 round 5: per-env sync failures
+	// MUST produce a non-zero exit code so CI pipelines actually
+	// notice. The error output is still printed inline; the return
+	// value now also reflects the failure as an aggregated error.
+	err := o.updateEnvs(nil)
+	if err == nil {
+		t.Fatal("updateEnvs should return an error when SyncEnv fails")
+	}
+	if !strings.Contains(err.Error(), "env(s) failed") {
+		t.Errorf("expected aggregated failure error, got: %v", err)
 	}
 	if !strings.Contains(errBuf.String(), "git clone failed") {
-		t.Errorf("expected error output, got: %s", errBuf.String())
+		t.Errorf("expected per-env error in stderr output, got: %s", errBuf.String())
 	}
 }
 

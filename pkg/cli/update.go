@@ -261,6 +261,12 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 	// single bad apple doesn't block the rest of the run.
 	var refusedEnvs []string
 
+	// Tracks per-env hard sync failures (network errors, missing
+	// previous commits for rollback, real apply errors, etc.) for the
+	// same reason: any failure must turn into a non-zero exit so CI
+	// notices. Per copilot review on PR #128 round 5.
+	var failedEnvs []string
+
 	// Collected plans for --plan-json. Per copilot review on PR #128:
 	// emitting one JSON document per env produced concatenated docs
 	// that aren't valid JSON for typical parsers. We now collect plans
@@ -342,6 +348,7 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		if o.Rollback {
 			if lockEntry == nil || lockEntry.PreviousCommit == "" {
 				fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ no previous commit to rollback to\n", entry.Key)
+				failedEnvs = append(failedEnvs, entry.Key)
 				continue
 			}
 			cfg.ForceCommit = lockEntry.PreviousCommit
@@ -352,6 +359,7 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		firstResult, err := syncEnvFunc(cfg, projectRoot, "", lockEntry)
 		if err != nil {
 			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
+			failedEnvs = append(failedEnvs, entry.Key)
 			continue
 		}
 
@@ -430,6 +438,7 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		realResult, err := syncEnvFunc(applyCfg, projectRoot, "", lockEntry)
 		if err != nil {
 			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
+			failedEnvs = append(failedEnvs, entry.Key)
 			continue
 		}
 
@@ -463,12 +472,21 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 	if err := lock.WriteLock(lockDir, lk, o.bVersion); err != nil {
 		return err
 	}
-	if len(refusedEnvs) > 0 {
-		// Per copilot review on PR #128: any safety refusal must
-		// produce a non-zero exit code so CI pipelines actually
-		// notice. The lock for non-refused envs has already been
-		// written above so partial progress isn't lost.
+	// Per copilot review on PR #128: any per-env safety refusal OR
+	// hard sync failure must produce a non-zero exit code so CI
+	// pipelines actually notice. The lock for successful envs has
+	// already been written above so partial progress isn't lost.
+	// Refusals are listed before failures so the safety story is
+	// clearly attributed when both happen.
+	switch {
+	case len(refusedEnvs) > 0 && len(failedEnvs) > 0:
+		return fmt.Errorf("safety refused %d env(s): %s; %d env(s) failed: %s",
+			len(refusedEnvs), strings.Join(refusedEnvs, ", "),
+			len(failedEnvs), strings.Join(failedEnvs, ", "))
+	case len(refusedEnvs) > 0:
 		return fmt.Errorf("safety refused %d env(s): %s", len(refusedEnvs), strings.Join(refusedEnvs, ", "))
+	case len(failedEnvs) > 0:
+		return fmt.Errorf("%d env(s) failed: %s", len(failedEnvs), strings.Join(failedEnvs, ", "))
 	}
 	return nil
 }
