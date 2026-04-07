@@ -251,18 +251,21 @@ binaries:
 	}
 }
 
-// TestSpliceSelectedScope_JSONErrors — JSON splice is not implemented;
-// passing through `merged` would silently drop out-of-scope JSON content
-// (the exact #122 bug), so the function must error out instead.
-func TestSpliceSelectedScope_JSONErrors(t *testing.T) {
-	local := []byte(`{"binaries": {"a": 1}, "envs": {}}`)
+// TestSpliceSelectedScope_JSONScoped — JSON splice support: scoped merge
+// must replace in-scope keys while preserving the rest. This is the
+// JSON sibling of the YAML splice contract from #122.
+func TestSpliceSelectedScope_JSONScoped(t *testing.T) {
+	local := []byte(`{"binaries": {"a": 1}, "envs": {"keep": true}}`)
 	merged := []byte(`{"binaries": {"a": 1, "b": 2}}`)
-	_, err := spliceSelectedScope(local, merged, []string{"binaries"}, "config.json")
-	if err == nil {
-		t.Fatal("expected error for scoped JSON merge (not yet supported)")
+	out, err := spliceSelectedScope(local, merged, []string{"binaries"}, "config.json")
+	if err != nil {
+		t.Fatalf("spliceSelectedScope: %v", err)
 	}
-	if !strings.Contains(err.Error(), "JSON") {
-		t.Errorf("error should mention JSON, got: %v", err)
+	if !strings.Contains(string(out), `"b"`) {
+		t.Errorf("merged b not present: %s", out)
+	}
+	if !strings.Contains(string(out), `"envs"`) || !strings.Contains(string(out), `"keep"`) {
+		t.Errorf("envs dropped: %s", out)
 	}
 }
 
@@ -451,20 +454,18 @@ func TestSpliceYAMLStructural_NonMappingErrors(t *testing.T) {
 	}
 }
 
-// TestSpliceSelectedScope_JSONErrorsForNewFile verifies that JSON +
-// select errors out even when the destination file doesn't exist yet,
-// so a first sync can't silently produce a half-written file that
-// would then fail on the next sync.
-func TestSpliceSelectedScope_JSONErrorsForNewFile(t *testing.T) {
+// TestSpliceSelectedScope_JSONNewFile: when the local file doesn't
+// exist yet (caller passes nil bytes), the JSON splice produces a
+// fresh document containing only the merged scope. There is no
+// out-of-scope content to preserve in the not-exist case.
+func TestSpliceSelectedScope_JSONNewFile(t *testing.T) {
 	merged := []byte(`{"binaries": {"a": 1}}`)
-	// Empty `local` simulates the not-exist case (the caller passes
-	// nil bytes when ReadFile returned ErrNotExist).
-	_, err := spliceSelectedScope(nil, merged, []string{"binaries"}, "config.json")
-	if err == nil {
-		t.Fatal("expected error for JSON select even when local file doesn't exist")
+	out, err := spliceSelectedScope(nil, merged, []string{"binaries"}, "config.json")
+	if err != nil {
+		t.Fatalf("spliceSelectedScope: %v", err)
 	}
-	if !strings.Contains(err.Error(), "JSON") {
-		t.Errorf("error should mention JSON, got: %v", err)
+	if !strings.Contains(string(out), `"a"`) {
+		t.Errorf("merged content missing in new-file splice: %s", out)
 	}
 }
 
