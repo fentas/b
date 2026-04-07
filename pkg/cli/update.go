@@ -183,13 +183,18 @@ func (o *UpdateOptions) Run() error {
 	return o.runAll()
 }
 
-// effectiveDryRun reports whether this update invocation should treat
-// the run as dry-run for purposes of writing the lock and applying
-// changes. `--dry-run` is the obvious case. `--plan-json` implies
-// dry-run because the user only wants the plan output and any side
-// effects (lock writes, file writes, hooks) would be surprising. New
-// dry-run-like flags should be added here so the rest of the update
-// loop can stay agnostic.
+// effectiveDryRun reports whether this update invocation should be
+// treated as dry-run by callers that route through this helper.
+// `--dry-run` is the obvious case. `--plan-json` is also dry-run-like
+// because the user only wants plan output and side effects such as
+// file writes, hooks, or lock writes would be surprising.
+//
+// Today the helper centralizes:
+//   - the per-env `cfg.DryRun` decision in `updateEnvs`
+//   - the lock-write suppression at the end of `updateEnvs`
+//
+// New dry-run-like flags should be added here so future code paths
+// that rely on this helper interpret them consistently.
 func (o *UpdateOptions) effectiveDryRun() bool {
 	return o.DryRun || o.PlanJSON
 }
@@ -505,10 +510,12 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		// partial plan generation as success.
 		return aggregateEnvErrors(refusedEnvs, failedEnvs)
 	}
-	if o.DryRun {
-		// Don't write the lock in dry-run mode, but still surface
-		// any per-env refusals or failures so CI and users can
-		// detect that planning was only partially successful.
+	if o.effectiveDryRun() {
+		// Don't write the lock in any dry-run-like mode, but still
+		// surface any per-env refusals or failures so CI and users
+		// can detect that planning was only partially successful.
+		// Routed through effectiveDryRun() so future dry-run-like
+		// flags get the same lock-write suppression for free.
 		return aggregateEnvErrors(refusedEnvs, failedEnvs)
 	}
 
@@ -588,7 +595,7 @@ func (o *UpdateOptions) gateApply(safety string, plan *env.Plan, isDryRun bool) 
 		if !isTTYFunc() {
 			if destructive {
 				return false, destructiveRefusalError("prompt safety on non-TTY", destructiveRows,
-					"re-run with --yes, set safety: auto in b.yaml, or --dry-run to preview")
+					"re-run with --yes or --safety=auto, set safety: auto in b.yaml, or --dry-run to preview")
 			}
 			return true, nil
 		}

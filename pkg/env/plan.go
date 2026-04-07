@@ -79,8 +79,10 @@ func (p *Plan) HasDestructive() bool {
 }
 
 // DestructiveRows returns every plan row whose action is destructive
-// (currently `overwrite` or `conflict`). Returned in source order so
-// callers can pin the first one for diagnostic messages.
+// (currently `overwrite` or `conflict`). Rows are returned in the
+// same order they appear in Plan.Rows, which PlanFromResult sorts by
+// destination path — so callers that pin "the first destructive row"
+// for diagnostic messages get a stable, dest-sorted choice.
 func (p *Plan) DestructiveRows() []PlanRow {
 	var out []PlanRow
 	for _, r := range p.Rows {
