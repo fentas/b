@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -175,19 +176,12 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 			}
 			// Update the lock entry's SHA so the next sync /
 			// `b verify` doesn't treat the resolved file as
-			// drifted. Without this step, `b env resolve` would
-			// produce a state where every status check still
-			// flagged the file as locally modified.
-			newHash, hashErr := lock.SHA256File(absDest)
-			if hashErr != nil {
-				resolveErrors = append(resolveErrors, fmt.Sprintf("rehashing %s: %v", f.Dest, hashErr))
-				continue
-			}
-			if newHash == "" {
-				resolveErrors = append(resolveErrors, fmt.Sprintf("rehashing %s: empty digest", f.Dest))
-				continue
-			}
-			f.SHA256 = newHash
+			// drifted. Hash the in-memory `resolved` bytes
+			// rather than re-reading the file: avoids the
+			// extra filesystem read AND closes a TOCTOU
+			// window where the file could be modified between
+			// the WriteFile and the rehash.
+			f.SHA256 = fmt.Sprintf("%x", sha256.Sum256(resolved))
 			lockChanged = true
 			totalResolved += n
 			side := "upstream"
@@ -308,32 +302,41 @@ func hasResolvableConflictMarkers(b []byte) bool {
 // keepOurs picks the block between `<<<<<<<` and the base or middle
 // marker; otherwise the block between `=======` and `>>>>>>>` wins.
 //
+// The implementation operates on []byte throughout (not a Go string)
+// so files containing non-UTF-8 bytes round-trip without corruption.
+// The separator marker is matched as the EXACT line `=======` (with
+// optional trailing `\r` for CRLF files) so a content line that
+// happens to start with `=======...` isn't misinterpreted as the
+// separator.
+//
 // Returns (resolved bytes, number of regions resolved, error).
 func resolveConflictMarkers(data []byte, keepOurs bool) ([]byte, int, error) {
-	lines := strings.Split(string(data), "\n")
-	var out []string
+	lines := bytes.Split(data, []byte("\n"))
+	var out [][]byte
 	var count int
+	startPrefix := []byte("<<<<<<<")
+	basePrefix := []byte("|||||||")
+	endPrefix := []byte(">>>>>>>")
 	i := 0
 	for i < len(lines) {
 		line := lines[i]
-		if !strings.HasPrefix(line, "<<<<<<<") {
+		if !bytes.HasPrefix(line, startPrefix) {
 			out = append(out, line)
 			i++
 			continue
 		}
-		// Found a conflict opening. Scan forward for the middle (|||||||
-		// or =======) and end (>>>>>>>) markers.
+		// Found a conflict opening. Scan forward for the middle
+		// (||||||| or =======) and end (>>>>>>>) markers.
 		startOurs := i + 1
 		var endOurs, startTheirs int
 		var endTheirs int
 		j := startOurs
-		// First search for `|||||||` (diff3 base) or `=======`.
 		for j < len(lines) {
-			if strings.HasPrefix(lines[j], "|||||||") {
+			if bytes.HasPrefix(lines[j], basePrefix) {
 				endOurs = j
 				// Skip the base section to the `=======`.
 				k := j + 1
-				for k < len(lines) && !strings.HasPrefix(lines[k], "=======") {
+				for k < len(lines) && !isSeparatorLine(lines[k]) {
 					k++
 				}
 				if k >= len(lines) {
@@ -342,7 +345,7 @@ func resolveConflictMarkers(data []byte, keepOurs bool) ([]byte, int, error) {
 				startTheirs = k + 1
 				break
 			}
-			if strings.HasPrefix(lines[j], "=======") {
+			if isSeparatorLine(lines[j]) {
 				endOurs = j
 				startTheirs = j + 1
 				break
@@ -354,7 +357,7 @@ func resolveConflictMarkers(data []byte, keepOurs bool) ([]byte, int, error) {
 		}
 		// Find the closing marker.
 		k := startTheirs
-		for k < len(lines) && !strings.HasPrefix(lines[k], ">>>>>>>") {
+		for k < len(lines) && !bytes.HasPrefix(lines[k], endPrefix) {
 			k++
 		}
 		if k >= len(lines) {
@@ -369,5 +372,14 @@ func resolveConflictMarkers(data []byte, keepOurs bool) ([]byte, int, error) {
 		count++
 		i = endTheirs + 1
 	}
-	return []byte(strings.Join(out, "\n")), count, nil
+	return bytes.Join(out, []byte("\n")), count, nil
+}
+
+// isSeparatorLine matches the exact `=======` separator line, with
+// optional trailing `\r` for CRLF files. We deliberately do NOT use
+// HasPrefix here so a content line that starts with `=======...`
+// (e.g. a markdown rule that happens to be inside a conflict
+// region's "ours" side) isn't misinterpreted.
+func isSeparatorLine(line []byte) bool {
+	return bytes.Equal(line, []byte("=======")) || bytes.Equal(line, []byte("=======\r"))
 }
