@@ -78,14 +78,14 @@ func Merge3WayStructural(local, base, upstream []byte, destPath string) ([]byte,
 	if len(conflicts) > 0 {
 		// Re-serialise the partial merge so the caller can fall back to
 		// the text path with confidence; the boolean signals conflict.
-		out, err := serializeStructuralAlways(merged, format, anyContent)
+		out, err := serializeStructural(merged, format, anyContent)
 		if err != nil {
 			return nil, true, err
 		}
 		return out, true, nil
 	}
 
-	out, err := serializeStructuralAlways(merged, format, anyContent)
+	out, err := serializeStructural(merged, format, anyContent)
 	if err != nil {
 		return nil, false, err
 	}
@@ -162,21 +162,13 @@ func normalizeValue(v any) any {
 	return v
 }
 
-// serializeStructural is kept as a thin wrapper that preserves the
-// "every side started empty → empty output" shortcut. Callers that
-// know whether at least one input had real content should call
-// serializeStructuralAlways with anyContent=true so an explicit empty
-// document like JSON `{}` round-trips faithfully.
-func serializeStructural(v any, format string) ([]byte, error) {
-	return serializeStructuralAlways(v, format, false)
-}
-
-// serializeStructuralAlways serializes v in the given format. When
+// serializeStructural serializes v in the given format. When
 // anyContent is true the function always emits a real document even
 // for an empty map (so a real `{}` doesn't get silently dropped to
 // empty bytes). When anyContent is false an empty map maps back to
-// empty bytes — used by the legacy serializeStructural shortcut.
-func serializeStructuralAlways(v any, format string, anyContent bool) ([]byte, error) {
+// empty bytes — the "every side started empty → empty output"
+// shortcut.
+func serializeStructural(v any, format string, anyContent bool) ([]byte, error) {
 	if !anyContent {
 		if m, ok := v.(map[string]any); ok && len(m) == 0 {
 			return nil, nil
