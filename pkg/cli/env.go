@@ -291,7 +291,15 @@ func (o *EnvStatusOptions) Run() error {
 				continue
 			}
 			if hasMarkers {
+				// Count conflicted files separately so users get
+				// the actionable "run b env resolve" message
+				// instead of the generic drift number. A
+				// conflicted file is NOT also counted as drift,
+				// even when its SHA happens to differ from the
+				// lock — the conflict counter is the source of
+				// truth.
 				conflictedFiles++
+				continue
 			}
 			if hash != f.SHA256 {
 				localDrift++
