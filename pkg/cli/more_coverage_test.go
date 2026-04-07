@@ -151,19 +151,33 @@ func TestNewListCmd(t *testing.T) {
 func TestVerifyRun_WithEntries(t *testing.T) {
 	dir := t.TempDir()
 	binDir := filepath.Join(dir, ".bin")
-	_ = os.MkdirAll(binDir, 0755)
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
 	t.Setenv("PATH_BIN", binDir)
 
 	// Real binary that matches
 	goodContent := []byte("#!/bin/sh\necho hi")
-	_ = os.WriteFile(filepath.Join(binDir, "jq"), goodContent, 0755)
-	goodHash, _ := lock.SHA256File(filepath.Join(binDir, "jq"))
+	if err := os.WriteFile(filepath.Join(binDir, "jq"), goodContent, 0755); err != nil {
+		t.Fatalf("WriteFile jq: %v", err)
+	}
+	goodHash, err := lock.SHA256File(filepath.Join(binDir, "jq"))
+	if err != nil {
+		t.Fatalf("SHA256File jq: %v", err)
+	}
 
 	// Env file: matching
 	envPath := filepath.Join(dir, "configs", "a.yaml")
-	_ = os.MkdirAll(filepath.Dir(envPath), 0755)
-	_ = os.WriteFile(envPath, []byte("data"), 0644)
-	envHash, _ := lock.SHA256File(envPath)
+	if err := os.MkdirAll(filepath.Dir(envPath), 0755); err != nil {
+		t.Fatalf("MkdirAll configs: %v", err)
+	}
+	if err := os.WriteFile(envPath, []byte("data"), 0644); err != nil {
+		t.Fatalf("WriteFile envPath: %v", err)
+	}
+	envHash, err := lock.SHA256File(envPath)
+	if err != nil {
+		t.Fatalf("SHA256File envPath: %v", err)
+	}
 
 	lk := &lock.Lock{
 		Version: 1,
@@ -182,10 +196,14 @@ func TestVerifyRun_WithEntries(t *testing.T) {
 			},
 		},
 	}
-	_ = lock.WriteLock(dir, lk, "test")
+	if err := lock.WriteLock(dir, lk, "test"); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
 
 	// Create kubectl with different content
-	_ = os.WriteFile(filepath.Join(binDir, "kubectl"), []byte("different"), 0755)
+	if err := os.WriteFile(filepath.Join(binDir, "kubectl"), []byte("different"), 0755); err != nil {
+		t.Fatalf("WriteFile kubectl: %v", err)
+	}
 
 	shared := NewSharedOptions(mkIO(), nil)
 	shared.ConfigPath = filepath.Join(dir, "b.yaml")

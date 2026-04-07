@@ -21,7 +21,9 @@ func setupBareRepo(t *testing.T) (bareDir, commit string) {
 	run("git", "-C", work, "config", "user.email", "t@t.com")
 	run("git", "-C", work, "config", "user.name", "T")
 	run("git", "-C", work, "config", "commit.gpgsign", "false")
-	_ = os.WriteFile(filepath.Join(work, "a.txt"), []byte("hello"), 0644)
+	if err := os.WriteFile(filepath.Join(work, "a.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 	run("git", "-C", work, "add", "-A")
 	run("git", "-C", work, "commit", "-m", "init", "--no-gpg-sign")
 	run("git", "clone", "--bare", "-q", work, bare)

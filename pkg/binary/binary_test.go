@@ -605,7 +605,9 @@ func TestDownloadAsset_HTTPError(t *testing.T) {
 func TestBinary_DownloadBinary_MkdirErr(t *testing.T) {
 	// Unreachable parent to trigger MkdirAll error
 	b := &Binary{Name: "x", File: "/proc/1/cannot/create/x"}
-	_ = b.DownloadBinary()
+	if err := b.DownloadBinary(); err == nil {
+		t.Error("expected error when MkdirAll cannot create parent directory")
+	}
 }
 
 func TestExtractSingleFileFromTar_SuccessMatch(t *testing.T) {

@@ -54,7 +54,9 @@ func TestGit_LatestVersion_Local(t *testing.T) {
 	run("git", "-C", tmp, "config", "user.email", "t@t.com")
 	run("git", "-C", tmp, "config", "user.name", "T")
 	run("git", "-C", tmp, "config", "commit.gpgsign", "false")
-	_ = os.WriteFile(filepath.Join(tmp, "script.sh"), []byte("#!/bin/sh\necho hi"), 0755)
+	if err := os.WriteFile(filepath.Join(tmp, "script.sh"), []byte("#!/bin/sh\necho hi"), 0755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 	run("git", "-C", tmp, "add", "-A")
 	run("git", "-C", tmp, "commit", "-m", "init", "--no-gpg-sign")
 
