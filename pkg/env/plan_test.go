@@ -230,3 +230,23 @@ func TestPlanFromResult_DeterministicOrdering(t *testing.T) {
 		t.Errorf("rows not sorted: %+v", p.Rows)
 	}
 }
+
+// TestPlan_MarshalJSON_NilRowsEncodesAsEmptyArray verifies that a
+// Plan with nil Rows encodes as `"rows":[]` rather than
+// `"rows":null`. The plan-json contract advertised in
+// docs/env-sync.mdx promises `[]` for up-to-date envs, and
+// consumers indexing into the array would break on `null`. Per
+// copilot review on PR #128 round 4.
+func TestPlan_MarshalJSON_NilRowsEncodesAsEmptyArray(t *testing.T) {
+	p := Plan{Ref: "github.com/org/repo", Commit: "abc"}
+	out, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), `"rows":[]`) {
+		t.Errorf("expected rows:[], got: %s", out)
+	}
+	if strings.Contains(string(out), `"rows":null`) {
+		t.Errorf("rows should NOT be null, got: %s", out)
+	}
+}

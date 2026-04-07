@@ -55,6 +55,20 @@ type Plan struct {
 	Rows    []PlanRow `json:"rows"`
 }
 
+// MarshalJSON ensures Plan.Rows is encoded as `[]` rather than `null`
+// when the slice is nil. The plan-json contract advertised in
+// docs/env-sync.mdx promises `rows: []` for up-to-date envs, and
+// consumers that index into the array would break on `null`. Per
+// copilot review on PR #128 round 4.
+func (p Plan) MarshalJSON() ([]byte, error) {
+	type planAlias Plan
+	out := planAlias(p)
+	if out.Rows == nil {
+		out.Rows = make([]PlanRow, 0)
+	}
+	return json.Marshal(out)
+}
+
 // HasDestructive reports whether the plan contains any destructive row.
 func (p *Plan) HasDestructive() bool {
 	for _, r := range p.Rows {
@@ -176,18 +190,19 @@ func planRowFromLockFile(f lock.LockFile, prevPaths map[string]bool) PlanRow {
 
 // RenderPlanText writes a human-readable plan table to w.
 //
-// Format (one line per row):
+// Format (one line per row, marker glyphs in single quotes to avoid
+// godoc list-bullet eating them):
 //
-//   - add       path/to/file
-//     ~ update    path/to/file
-//     = keep      path/to/file       (local changes preserved)
-//     ! overwrite path/to/file
-//     ⊕ merge     path/to/file
-//     ✗ conflict  path/to/file
+//	'+' add       path/to/file
+//	'~' update    path/to/file
+//	'=' keep      path/to/file       (local changes preserved)
+//	'!' overwrite path/to/file
+//	'⊕' merge     path/to/file
+//	'✗' conflict  path/to/file
 //
-// A summary line is printed at the end:
+// A summary line is printed at the end with non-zero counts only:
 //
-//	→ 12 add, 3 update, 0 keep, 1 overwrite, 0 merge, 0 conflict
+//	→ 12 add, 3 update, 1 conflict
 func RenderPlanText(w io.Writer, p *Plan) {
 	if p == nil || len(p.Rows) == 0 {
 		fmt.Fprintln(w, "  (no files)")
