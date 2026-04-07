@@ -20,6 +20,7 @@ import (
 	"github.com/fentas/b/pkg/env"
 	"github.com/fentas/b/pkg/gitcache"
 	"github.com/fentas/b/pkg/lock"
+	"github.com/fentas/b/pkg/state"
 )
 
 // Test hooks — production code uses the defaults; tests can override.
@@ -40,7 +41,10 @@ type UpdateOptions struct {
 	specifiedBinaries []*binary.Binary             // resolved binaries from CLI args
 	specifiedEnvRefs  []string                     // resolved env refs from CLI args
 	Strategy          string                       // strategy flag override: replace, client, merge
+	Safety            string                       // safety flag override: strict, prompt, auto
 	DryRun            bool                         // show what would change without writing
+	PlanJSON          bool                         // emit machine-readable plan and exit (implies dry-run)
+	Yes               bool                         // skip prompt confirmations (treat prompt as auto)
 	Rollback          bool                         // rollback to previous commit from lock
 	Group             string                       // only update envs in this group
 	stdinReader       io.Reader                    // overridden by tests; nil means os.Stdin
@@ -89,7 +93,10 @@ func NewUpdateCmd(shared *SharedOptions) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&o.Strategy, "strategy", "", "Conflict strategy: replace (default), client, merge")
+	cmd.Flags().StringVar(&o.Safety, "safety", "", "Override per-env safety: strict, prompt, auto")
 	cmd.Flags().BoolVar(&o.DryRun, "dry-run", false, "Show what would change without writing files")
+	cmd.Flags().BoolVar(&o.PlanJSON, "plan-json", false, "Emit a machine-readable plan as JSON (implies --dry-run)")
+	cmd.Flags().BoolVarP(&o.Yes, "yes", "y", false, "Skip prompt confirmation (treat prompt as auto)")
 	cmd.Flags().BoolVar(&o.Rollback, "rollback", false, "Rollback envs to previous commit from lock")
 	cmd.Flags().StringVar(&o.Group, "group", "", "Only update envs in this group")
 
@@ -255,6 +262,24 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			strategy = o.Strategy
 		}
 
+		// Determine safety: CLI flag > config > default (prompt). Defaulted
+		// via state.NormalizeSafety so unknown values fall back safely.
+		safety := state.NormalizeSafety(entry.Safety)
+		if o.Safety != "" {
+			safety = state.NormalizeSafety(o.Safety)
+		}
+		// --plan-json implies --dry-run; the user only wants the plan.
+		isDryRun := o.DryRun || o.PlanJSON
+
+		// We only need a dry-run "plan" pass when the safety mode might
+		// reject the apply (strict, or prompt where the user has to be
+		// asked). For SafetyAuto and for explicit --yes we can go straight
+		// to the real apply and render the plan from its result — no
+		// double work, no second clone-cache hit.
+		needsPlanFirst := isDryRun ||
+			safety == state.SafetyStrict ||
+			(safety == state.SafetyPrompt && !o.Yes)
+
 		cfg := env.EnvConfig{
 			Ref:        ref,
 			Label:      label,
@@ -263,15 +288,18 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			Ignore:     entry.Ignore,
 			Strategy:   strategy,
 			Files:      entry.Files,
-			DryRun:     o.DryRun,
+			DryRun:     needsPlanFirst,
 			OnPreSync:  entry.OnPreSync,
 			OnPostSync: entry.OnPostSync,
 			Stdout:     o.IO.Out,
 			Stderr:     o.IO.ErrOut,
 		}
-
-		// Set up interactive conflict resolver for replace strategy on TTY
-		if (strategy == "" || strategy == env.StrategyReplace) && isTTYFunc() && !o.DryRun {
+		// Attach the interactive conflict resolver only when this very
+		// pass will actually apply to disk (auto / --yes path). The
+		// resolver is interactive — running it during a dry-run plan
+		// pass would prompt the user before they've even approved the
+		// plan. The plan-first path sets it on the second pass instead.
+		if !needsPlanFirst && (strategy == "" || strategy == env.StrategyReplace) && isTTYFunc() {
 			cfg.ResolveConflict = o.interactiveConflictResolver(ref, lk)
 		}
 
@@ -286,65 +314,175 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 			cfg.ForceCommit = lockEntry.PreviousCommit
 		}
 
-		result, err := syncEnvFunc(cfg, projectRoot, "", lockEntry)
+		// First pass — dry-run when we need a plan to gate on, real
+		// apply when safety is auto / --yes.
+		firstResult, err := syncEnvFunc(cfg, projectRoot, "", lockEntry)
 		if err != nil {
 			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
 			continue
 		}
 
-		if result.Skipped {
-			fmt.Fprintf(o.IO.Out, "  %-40s %s\n", entry.Key, result.Message)
+		if firstResult.Skipped {
+			fmt.Fprintf(o.IO.Out, "  %-40s %s\n", entry.Key, firstResult.Message)
 			continue // don't overwrite lock entry when up-to-date
 		}
 
-		modes := []string{}
-		if o.DryRun {
-			modes = append(modes, "dry-run")
-		}
-		if o.Rollback {
-			modes = append(modes, "rollback")
-		}
-		prefix := ""
-		if len(modes) > 0 {
-			prefix = fmt.Sprintf("(%s) ", strings.Join(modes, ", "))
-		}
+		plan := env.PlanFromResult(firstResult)
 
-		fmt.Fprintf(o.IO.Out, "  %s%-40s %s → %s (%s)\n", prefix, entry.Key, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)
-		for _, f := range result.Files {
-			o.printFileStatus(f)
-		}
-
-		if result.Conflicts > 0 {
-			fmt.Fprintf(o.IO.ErrOut, "    ⚠ %d file(s) have merge conflicts — resolve manually:\n", result.Conflicts)
-			for _, f := range result.Files {
-				if f.Status == "conflict" || f.Status == "conflict (dry-run)" {
-					destPath := f.Dest
-					if !filepath.IsAbs(destPath) {
-						destPath = filepath.Join(projectRoot, destPath)
-					}
-					fmt.Fprintf(o.IO.ErrOut, "      %s\n", destPath)
-				}
+		// --plan-json: emit JSON and skip everything else for this env.
+		if o.PlanJSON {
+			if err := env.RenderPlanJSON(o.IO.Out, plan); err != nil {
+				fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, err)
 			}
+			continue
 		}
 
-		// Don't update lock in dry-run mode
-		if !o.DryRun {
+		// Header line + plan table.
+		fmt.Fprintf(o.IO.Out, "  %-40s %s → %s\n", entry.Key,
+			shortCommit(firstResult.PreviousCommit), shortCommit(firstResult.Commit))
+		env.RenderPlanText(o.IO.Out, plan)
+
+		// If the first pass was already a real apply (auto / --yes path),
+		// just write the lock and move on. No gate, no second SyncEnv.
+		if !needsPlanFirst {
+			if firstResult.Conflicts > 0 {
+				printConflictHint(o.IO.ErrOut, firstResult, projectRoot)
+			}
 			lk.UpsertEnv(lock.EnvEntry{
-				Ref:            result.Ref,
-				Label:          result.Label,
-				Version:        result.Version,
-				Commit:         result.Commit,
-				PreviousCommit: result.PreviousCommit,
-				Files:          result.Files,
+				Ref:            firstResult.Ref,
+				Label:          firstResult.Label,
+				Version:        firstResult.Version,
+				Commit:         firstResult.Commit,
+				PreviousCommit: firstResult.PreviousCommit,
+				Files:          firstResult.Files,
 			})
+			continue
 		}
+
+		// Plan-first path: gate on safety, then apply if approved.
+		apply, gateErr := o.gateApply(safety, plan, isDryRun)
+		if gateErr != nil {
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, gateErr)
+			continue
+		}
+		if !apply {
+			// Dry-run, strict refusal, or user declined.
+			continue
+		}
+
+		// Second pass: real apply. The gitcache is hot from the first
+		// pass, so only the actual file writes hit disk newly.
+		applyCfg := cfg
+		applyCfg.DryRun = false
+		if (strategy == "" || strategy == env.StrategyReplace) && isTTYFunc() {
+			applyCfg.ResolveConflict = o.interactiveConflictResolver(ref, lk)
+		}
+		realResult, err := syncEnvFunc(applyCfg, projectRoot, "", lockEntry)
+		if err != nil {
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
+			continue
+		}
+
+		if realResult.Conflicts > 0 {
+			printConflictHint(o.IO.ErrOut, realResult, projectRoot)
+		}
+
+		lk.UpsertEnv(lock.EnvEntry{
+			Ref:            realResult.Ref,
+			Label:          realResult.Label,
+			Version:        realResult.Version,
+			Commit:         realResult.Commit,
+			PreviousCommit: realResult.PreviousCommit,
+			Files:          realResult.Files,
+		})
 	}
 
-	if o.DryRun {
-		return nil // don't write lock in dry-run mode
+	if o.DryRun || o.PlanJSON {
+		return nil // don't write lock in dry-run / plan-only mode
 	}
 
 	return lock.WriteLock(lockDir, lk, o.bVersion)
+}
+
+// printConflictHint emits the legacy "needs manual resolution" footer for
+// any files that came back with conflict status.
+func printConflictHint(w io.Writer, result *env.SyncResult, projectRoot string) {
+	fmt.Fprintf(w, "    ⚠ %d file(s) have merge conflicts — resolve manually:\n", result.Conflicts)
+	for _, f := range result.Files {
+		status := strings.TrimSuffix(f.Status, " (dry-run)")
+		if status == "conflict" {
+			destPath := f.Dest
+			if !filepath.IsAbs(destPath) {
+				destPath = filepath.Join(projectRoot, destPath)
+			}
+			fmt.Fprintf(w, "      %s\n", destPath)
+		}
+	}
+}
+
+// gateApply implements the #125 safety + plan flow. It returns
+// (applyNow, error). applyNow=false means "do not run the real sync for
+// this env, but the loop should continue".
+func (o *UpdateOptions) gateApply(safety string, plan *env.Plan, isDryRun bool) (bool, error) {
+	// Dry-run is the simplest case: never apply, never error. The plan
+	// has already been printed for the user.
+	if isDryRun {
+		return false, nil
+	}
+
+	destructive := plan.HasDestructive()
+
+	switch safety {
+	case state.SafetyAuto:
+		// Trust the upstream and apply silently.
+		return true, nil
+
+	case state.SafetyStrict:
+		// Refuse if any destructive row is present.
+		if destructive {
+			return false, fmt.Errorf("strict safety: plan contains destructive changes — use --safety=prompt or --safety=auto to apply")
+		}
+		return true, nil
+
+	case state.SafetyPrompt:
+		// --yes overrides the prompt and behaves like auto.
+		if o.Yes {
+			return true, nil
+		}
+		// On non-TTY, prompt collapses to strict — refuse on destructive.
+		if !isTTYFunc() {
+			if destructive {
+				return false, fmt.Errorf("prompt safety on non-TTY: plan contains destructive changes — re-run with --yes, --safety=auto, or --dry-run")
+			}
+			return true, nil
+		}
+		// Interactive prompt.
+		return o.confirmApply(destructive), nil
+	}
+
+	// Unknown safety value (shouldn't happen — NormalizeSafety covers it,
+	// but be defensive).
+	return false, fmt.Errorf("unknown safety value %q", safety)
+}
+
+// confirmApply prompts the user with a y/N question. Default is N (safer).
+func (o *UpdateOptions) confirmApply(destructive bool) bool {
+	r := o.stdinReader
+	if r == nil {
+		r = os.Stdin
+	}
+	reader := bufio.NewReader(r)
+	if destructive {
+		fmt.Fprint(o.IO.ErrOut, "  Plan contains destructive changes. Apply? [y/N] ")
+	} else {
+		fmt.Fprint(o.IO.ErrOut, "  Apply plan? [y/N] ")
+	}
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+	input = strings.TrimSpace(strings.ToLower(input))
+	return input == "y" || input == "yes"
 }
 
 // printFileStatus prints a single file's sync status.

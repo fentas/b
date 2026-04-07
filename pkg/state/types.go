@@ -23,10 +23,36 @@ type EnvEntry struct {
 	Version     string                         `yaml:"version,omitempty"`
 	Ignore      []string                       `yaml:"ignore,omitempty"`
 	Strategy    string                         `yaml:"strategy,omitempty"`
+	Safety      string                         `yaml:"safety,omitempty"` // strict | prompt (default) | auto — see issue #125
 	Group       string                         `yaml:"group,omitempty"`
 	OnPreSync   string                         `yaml:"onPreSync,omitempty"`
 	OnPostSync  string                         `yaml:"onPostSync,omitempty"`
 	Files       map[string]envmatch.GlobConfig `yaml:"-"` // populated via custom EnvList unmarshal
+}
+
+// Safety levels for env updates. The default is SafetyPrompt.
+const (
+	// SafetyStrict refuses to apply any destructive change (overwrite,
+	// delete, conflict). The plan is printed; if it contains any
+	// destructive row the sync exits non-zero with no changes written.
+	SafetyStrict = "strict"
+	// SafetyPrompt prints the plan and asks the user to confirm before
+	// applying. On non-TTY (CI/CD) it falls back to strict behavior.
+	SafetyPrompt = "prompt"
+	// SafetyAuto applies the plan without prompting. Equivalent to the
+	// pre-#125 default behavior. Use only when you trust the upstream.
+	SafetyAuto = "auto"
+)
+
+// NormalizeSafety returns the canonical safety value. Empty string and
+// unknown values both fall back to SafetyPrompt — the safe default.
+func NormalizeSafety(s string) string {
+	switch s {
+	case SafetyStrict, SafetyPrompt, SafetyAuto:
+		return s
+	default:
+		return SafetyPrompt
+	}
 }
 
 // EnvList is a list of env entries parsed from the envs map.
@@ -47,6 +73,7 @@ func (list *EnvList) UnmarshalYAML(unmarshal func(interface{}) error) error {
 			e.Version = r.Version
 			e.Ignore = r.Ignore
 			e.Strategy = r.Strategy
+			e.Safety = r.Safety
 			e.Group = r.Group
 			e.OnPreSync = r.OnPreSync
 			e.OnPostSync = r.OnPostSync
@@ -76,6 +103,11 @@ func (list *EnvList) MarshalYAML() (interface{}, error) {
 		}
 		if e.Strategy != "" && e.Strategy != "replace" {
 			cfg["strategy"] = e.Strategy
+		}
+		// Omit safety when it's the default ("prompt" or empty) so b.yaml
+		// stays terse for the common case.
+		if e.Safety != "" && e.Safety != SafetyPrompt {
+			cfg["safety"] = e.Safety
 		}
 		if e.Group != "" {
 			cfg["group"] = e.Group
@@ -146,6 +178,7 @@ type envEntryRaw struct {
 	Version     string                 `yaml:"version,omitempty"`
 	Ignore      []string               `yaml:"ignore,omitempty"`
 	Strategy    string                 `yaml:"strategy,omitempty"`
+	Safety      string                 `yaml:"safety,omitempty"`
 	Group       string                 `yaml:"group,omitempty"`
 	OnPreSync   string                 `yaml:"onPreSync,omitempty"`
 	OnPostSync  string                 `yaml:"onPostSync,omitempty"`
