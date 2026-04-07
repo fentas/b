@@ -273,7 +273,6 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			// directly. This preserves the legacy `select` semantics
 			// (extract a subset, overwrite the destination) for
 			// callers that explicitly opted into per-key extraction.
-			//.
 			if !allTopLevelSelectors {
 				return content, nil
 			}
