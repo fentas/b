@@ -549,17 +549,30 @@ func doMerge(
 		}
 	}
 
-	// Try the structural merge first for YAML/JSON destinations. It
-	// resolves the "both sides added adjacent map entries" case that
-	// the text-based git merge-file mistakes for a conflict. On parse
-	// failure, unsupported format, or any conflicts it returns, fall
-	// back to the text path which still produces well-known conflict
-	// markers consumers know how to resolve.
-	if merged, hasConflict, structErr := Merge3WayStructural(local, base, upstream, destPath); structErr == nil && !hasConflict {
+	// Try the text merge first. When git merge-file produces a clean
+	// result we keep it byte-for-byte, which preserves local key
+	// order, comments, and whitespace — the structural merge would
+	// otherwise re-serialize through yaml.v3 / encoding/json and
+	// reorder map keys, dropping comments in the process.
+	//
+	// Only when the text merge reports conflicts do we try the
+	// structural merge for YAML/JSON. The structural path resolves
+	// the "both sides added adjacent map entries" case that
+	// git merge-file mistakes for a conflict. If the structural
+	// merge also fails to resolve cleanly we return the text
+	// merge's conflicted output so the user gets the familiar
+	// git-marker form they can resolve manually.
+	merged, hasConflict, mergeErr := gitcache.Merge3Way(local, base, upstream)
+	if mergeErr != nil {
+		return nil, false, mergeErr
+	}
+	if !hasConflict {
 		return merged, false, nil
 	}
-
-	return gitcache.Merge3Way(local, base, upstream)
+	if structMerged, structConflict, structErr := Merge3WayStructural(local, base, upstream, destPath); structErr == nil && !structConflict {
+		return structMerged, false, nil
+	}
+	return merged, hasConflict, nil
 }
 
 // writeFile ensures the dest directory exists and writes content with the given mode.

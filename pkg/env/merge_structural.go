@@ -42,7 +42,7 @@ import (
 //   - present in base, missing on one side, unchanged on the other → delete
 //   - present in base, missing on one side, changed on the other → conflict
 func Merge3WayStructural(local, base, upstream []byte, destPath string) ([]byte, bool, error) {
-	format := detectStructuralFormat(destPath, local)
+	format := detectStructuralFormat(destPath)
 	if format == "" {
 		return nil, false, fmt.Errorf("structural merge: unsupported format")
 	}
@@ -78,21 +78,17 @@ func Merge3WayStructural(local, base, upstream []byte, destPath string) ([]byte,
 	return out, false, nil
 }
 
-// detectStructuralFormat returns "json", "yaml", or "" based on the
-// destination filename. JSON is detected by extension only; anything
-// matching .yaml/.yml is YAML; bare/unknown extensions return "".
-func detectStructuralFormat(destPath string, sample []byte) string {
-	ext := strings.ToLower(filepath.Ext(destPath))
-	switch ext {
+// detectStructuralFormat returns "json", "yaml", or "" based purely
+// on the destination filename extension. The extension is
+// authoritative — sniffing the bytes would risk routing a YAML file
+// that happens to start with `{` (a flow-style mapping) through the
+// JSON path and producing nonsense output.
+func detectStructuralFormat(destPath string) string {
+	switch strings.ToLower(filepath.Ext(destPath)) {
 	case ".json":
 		return "json"
 	case ".yaml", ".yml":
 		return "yaml"
-	}
-	// Fallback: try to sniff JSON.
-	trim := bytes.TrimSpace(sample)
-	if len(trim) > 0 && (trim[0] == '{' || trim[0] == '[') {
-		return "json"
 	}
 	return ""
 }
@@ -149,6 +145,14 @@ func normalizeValue(v any) any {
 }
 
 func serializeStructural(v any, format string) ([]byte, error) {
+	// Empty input → empty output. Without this check, an empty map
+	// would serialize as `{}\n`, changing the document even when
+	// every side started empty. The structural merge runs as a
+	// fallback path on conflicts and shouldn't materialize content
+	// out of nothing.
+	if m, ok := v.(map[string]any); ok && len(m) == 0 {
+		return nil, nil
+	}
 	switch format {
 	case "json":
 		var buf bytes.Buffer
@@ -202,6 +206,17 @@ func mergeValues(base, local, upstream any, path []string) (any, []string) {
 // mergeMaps walks the union of keys across base/local/upstream and merges
 // per-key. Conflicts bubble up with their dotted path so the caller can
 // surface a useful error.
+//
+// Output ordering: keys are sorted alphabetically. The result is a
+// Go map[string]any, so any ordering chosen here is squashed when
+// the JSON / YAML encoder re-emits the document — encoding/json
+// sorts alphabetically and yaml.v3 does too. Sorting here makes the
+// conflict-list ordering deterministic for tests; it does not, by
+// itself, change what the consumer sees on disk. The wider key-
+// reordering caveat is documented on doMerge: callers fall back to
+// the structural merge only when the text merge has already
+// produced conflicts, so the trade-off is "messy diff" versus
+// "unresolved conflict markers", and the messy diff wins.
 func mergeMaps(base, local, upstream map[string]any, path []string) (map[string]any, []string) {
 	keys := make(map[string]struct{}, len(base)+len(local)+len(upstream))
 	for k := range base {
