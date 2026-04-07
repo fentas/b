@@ -13,36 +13,32 @@ import (
 // result of the selected scope (from doMerge), and the list of selectors,
 // and returns a new file where only the selected top-level keys in `local`
 // are replaced with the merged values. Out-of-scope top-level keys in
-// `local` are preserved; YAML comments and key ordering are preserved on
-// a best-effort basis. The structural fast path round-trips through
-// yaml.v3's emitter, which can normalize whitespace and quoting style
-// even for unchanged keys, so the output is not guaranteed to be
-// byte-identical to the input. The text fallback path (used when the
-// merge produced conflict markers) preserves bytes verbatim.
+// `local` are preserved.
 //
 // This is the complement of filterContent: filterContent extracts a scope;
-// spliceSelectedScope puts a (merged) scope back.
+// spliceSelectedScope puts a (merged) scope back. The implementation
+// dispatches between three paths in order of fidelity (see spliceYAML):
 //
-// Two paths:
+//   - Byte-level splice (best fidelity): when `merged` parses cleanly,
+//     copy out-of-scope byte ranges from `local` verbatim and re-emit
+//     each in-scope `key: value` pair via the yaml.v3 encoder. Bytes
+//     outside the replaced ranges are byte-identical to local; the
+//     scoped key lines are re-encoded so quoting/style and key-line
+//     comments inside those ranges may change.
 //
-//   - Structural splice (fast path): when `merged` parses as valid YAML,
-//     rewrite the local Node tree in place (replace scoped key values,
-//     append new scoped keys, remove vanished scoped keys). Out-of-scope
-//     comments and layout are preserved because their Nodes are untouched.
-//     Note: the yaml.v3 encoder re-emits the whole document, so the output won't
-//     be byte-identical to the input even for unchanged keys — this is a
-//     limitation of yaml.v3 that the structural splice cannot work around
-//     here. A format-preserving emitter is tracked as a separate
-//     follow-up.
+//   - Structural splice (fallback): when the byte-level path can't be
+//     used (rare yaml.v3 edge cases — flow-style mappings, single-line
+//     docs), round-trip the whole document through yaml.v3's Node tree.
+//     Out-of-scope keys keep their content but lose exact whitespace
+//     because the encoder re-emits the entire file.
 //
-//   - Text splice (conflict path): when `merged` contains `git merge-file`
-//     conflict markers, it doesn't parse as YAML. In that case we find the
-//     byte range of each scoped top-level key in `local` using yaml.v3
-//     Node Line/Column metadata, and replace that range with the
-//     conflicted text from `merged`. The rest of `local` is preserved
-//     byte-for-byte, so consumer-owned content and comments survive even
-//     in the conflict case — which is the #122 data-loss fix the user
-//     actually cares about.
+//   - Text splice (conflict path): when `merged` contains git merge-file
+//     conflict markers it doesn't parse as YAML at all. We then find
+//     the byte range of each scoped top-level key in `local` and
+//     substitute the conflicted text in place. Bytes outside the
+//     scoped ranges are preserved verbatim, so consumer-owned content
+//     and comments survive even in the conflict case — the #122
+//     data-loss fix.
 //
 // Splicing is only correct when `merged` contains the COMPLETE value
 // for each in-scope top-level key. Nested selectors like `database.host`
