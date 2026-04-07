@@ -129,10 +129,45 @@ func TestSpliceYAMLByteLevel_PreservesCRLFLineEndings(t *testing.T) {
 	}
 }
 
+// TestSpliceYAMLByteLevel_AppendsNewScopedKey verifies the byte-level
+// splice's "additions" path: when a scoped top-level key exists in
+// merged but NOT in local, it must be appended at EOF without
+// disturbing the existing bytes and with a separating newline.
+func TestSpliceYAMLByteLevel_AppendsNewScopedKey(t *testing.T) {
+	// Local has only out-of-scope keys (envs), no binaries.
+	local := []byte(`envs:
+  github.com/keep/me:
+    files:
+      a.yaml: docs/a.yaml
+`)
+	// Merged introduces binaries. The splice should append it at EOF.
+	merged := []byte(`binaries:
+  kubectl: {}
+`)
+	out, err := spliceSelectedScope(local, merged, []string{"binaries"}, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	outStr := string(out)
+	// The original envs section must come first and be byte-identical.
+	if !bytes.HasPrefix(out, local) {
+		t.Errorf("local prefix not preserved verbatim:\nlocal: %q\nout: %q", local, outStr)
+	}
+	// The merged binaries content must follow.
+	if !strings.Contains(outStr, "binaries:") || !strings.Contains(outStr, "kubectl") {
+		t.Errorf("appended binaries missing:\n%s", outStr)
+	}
+	// The append must be separated by a newline (no fused last line).
+	binariesIdx := bytes.Index(out, []byte("binaries:"))
+	if binariesIdx <= 0 || out[binariesIdx-1] != '\n' {
+		t.Errorf("appended block not separated by newline at %d:\n%q", binariesIdx, outStr)
+	}
+}
+
 // TestSpliceYAMLByteLevel_PreservesOutOfScopeBytesVerbatim verifies
 // that the format-preserving byte-level splice keeps out-of-scope
 // content byte-identical to the input. The previous structural
-// splice round-tripped the whole document through yaml.Marshal,
+// splice re-encoded the whole document with the yaml.v3 encoder,
 // which would normalize whitespace, quoting, and field ordering
 // even for keys the splice didn't touch — producing noisy git
 // diffs on every successful merge sync.
