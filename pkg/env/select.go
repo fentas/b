@@ -90,11 +90,19 @@ func filterYAMLHybrid(content []byte, selectors []string) ([]byte, error) {
 	return mergeYAMLTopLevel(simpleOut, jmesOut)
 }
 
-// filterJSONHybrid dispatches JSON to either the legacy gjson path or
-// JMESPath. Since JSON has no comments, the only benefit of the gjson
-// path is its slightly different semantics — but the hybrid classifier
-// keeps behavior uniform with YAML so users don't have to learn two
-// dialects.
+// filterJSONHybrid dispatches JSON selectors to either the legacy gjson
+// path or JMESPath based on the classifier. JSON has no comments to
+// preserve, so the only reason to keep two paths is the differing
+// semantics: gjson handles simple dot-paths and preserves wrapping
+// keys, JMESPath handles full expressions.
+//
+// The mixed case (a single file with both simple AND complex selectors)
+// is intentionally unsupported. Mixing them on a JSON file would
+// require merging the gjson output and the JMESPath output at the
+// top-level, and that merge has no test coverage and no real-world
+// use case (users either want a clean dot-path extraction or a full
+// JMESPath query, not both on the same JSON file). Erroring out is
+// preferable to silently shipping an untested merge path.
 func filterJSONHybrid(content []byte, selectors []string) ([]byte, error) {
 	simple, complex := splitSelectorsByComplexity(selectors)
 
@@ -105,16 +113,7 @@ func filterJSONHybrid(content []byte, selectors []string) ([]byte, error) {
 		return filterJSONJMESPath(content, complex)
 	}
 
-	// Mixed: run both and merge.
-	simpleOut, err := filterJSON(content, simple)
-	if err != nil {
-		return nil, err
-	}
-	jmesOut, err := filterJSONJMESPath(content, complex)
-	if err != nil {
-		return nil, err
-	}
-	return mergeJSONTopLevel(simpleOut, jmesOut)
+	return nil, fmt.Errorf("mixing simple and complex selectors on a JSON file is not supported — use either dot-paths only or JMESPath only (got %d simple and %d complex selectors)", len(simple), len(complex))
 }
 
 // mergeYAMLTopLevel merges b's top-level keys into a's. Any key present
@@ -198,28 +197,6 @@ func findYAMLTopLevelKey(mapping *yaml.Node, key string) int {
 		}
 	}
 	return -1
-}
-
-// mergeJSONTopLevel is the JSON sibling of mergeYAMLTopLevel.
-func mergeJSONTopLevel(a, b []byte) ([]byte, error) {
-	var aData, bData map[string]interface{}
-	if err := json.Unmarshal(a, &aData); err != nil {
-		return nil, fmt.Errorf("merging JSON results: parsing simple: %w", err)
-	}
-	if err := json.Unmarshal(b, &bData); err != nil {
-		return nil, fmt.Errorf("merging JSON results: parsing jmespath: %w", err)
-	}
-	if aData == nil {
-		aData = make(map[string]interface{})
-	}
-	for k, v := range bData {
-		aData[k] = v
-	}
-	out, err := json.MarshalIndent(aData, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("encoding merged JSON: %w", err)
-	}
-	return append(out, '\n'), nil
 }
 
 // filterYAML extracts selected keys from YAML content using yaml.v3 Node API.
