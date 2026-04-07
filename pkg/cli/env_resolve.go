@@ -10,6 +10,7 @@ import (
 	"github.com/fentas/goodies/templates"
 	"github.com/spf13/cobra"
 
+	"github.com/fentas/b/pkg/env"
 	"github.com/fentas/b/pkg/lock"
 )
 
@@ -92,20 +93,39 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 		return nil
 	}
 
+	// Normalize each filter arg to its canonical "ref" or "ref#label"
+	// form so labeled envs can be targeted unambiguously when multiple
+	// lock entries share the same ref.
 	filter := make(map[string]bool, len(envFilter))
 	for _, k := range envFilter {
-		filter[k] = true
+		filter[envKey(k)] = true
 	}
 
+	projectRoot := o.ProjectRoot()
 	var totalConflicts, totalResolved int
-	for _, entry := range lk.Envs {
-		if len(filter) > 0 && !filter[entry.Ref] {
+	lockChanged := false
+	for ei := range lk.Envs {
+		entry := &lk.Envs[ei]
+		key := envKey(entry.Ref)
+		if entry.Label != "" {
+			key = entry.Ref + "#" + entry.Label
+		}
+		if len(filter) > 0 && !filter[key] {
 			continue
 		}
-		for _, f := range entry.Files {
+		for fi := range entry.Files {
+			f := &entry.Files[fi]
 			absDest := f.Dest
 			if !filepath.IsAbs(absDest) {
-				absDest = filepath.Join(o.ProjectRoot(), absDest)
+				absDest = filepath.Join(projectRoot, absDest)
+			}
+			absDest = filepath.Clean(absDest)
+			// Path-traversal check against projectRoot. A
+			// malicious or hand-edited lockfile must not let
+			// `b env resolve` read or write files outside the
+			// project root.
+			if err := env.ValidatePathUnderRoot(projectRoot, absDest); err != nil {
+				return fmt.Errorf("path traversal rejected for %s: %w", f.Dest, err)
 			}
 			data, err := os.ReadFile(absDest)
 			if err != nil {
@@ -118,7 +138,7 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 				continue
 			}
 			totalConflicts++
-			fmt.Fprintf(o.IO.Out, "  %s → %s\n", entry.Ref, f.Dest)
+			fmt.Fprintf(o.IO.Out, "  %s → %s\n", key, f.Dest)
 
 			if !o.Ours && !o.Theirs {
 				continue
@@ -130,12 +150,28 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 			if err := os.WriteFile(absDest, resolved, 0644); err != nil {
 				return fmt.Errorf("writing %s: %w", f.Dest, err)
 			}
+			// Update the lock entry's SHA so the next sync /
+			// `b verify` doesn't treat the resolved file as
+			// drifted. Without this step, `b env resolve` would
+			// produce a state where every status check still
+			// flagged the file as locally modified.
+			newHash, hashErr := lock.SHA256File(absDest)
+			if hashErr == nil && newHash != "" {
+				f.SHA256 = newHash
+				lockChanged = true
+			}
 			totalResolved += n
 			side := "upstream"
 			if o.Ours {
 				side = "local"
 			}
 			fmt.Fprintf(o.IO.Out, "    → resolved %d region(s) in favor of %s\n", n, side)
+		}
+	}
+
+	if lockChanged {
+		if err := lock.WriteLock(lockDir, lk, o.bVersion); err != nil {
+			return fmt.Errorf("updating b.lock after resolve: %w", err)
 		}
 	}
 
@@ -149,6 +185,15 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 	}
 	fmt.Fprintf(o.IO.Out, "\nResolved %d region(s) across %d file(s).\n", totalResolved, totalConflicts)
 	return nil
+}
+
+// envKey returns the canonical "ref" or "ref#label" form for a user-
+// supplied env key. It's a no-op for keys that already include a label
+// or that don't need normalization; it exists so the filter matching
+// in Run can compare against the same canonical form the lock entries
+// produce.
+func envKey(s string) string {
+	return strings.TrimSpace(s)
 }
 
 // hasConflictMarkers reports whether the byte slice contains the
@@ -234,4 +279,3 @@ func resolveConflictMarkers(data []byte, keepOurs bool) ([]byte, int, error) {
 	}
 	return []byte(strings.Join(out, "\n")), count, nil
 }
-
