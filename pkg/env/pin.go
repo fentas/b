@@ -42,14 +42,22 @@ const PinAnnotation = "b.pin"
 // upstream then deleted is preserved.
 //
 // Pin scope is per-map-node: if `kubectl` is pinned, the entire
-// `kubectl:` map is preserved verbatim. Deeper pins only apply when
-// the path is itself a nested map node that can carry the
-// `b.pin: true` annotation; scalar fields like a typical
-// `kubectl.version` value cannot be pinned directly because there is
-// nowhere to attach the annotation. The implementation walks the
-// local tree once to collect annotated map paths and then walks
-// pending to substitute. Pinned paths that don't exist in pending
-// (because upstream deleted them) are reinserted from local.
+// `kubectl:` map is replaced with the local version. Deeper pins
+// only apply when the path is itself a nested map node that can
+// carry the `b.pin: true` annotation; scalar fields like a typical
+// `kubectl.version` value cannot be pinned directly because there
+// is nowhere to attach the annotation. Pinned paths that don't
+// exist in pending (because upstream deleted them) are reinserted
+// from local.
+//
+// Formatting caveat: when pin restoration actually substitutes a
+// subtree, the file is round-tripped through the yaml.v3 encoder,
+// so comments and whitespace on the affected file are NOT
+// preserved (yaml.v3 has no format-preserving emitter for this
+// kind of edit-in-place). When every pinned subtree already
+// matches what the splice produced, applyPinsYAML returns the
+// splice's bytes verbatim — so the common no-drift case keeps
+// splice's byte-preservation guarantees.
 func applyPinsYAML(local, pending []byte, filePath string) ([]byte, error) {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	if ext != ".yaml" && ext != ".yml" {
@@ -121,9 +129,22 @@ func applyPinsYAML(local, pending []byte, filePath string) ([]byte, error) {
 		}
 	}
 
+	changed := false
 	for _, p := range pinned {
 		localNode := lookupPath(&localDoc, p.path)
 		if localNode == nil {
+			continue
+		}
+		// Skip when pending already has the exact same subtree at
+		// this path. This is the common case for syncs where the
+		// pinned keys haven't drifted yet, and skipping the
+		// substitution lets the function fall through to the
+		// "return pending unchanged" branch — which preserves
+		// every byte that the splice carefully laid out, instead
+		// of round-tripping the whole document through yaml.v3
+		// and dropping comments / whitespace.
+		if pendingNode := lookupPath(&pendingDoc, p.path); pendingNode != nil &&
+			yamlNodesStructurallyEqual(pendingNode, localNode) {
 			continue
 		}
 		if !setPath(&pendingDoc, p.path, localNode) {
@@ -131,6 +152,15 @@ func applyPinsYAML(local, pending []byte, filePath string) ([]byte, error) {
 			// upstream and consumer wants to keep it. Add it back.
 			addPath(&pendingDoc, p.path, localNode)
 		}
+		changed = true
+	}
+	if !changed {
+		// No pinned subtree needed substitution: every pin already
+		// matches what the splice produced. Return the splice's
+		// bytes verbatim instead of round-tripping through the
+		// yaml.v3 encoder, which would otherwise reformat the
+		// whole file.
+		return pending, nil
 	}
 
 	var buf strings.Builder
@@ -143,6 +173,26 @@ func applyPinsYAML(local, pending []byte, filePath string) ([]byte, error) {
 		return nil, fmt.Errorf("finalize pinned doc: %w", err)
 	}
 	return []byte(buf.String()), nil
+}
+
+// yamlNodesStructurallyEqual reports whether two yaml.Node trees
+// encode to the same canonical bytes. We use the encoder rather than
+// comparing fields directly so style/comment differences (which the
+// pin restoration explicitly doesn't care about) don't trip the
+// equality check.
+func yamlNodesStructurallyEqual(a, b *yaml.Node) bool {
+	enc := func(n *yaml.Node) []byte {
+		var buf strings.Builder
+		e := yaml.NewEncoder(&yamlStringWriter{&buf})
+		e.SetIndent(2)
+		if err := e.Encode(n); err != nil {
+			return nil
+		}
+		_ = e.Close()
+		return []byte(buf.String())
+	}
+	ab, bb := enc(a), enc(b)
+	return ab != nil && bytes.Equal(ab, bb)
 }
 
 type yamlStringWriter struct{ b *strings.Builder }
