@@ -44,9 +44,17 @@ import (
 //     in the conflict case — which is the #122 data-loss fix the user
 //     actually cares about.
 //
-// Only top-level selectors are supported. Nested selectors (`database.host`)
-// are flattened to their top-level key (`database`) and the whole top-level
-// scope is spliced; the merge will have done the right thing inside.
+// Splicing is only correct when `merged` contains the COMPLETE value
+// for each in-scope top-level key. Nested selectors like `database.host`
+// must NOT reach this function — the caller (SyncEnv) classifies them
+// upstream and either errors out (for `merge`) or skips the splice
+// entirely (for `replace`). If a nested selector did reach the splice,
+// the in-scope view would be a truncated `{database: {host: ...}}`
+// mapping, and replacing the consumer's full `database` node with that
+// would silently drop sibling fields like `database.port`. The
+// classification rules live in pkg/env/env.go's `allTopLevelSelectors`
+// flag; this comment exists to keep splice.go honest about the
+// preconditions it relies on.
 func spliceSelectedScope(local, merged []byte, selectors []string, filePath string) ([]byte, error) {
 	if len(selectors) == 0 {
 		return merged, nil
