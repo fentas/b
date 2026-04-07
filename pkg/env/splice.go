@@ -143,10 +143,25 @@ func spliceYAMLStructural(local, merged []byte, scope map[string]bool) ([]byte, 
 		return nil, fmt.Errorf("parsing local YAML for splice: %w", err)
 	}
 
-	// Empty local file: emit the merged content verbatim. There's
-	// nothing to splice into and nothing to lose.
+	// Empty document content: there's nothing to splice INTO. But a
+	// "valid YAML file with no document content" can still contain
+	// header comments and whitespace that yaml.v3 doesn't surface
+	// as Document.Content. Preserve those original bytes by
+	// concatenating local + merged instead of dropping local
+	// entirely. Per copilot review on PR #126 round 9.
 	if localDoc.Kind == 0 || len(localDoc.Content) == 0 {
-		return merged, nil
+		if len(local) == 0 {
+			return merged, nil
+		}
+		if len(merged) == 0 {
+			return append([]byte(nil), local...), nil
+		}
+		out := append([]byte(nil), local...)
+		if out[len(out)-1] != '\n' {
+			out = append(out, '\n')
+		}
+		out = append(out, merged...)
+		return out, nil
 	}
 	if localDoc.Kind != yaml.DocumentNode {
 		return nil, fmt.Errorf("unexpected local YAML structure for splice")
@@ -417,7 +432,22 @@ func spliceYAMLText(local, merged []byte, scope map[string]bool) ([]byte, error)
 
 	ranges := topLevelKeyRanges(local, localRoot)
 	if len(ranges) == 0 {
-		return merged, nil
+		// No replaceable top-level key ranges (e.g. local was an
+		// empty `{}` mapping). Preserve original bytes and append
+		// merged so any leading comments stay with the file. Per
+		// copilot review on PR #126 round 9.
+		if len(local) == 0 {
+			return merged, nil
+		}
+		if len(merged) == 0 {
+			return append([]byte(nil), local...), nil
+		}
+		out := append([]byte(nil), local...)
+		if out[len(out)-1] != '\n' {
+			out = append(out, '\n')
+		}
+		out = append(out, merged...)
+		return out, nil
 	}
 
 	// Collect the scoped ranges in source order.

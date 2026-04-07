@@ -267,6 +267,29 @@ func TestSpliceSelectedScope_JSONErrors(t *testing.T) {
 	}
 }
 
+// TestSpliceYAMLStructural_HeaderCommentsPreservedOnEmptyDoc verifies
+// that splicing into a YAML file with only header comments (and no
+// document content) preserves the comments instead of dropping them.
+// yaml.v3 doesn't surface header-only files as Document.Content, so
+// the empty-doc fast path has to fall back to byte concatenation.
+func TestSpliceYAMLStructural_HeaderCommentsPreservedOnEmptyDoc(t *testing.T) {
+	local := []byte(`# managed by hand — do not edit
+# generated from upstream
+`)
+	merged := []byte("binaries:\n  kubectl: {}\n")
+	out, err := spliceSelectedScope(local, merged, []string{"binaries"}, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "managed by hand") {
+		t.Errorf("header comment dropped, got:\n%s", outStr)
+	}
+	if !strings.Contains(outStr, "kubectl") {
+		t.Errorf("merged binaries missing, got:\n%s", outStr)
+	}
+}
+
 // TestSpliceYAMLText_PreservesCommentAttributedToNextKey verifies the
 // boundary attribution fix from PR #126 round 5: a comment block sitting
 // between an in-scope key and an out-of-scope key must be preserved when
