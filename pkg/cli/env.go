@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -24,14 +25,79 @@ import (
 	"github.com/fentas/b/pkg/state"
 )
 
-// hasConflictMarkers reports whether the byte slice contains all
-// three pieces of a git merge-file conflict region. We require all
-// three so partial matches (e.g. a markdown rule line that contains
-// `=======`) don't trip the detector.
+// hasConflictMarkers reports whether the byte slice contains a git
+// merge-file conflict region. The check is line-anchored so a
+// markdown rule line like `=======` or stray `<<<<<<<` inside a
+// string literal can't trip the detector. We early-return as soon
+// as all three line markers have been seen.
+//
+// Note: pkg/env/splice.go has a similar `containsConflictMarkers`
+// helper that uses substring matching and isn't currently exported.
+// Keeping a local copy here to avoid widening the pkg/env API
+// surface in this small follow-up; merging that into one shared
+// helper is tracked as a separate cleanup.
 func hasConflictMarkers(b []byte) bool {
-	return bytes.Contains(b, []byte("<<<<<<<")) &&
-		bytes.Contains(b, []byte("=======")) &&
-		bytes.Contains(b, []byte(">>>>>>>"))
+	var hasStart, hasSep, hasEnd bool
+	scanner := bufio.NewScanner(bytes.NewReader(b))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		switch {
+		case bytes.HasPrefix(line, []byte("<<<<<<< ")):
+			hasStart = true
+		case bytes.Equal(line, []byte("=======")):
+			hasSep = true
+		case bytes.HasPrefix(line, []byte(">>>>>>> ")):
+			hasEnd = true
+		}
+		if hasStart && hasSep && hasEnd {
+			return true
+		}
+	}
+	return false
+}
+
+// hashAndScanConflicts reads a file once, computing its SHA-256 hex
+// digest and detecting whether the contents include any git
+// merge-file conflict region. Bundling the two passes lets `b env
+// status` scan every synced file without paying for two reads (one
+// for the hash, one for the marker check).
+//
+// Returns ("", false, err) on read failure. A missing file is an
+// error from the caller's perspective and is not handled specially
+// here — env.Status's existing missing-file branch checks os.Stat
+// before calling this helper.
+func hashAndScanConflicts(path string) (string, bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false, err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	scanner := bufio.NewScanner(io.TeeReader(f, h))
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	var hasStart, hasSep, hasEnd, hasAll bool
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if !hasAll {
+			switch {
+			case bytes.HasPrefix(line, []byte("<<<<<<< ")):
+				hasStart = true
+			case bytes.Equal(line, []byte("=======")):
+				hasSep = true
+			case bytes.HasPrefix(line, []byte(">>>>>>> ")):
+				hasEnd = true
+			}
+			if hasStart && hasSep && hasEnd {
+				hasAll = true
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", false, err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), hasAll, nil
 }
 
 // NewEnvCmd creates the env parent command with subcommands.
@@ -147,21 +213,23 @@ func (o *EnvStatusOptions) Run() error {
 				}
 				continue
 			}
-			hash, err := lock.SHA256File(destPath)
+			// Single-pass: hash the file AND scan it for conflict
+			// markers in one read. We must scan EVERY synced file,
+			// not just ones whose SHA drifted, because env update
+			// records the post-merge bytes (including any conflict
+			// markers) into the lock — so a conflicted file can
+			// match its lock SHA exactly and would otherwise be
+			// reported as "✓ up to date".
+			hash, hasMarkers, err := hashAndScanConflicts(destPath)
 			if err != nil {
 				localDrift++
 				continue
 			}
+			if hasMarkers {
+				conflictedFiles++
+			}
 			if hash != f.SHA256 {
 				localDrift++
-				// Re-read and check for conflict markers so the
-				// status output can call them out specifically. We
-				// only ever read files we already know are drifted,
-				// so this is bounded by `localDrift` rather than
-				// scanning every synced file on every status run.
-				if data, rerr := os.ReadFile(destPath); rerr == nil && hasConflictMarkers(data) {
-					conflictedFiles++
-				}
 				continue
 			}
 			// Also check file mode drift when lock records a mode
@@ -178,8 +246,10 @@ func (o *EnvStatusOptions) Run() error {
 			}
 		}
 
-		// Build status line
-		if upstreamStatus == "" && localDrift == 0 && missingFiles == 0 {
+		// Build status line. Conflicted files block the "up to date"
+		// shortcut even when their on-disk SHA matches the lock —
+		// the user still needs to resolve the markers.
+		if upstreamStatus == "" && localDrift == 0 && missingFiles == 0 && conflictedFiles == 0 {
 			fmt.Fprintf(o.IO.Out, "  %-40s %s @ %s ✓ up to date\n", entry.Key, version, shortCommit(lockEntry.Commit))
 		} else {
 			fmt.Fprintf(o.IO.Out, "  %-40s %s @ %s\n", entry.Key, version, shortCommit(lockEntry.Commit))
