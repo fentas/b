@@ -130,6 +130,19 @@ func decodeOrderedJSONObject(data []byte) (orderedJSONObject, error) {
 		out.Keys = append(out.Keys, key)
 		out.Values = append(out.Values, raw)
 	}
+	// Consume the closing '}' so the splice rejects truncated input
+	// and ensure no trailing garbage follows. Without these checks, a
+	// malformed local file could be silently rewritten.
+	closing, err := dec.Token()
+	if err != nil {
+		return out, fmt.Errorf("missing closing '}': %w", err)
+	}
+	if d, ok := closing.(json.Delim); !ok || d != '}' {
+		return out, fmt.Errorf("expected '}' at end of object, got %v", closing)
+	}
+	if dec.More() {
+		return out, fmt.Errorf("unexpected trailing content after JSON object")
+	}
 	return out, nil
 }
 

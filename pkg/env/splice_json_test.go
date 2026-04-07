@@ -116,6 +116,28 @@ func TestSpliceJSON_ConflictMarkersErrorOut(t *testing.T) {
 	}
 }
 
+// TestSpliceJSON_RejectsMalformedLocal: a truncated local file (no
+// closing brace) or trailing garbage after the object must produce
+// an error rather than silently succeeding and rewriting the file.
+func TestSpliceJSON_RejectsMalformedLocal(t *testing.T) {
+	merged := []byte(`{"binaries":{"a":1}}`)
+	cases := []struct {
+		name  string
+		local string
+	}{
+		{"no closing brace", `{"binaries":{"a":1}`},
+		{"trailing garbage", `{"binaries":{"a":1}}garbage`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := spliceJSON([]byte(c.local), merged, []string{"binaries"})
+			if err == nil {
+				t.Errorf("expected error for malformed local: %s", c.local)
+			}
+		})
+	}
+}
+
 // TestSpliceJSON_NestedSelectorIsTopLevelOnly mirrors the YAML rule:
 // `database.host` reduces to top-level key `database`.
 func TestSpliceJSON_NestedSelectorIsTopLevelOnly(t *testing.T) {
