@@ -363,23 +363,33 @@ func TestFilterContent_InvalidJMESPath(t *testing.T) {
 }
 
 // TestWrapKeyFor covers the fallback-key logic for non-map results.
+// Step numbering mirrors the wrapKeyFor implementation:
+//
+//	(1) leading identifier + JMESPath grammar  → use leading
+//	(2) simple dot-path                        → trailing or whole
+//	(3) anything else                          → "result"
+//
+// All filter selectors below are used purely to exercise wrapKeyFor's
+// parser; the inner JMESPath bodies are never evaluated, so they
+// intentionally use a minimal `[?true]` rather than the documented
+// `items()/[1]` dialect.
 func TestWrapKeyFor(t *testing.T) {
 	cases := []struct {
 		sel, want string
 	}{
-		// (1) Whole expression is a simple identifier.
-		{"binaries", "binaries"},
-		{".binaries", "binaries"},
-		// (2) Trailing identifier after a dot.
-		{"database.host", "host"},
-		// (3) Leading identifier followed by JMESPath grammar.
+		// (1) Leading identifier followed by JMESPath grammar.
 		// Before the round-7 fix these all fell through to "result".
-		{"binaries[?contains(value.groups, 'core')]", "binaries"},
+		{"binaries[?true]", "binaries"},
 		{"binaries | [0]", "binaries"},
 		{"binaries[*].name", "binaries"},
 		{"binaries[0]", "binaries"},
 		{"my-key[?true]", "my-key"},
-		// (4) Fallbacks.
+		// (2) Simple dot-path: whole identifier, or trailing
+		// identifier after a dot.
+		{"binaries", "binaries"},
+		{".binaries", "binaries"},
+		{"database.host", "host"},
+		// (3) Fallbacks.
 		{"items(binaries)", "result"}, // starts with a function call, not an identifier
 		{"{a: b}", "result"},          // multi-select hash
 		{"", "result"},

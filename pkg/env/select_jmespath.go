@@ -113,8 +113,13 @@ func splitSelectorsByComplexity(selectors []string) (simple, complex []string) {
 //     the same key).
 //
 //   - If an expression returns something else (scalar, array), it is
-//     wrapped under the last dotted segment of the expression text, or
-//     under "result" if the expression doesn't end in an identifier.
+//     wrapped under a key chosen by `wrapKeyFor`. The key is selected
+//     by a small fallback chain: a leading identifier followed by
+//     JMESPath grammar (e.g. `binaries[?...]` → `binaries`), the
+//     trailing identifier of a simple dot-path (`database.host` →
+//     `host`), the whole expression when it's a bare identifier
+//     (`binaries` → `binaries`), or the literal string "result" as a
+//     last resort. See wrapKeyFor for the exact rules.
 //
 //   - Nil results are ignored (JMESPath spec: missing paths return null).
 //
@@ -183,7 +188,7 @@ func runJMESPathSelectors(
 //  4. Otherwise → "result".
 //
 // Step 1 was added in response to copilot review: previously a filter
-// expression like `binaries[?contains(value.groups, 'core')]` returned
+// expression like `binaries[?contains(groups, 'core')]` returned
 // a flat array and got wrapped under "result", which is surprising for
 // users who'd expect "binaries". The leading-identifier extraction
 // handles those cases without changing behavior for users who
