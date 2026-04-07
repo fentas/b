@@ -138,9 +138,19 @@ func (list *EnvList) MarshalYAML() (interface{}, error) {
 			// recognized so we can decide between (a) emitting the
 			// normalized form, (b) omitting as default, or
 			// (c) preserving an unknown value verbatim.
+			//
+			// Special case for inheritance: when the entry uses
+			// `includes:`, an explicit `safety: prompt` value is an
+			// override of whatever the included profile sets, so we
+			// MUST emit it — otherwise SaveConfig drops it and the
+			// included profile's non-default safety wins on next
+			// load. Per copilot review on PR #128 round 8.
 			switch rawSafety {
 			case SafetyPrompt:
-				// canonical default → omit
+				if len(e.Includes) > 0 {
+					cfg["safety"] = SafetyPrompt
+				}
+				// otherwise canonical default → omit
 			case SafetyAuto, SafetyStrict:
 				cfg["safety"] = rawSafety
 			default:

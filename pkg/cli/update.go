@@ -481,7 +481,11 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		return aggregateEnvErrors(refusedEnvs, failedEnvs)
 	}
 	if o.DryRun {
-		return nil // don't write lock in dry-run mode
+		// Don't write the lock in dry-run mode, but still surface
+		// any per-env refusals or failures so CI and users can
+		// detect that planning was only partially successful. Per
+		// copilot review on PR #128 round 8.
+		return aggregateEnvErrors(refusedEnvs, failedEnvs)
 	}
 
 	if err := lock.WriteLock(lockDir, lk, o.bVersion); err != nil {

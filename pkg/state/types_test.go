@@ -107,6 +107,31 @@ func TestEnvConfigMarshal(t *testing.T) {
 	}
 }
 
+// TestEnvConfigMarshal_PromptOverrideWithIncludes verifies that an
+// explicit `safety: prompt` is emitted (not omitted as default) when
+// the entry uses `includes:`. Otherwise SaveConfig would drop the
+// override and the included profile's non-default safety would win
+// on the next load. Per copilot review on PR #128 round 8.
+func TestEnvConfigMarshal_PromptOverrideWithIncludes(t *testing.T) {
+	// Without includes: prompt is omitted as default.
+	noInc := &State{Envs: EnvList{{Key: "github.com/org/a", Safety: "prompt"}}}
+	data, _ := yaml.Marshal(noInc)
+	if contains(string(data), "safety:") {
+		t.Errorf("safety: prompt should be omitted when no includes, got:\n%s", data)
+	}
+
+	// With includes: prompt MUST be emitted as an explicit override.
+	withInc := &State{Envs: EnvList{{
+		Key:      "github.com/org/b",
+		Safety:   "prompt",
+		Includes: []string{"core"},
+	}}}
+	data, _ = yaml.Marshal(withInc)
+	if !contains(string(data), "safety: prompt") {
+		t.Errorf("safety: prompt should be emitted as override when includes are set, got:\n%s", data)
+	}
+}
+
 // TestEnvConfigMarshal_PreservesUnknownSafety verifies that
 // MarshalYAML doesn't silently drop a safety value it doesn't
 // recognize. Forward-compat: a future b version with a new safety

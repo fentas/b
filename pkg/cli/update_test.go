@@ -2018,6 +2018,31 @@ func TestUpdateEnvs_DryRun_NewBehavior(t *testing.T) {
 	}
 }
 
+// TestUpdateEnvs_DryRun_PropagatesFailures verifies that --dry-run
+// surfaces aggregated failure errors. Before the round-8 fix, a
+// dry-run with a SyncEnv error would print to stderr but return
+// nil — CI couldn't tell that planning had partially failed. Per
+// copilot review on PR #128 round 8.
+func TestUpdateEnvs_DryRun_PropagatesFailures(t *testing.T) {
+	saveHooks(t)
+	syncEnvFunc = func(cfg env.EnvConfig, _, _ string, _ *lock.EnvEntry) (*env.SyncResult, error) {
+		return nil, fmt.Errorf("simulated clone failure")
+	}
+
+	o, _, errBuf := makeUpdateOpts(t, state.EnvEntry{Key: "github.com/org/repo"},
+		func(o *UpdateOptions) { o.DryRun = true })
+	err := o.updateEnvs(nil)
+	if err == nil {
+		t.Fatal("dry-run with sync failure should return aggregated error")
+	}
+	if !strings.Contains(err.Error(), "env(s) failed") {
+		t.Errorf("expected aggregated failure, got: %v", err)
+	}
+	if !strings.Contains(errBuf.String(), "simulated clone failure") {
+		t.Errorf("expected per-env error in stderr, got: %s", errBuf.String())
+	}
+}
+
 // TestNormalizeSafety covers the centralized safety-value coercion.
 // Per copilot review on PR #128 round 2: whitespace and casing
 // variants are normalized so users can write `safety: Auto` or
