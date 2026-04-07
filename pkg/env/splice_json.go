@@ -29,12 +29,17 @@ func spliceJSON(local, merged []byte, selectors []string) ([]byte, error) {
 		return merged, nil
 	}
 
+	// JSON cannot host git conflict markers without becoming
+	// unparseable, and we can't reliably scan a half-broken JSON
+	// document to splice per-key. Check both sides — a previous run
+	// can leave markers in the local file too — and surface this
+	// clearly so the caller (and the user) can resolve manually.
+	// The YAML splice has a structured fallback for this case;
+	// JSON does not yet.
+	if containsConflictMarkers(local) {
+		return nil, fmt.Errorf("JSON splice: local file contains unresolved conflict markers; resolve them manually before re-running")
+	}
 	if containsConflictMarkers(merged) {
-		// JSON cannot host git conflict markers without becoming
-		// unparseable, and we can't reliably scan a half-broken JSON
-		// document to splice per-key. Surface this clearly so the
-		// caller (and the user) can resolve manually. The YAML splice
-		// has a structured fallback for this case; JSON does not yet.
 		return nil, fmt.Errorf("JSON splice: merge produced conflict markers; resolve them manually before re-running")
 	}
 	return spliceJSONStructural(local, merged, scope)

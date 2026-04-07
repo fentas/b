@@ -101,6 +101,21 @@ func TestSpliceJSON_AddNewScopedKey(t *testing.T) {
 	}
 }
 
+// TestSpliceJSON_LocalConflictMarkersErrorOut: a local file left
+// with conflict markers from an earlier run must produce a clear
+// error rather than a generic JSON parse error from the decoder.
+func TestSpliceJSON_LocalConflictMarkersErrorOut(t *testing.T) {
+	local := []byte("<<<<<<< local\n{\"a\":1}\n=======\n{\"a\":2}\n>>>>>>> upstream\n")
+	merged := []byte(`{"binaries":{"a":1}}`)
+	_, err := spliceJSON(local, merged, []string{"binaries"})
+	if err == nil {
+		t.Fatal("expected error for local conflict markers")
+	}
+	if !strings.Contains(err.Error(), "local file contains unresolved conflict markers") {
+		t.Errorf("error should mention local conflict markers, got: %v", err)
+	}
+}
+
 // TestSpliceJSON_ConflictMarkersErrorOut: merged with conflict markers
 // is not splicable into JSON; the function must error so the caller
 // surfaces the situation rather than writing a half-broken file.
