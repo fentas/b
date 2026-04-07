@@ -496,12 +496,17 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 	// next to the existing strict/prompt/auto safety logic.
 	var deletedFiles []lock.LockFile
 	if lockEntry != nil {
-		matchedSet := make(map[string]bool, len(matched))
+		// Match by (source path, dest path) so a file that's still
+		// in upstream but whose dest changed (e.g. user edited
+		// glob config or `dest:`) still surfaces the old dest as
+		// an orphan that needs cleaning up.
+		type fileKey struct{ src, dest string }
+		matchedSet := make(map[fileKey]bool, len(matched))
 		for _, m := range matched {
-			matchedSet[m.SourcePath] = true
+			matchedSet[fileKey{src: m.SourcePath, dest: m.DestPath}] = true
 		}
 		for _, prev := range lockEntry.Files {
-			if matchedSet[prev.Path] {
+			if matchedSet[fileKey{src: prev.Path, dest: prev.Dest}] {
 				continue
 			}
 			absDest := prev.Dest
@@ -801,25 +806,29 @@ func syncMessage(files []lock.LockFile, deleted []lock.LockFile, conflicts int) 
 			// conflicts are reported separately via the conflicts argument
 		}
 	}
-	deletes, deleteSkips := 0, 0
+	deletes, deleteSkips, deleteNoops := 0, 0, 0
 	for _, f := range deleted {
 		status := strings.TrimSuffix(f.Status, " (dry-run)")
-		if strings.HasPrefix(status, "delete-skipped") {
+		switch {
+		case strings.HasPrefix(status, "delete-skipped"):
 			deleteSkips++
-		} else {
+		case strings.HasPrefix(status, "delete-noop"):
+			deleteNoops++
+		default:
 			deletes++
 		}
 	}
+	_ = deleteNoops // currently surfaced via the plan, not the message
 
 	parts := []string{}
 	total := len(files)
-	if total == 0 && deletes == 0 && deleteSkips == 0 {
+	if total == 0 && deletes == 0 && deleteSkips == 0 && deleteNoops == 0 {
 		return "0 file(s) synced"
 	}
-	if replaced == total && deletes == 0 && deleteSkips == 0 {
+	if replaced == total && deletes == 0 && deleteSkips == 0 && deleteNoops == 0 {
 		return fmt.Sprintf("%d file(s) synced", total)
 	}
-	if unchanged == total && deletes == 0 && deleteSkips == 0 {
+	if unchanged == total && deletes == 0 && deleteSkips == 0 && deleteNoops == 0 {
 		return fmt.Sprintf("%d file(s) unchanged", total)
 	}
 	if replaced > 0 {

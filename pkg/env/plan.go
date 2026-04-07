@@ -164,7 +164,7 @@ func planRowFromLockFile(f lock.LockFile, prevPaths map[string]bool) PlanRow {
 		note := strings.TrimPrefix(status, "delete-noop ")
 		note = strings.TrimPrefix(note, "(")
 		note = strings.TrimSuffix(note, ")")
-		row.Note = "already gone: " + note
+		row.Note = note
 	case strings.HasPrefix(status, "delete-skipped"):
 		row.Action = PlanKeep
 		// Surface the reason (e.g. "local modified") so users can

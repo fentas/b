@@ -1,6 +1,8 @@
 package env
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -141,6 +143,33 @@ func TestSyncEnv_OrphanDetection_EmitsDeleteRows(t *testing.T) {
 	}
 	if !strings.Contains(res2.Deleted[0].Status, "delete-noop") {
 		t.Errorf("missing-file orphan should be delete-noop, got %q", res2.Deleted[0].Status)
+	}
+
+	// Sub-case 3: orphan file present and matches the recorded
+	// SHA (unmodified) → "deleted (dry-run)" without any
+	// skipped/noop suffix. Compute the SHA from real bytes so
+	// the lock and disk content actually agree.
+	body := []byte("untouched\n")
+	bodyHash := fmt.Sprintf("%x", sha256.Sum256(body))
+	if err := os.WriteFile(orphanPath, body, 0644); err != nil {
+		t.Fatal(err)
+	}
+	prevMatch := &lock.EnvEntry{
+		Ref:    bare,
+		Commit: "0000000000000000000000000000000000000000",
+		Files: []lock.LockFile{
+			{Path: "cfg/orphan.yaml", Dest: "configs/orphan.yaml", SHA256: bodyHash},
+		},
+	}
+	res3, err := SyncEnv(cfg, project, t.TempDir(), prevMatch)
+	if err != nil {
+		t.Fatalf("SyncEnv: %v", err)
+	}
+	if len(res3.Deleted) != 1 {
+		t.Fatalf("want 1 orphan, got %d", len(res3.Deleted))
+	}
+	if got := res3.Deleted[0].Status; !strings.HasPrefix(got, "deleted") || strings.Contains(got, "skipped") || strings.Contains(got, "noop") {
+		t.Errorf("unmodified orphan should be plain deleted, got %q", got)
 	}
 }
 
