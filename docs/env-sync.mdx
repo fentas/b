@@ -97,7 +97,7 @@ files:
 
 Selectors use **hybrid syntax**:
 
-- **Simple dot-paths** like `binaries`, `.binaries`, `database.host`, or even plain keys with characters that the legacy validator accepts (`foo/bar`, `my+key`, `a@b`, `#tag`) are extracted via the YAML Node API. Whole top-level keys keep their comments, ordering, and block/flow style.
+- **Simple dot-paths** like `binaries`, `.binaries`, `database.host`, or even plain keys with characters that the legacy validator accepts (`foo/bar`, `my+key`, `a@b`) are extracted via the YAML Node API. Whole top-level keys keep their comments, ordering, and block/flow style. (`#` is fine for the classifier itself, but in `b.yaml` you'd need to quote a selector starting with `#` like `"#tag"` so YAML doesn't treat it as a comment.)
 - **Complex JMESPath expressions** — anything containing brackets, parens, braces, pipes, multi-select hashes, or function calls (i.e. JMESPath grammar characters) — are routed to [JMESPath](https://jmespath.org/) (jmespath-community fork, supports `items` / `from_items`). Comments are NOT preserved for keys produced by the complex side.
 
 > **Selecting top-level keys with JMESPath grammar characters**
@@ -106,10 +106,10 @@ Selectors use **hybrid syntax**:
 > uses as grammar (`[`, `]`, `(`, `)`, `{`, `}`, `|`, `*`, `&`, `,`, `'`,
 > `"`, `<`, `>`, `=`, `!`, `?`, backtick, backslash, whitespace), the
 > simple dot-path classifier will route it to JMESPath where you'll need
-> to wrap it in JMESPath bracket-quotes: `'"my key with spaces"'` or
-> `'"weird[name]"'`. Plain keys with `/`, `+`, `@`, `#`, etc. work
-> without quoting because the classifier passes them through to the
-> Node API path.
+> to use a quoted identifier in the JMESPath expression:
+> `'"my key with spaces"'` or `'"weird[name]"'`. Plain keys with `/`,
+> `+`, `@`, `#`, etc. work without quoting because the classifier passes
+> them through to the Node API path.
 - **Mixed lists** are supported: simple and complex selectors on the same file are evaluated independently and merged at the top level via the Node API. Simple-side comments and layout survive the merge; complex-side keys carry no comments. JMESPath wins on key collisions.
 
 > **⚠ `items()` returns tuples, not objects in the v1.1.1 Go fork**
