@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fentas/b/pkg/envmatch"
@@ -51,7 +52,7 @@ func setupLocalBareRepo(t *testing.T) (string, string) {
 	if err != nil {
 		t.Fatalf("rev-parse: %v", err)
 	}
-	return bare, string(commitOut[:len(commitOut)-1])
+	return bare, strings.TrimSpace(string(commitOut))
 }
 
 func TestSyncEnv_LocalReplace(t *testing.T) {
@@ -183,8 +184,11 @@ func TestSyncEnv_LocalMergeAndClient(t *testing.T) {
 	run("git", "-C", work, "add", "-A")
 	run("git", "-C", work, "commit", "-m", "v1", "--no-gpg-sign")
 	run("git", "clone", "--bare", "-q", work, bare)
-	firstCommit, _ := exec.Command("git", "-C", bare, "rev-parse", "HEAD").Output()
-	firstSha := string(firstCommit[:len(firstCommit)-1])
+	firstCommit, err := exec.Command("git", "-C", bare, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("rev-parse: %v", err)
+	}
+	firstSha := strings.TrimSpace(string(firstCommit))
 
 	project := t.TempDir()
 	cfg := EnvConfig{

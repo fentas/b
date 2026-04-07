@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -244,13 +243,7 @@ func TestBinary_Cmd_Exec(t *testing.T) {
 }
 
 func exeLookup(name string) (string, error) {
-	for _, p := range strings.Split(os.Getenv("PATH"), ":") {
-		full := filepath.Join(p, name)
-		if fi, err := os.Stat(full); err == nil && fi.Mode()&0111 != 0 {
-			return full, nil
-		}
-	}
-	return "", errors.New("not found")
+	return exec.LookPath(name)
 }
 
 // --- download.go preset path ---

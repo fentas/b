@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,7 +32,7 @@ func setupBareRepo(t *testing.T) (bareDir, commit string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return bare, string(out[:len(out)-1])
+	return bare, strings.TrimSpace(string(out))
 }
 
 func TestGitcache_EnsureCloneFetchResolve(t *testing.T) {
