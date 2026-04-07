@@ -188,11 +188,21 @@ func yamlNodesStructurallyEqual(a, b *yaml.Node) bool {
 		if err := e.Encode(n); err != nil {
 			return nil
 		}
-		_ = e.Close()
+		// Close can flush buffered errors. If it fails the
+		// encoded bytes may be incomplete, in which case the
+		// equality check would compare a partial encoding and
+		// produce a wrong answer (either skipping a needed
+		// substitution or doing an unnecessary one). Return
+		// nil so the outer comparison falls through to the
+		// "not equal" branch and the substitution path runs
+		// — that's the safer side.
+		if err := e.Close(); err != nil {
+			return nil
+		}
 		return []byte(buf.String())
 	}
 	ab, bb := enc(a), enc(b)
-	return ab != nil && bytes.Equal(ab, bb)
+	return ab != nil && bb != nil && bytes.Equal(ab, bb)
 }
 
 type yamlStringWriter struct{ b *strings.Builder }
