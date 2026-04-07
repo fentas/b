@@ -277,10 +277,10 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 	// notices.
 	var failedEnvs []string
 
-	// Collected plans for --plan-json.:
-	// emitting one JSON document per env produced concatenated docs
-	// that aren't valid JSON for typical parsers. We now collect plans
-	// in this slice and emit a single JSON array at the end.
+	// Collected plans for --plan-json. Previously, emitting one JSON
+	// document per env produced concatenated output that isn't valid
+	// JSON for typical parsers. We now collect plans in this slice and
+	// emit a single JSON array at the end.
 	var planJSONOut []*env.Plan
 
 	for _, entry := range o.Config.Envs {
