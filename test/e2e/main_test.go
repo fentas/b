@@ -9,6 +9,21 @@ import (
 	"time"
 )
 
+// envWithPathBin returns a new env slice based on os.Environ() but with any
+// existing PATH_BIN= entries removed and the given path appended. This avoids
+// the duplicate-key ambiguity in some getenv implementations.
+func envWithPathBin(pathBin string) []string {
+	src := os.Environ()
+	out := make([]string, 0, len(src)+1)
+	for _, e := range src {
+		if strings.HasPrefix(e, "PATH_BIN=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return append(out, "PATH_BIN="+pathBin)
+}
+
 func TestE2E_CLIBuild(t *testing.T) {
 	// Test that the CLI can be built successfully
 	binaryPath := filepath.Join(os.TempDir(), "b-e2e-test")
@@ -69,7 +84,7 @@ func TestE2E_InitWorkflow(t *testing.T) {
 
 	// Run init command (isolate from the host repo's git root via PATH_BIN)
 	cmd = exec.Command(binaryPath, "init")
-	cmd.Env = append(os.Environ(), "PATH_BIN="+filepath.Join(tempDir, ".bin"))
+	cmd.Env = envWithPathBin(filepath.Join(tempDir, ".bin"))
 	output, err = cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Init command failed: %v\nOutput: %s", err, output)
@@ -166,7 +181,7 @@ binaries:
 
 	// Run list command to test config discovery
 	cmd = exec.Command(binaryPath, "list")
-	cmd.Env = append(os.Environ(), "PATH_BIN="+configDir)
+	cmd.Env = envWithPathBin(configDir)
 	output, err = cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("List command failed: %v\nOutput: %s", err, output)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -197,19 +198,31 @@ func (rt *rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	return rt.inner.RoundTrip(newReq)
 }
 
+// httpDefaultsMu guards mutation of http.DefaultClient/Transport so that
+// concurrent tests using withFakeAPI cannot race. Tests that use withFakeAPI
+// must NOT call t.Parallel().
+var httpDefaultsMu sync.Mutex
+
 func withFakeAPI(t *testing.T, handler http.Handler) func() {
 	t.Helper()
+	httpDefaultsMu.Lock()
 	srv := httptest.NewServer(handler)
 	oldTransport := http.DefaultTransport
 	oldClient := http.DefaultClient
 	rewriter := &rewriteTransport{server: srv.URL, inner: oldTransport}
 	http.DefaultTransport = rewriter
 	http.DefaultClient = &http.Client{Transport: rewriter}
-	return func() {
-		http.DefaultTransport = oldTransport
-		http.DefaultClient = oldClient
-		srv.Close()
+	var once sync.Once
+	cleanup := func() {
+		once.Do(func() {
+			http.DefaultTransport = oldTransport
+			http.DefaultClient = oldClient
+			srv.Close()
+			httpDefaultsMu.Unlock()
+		})
 	}
+	t.Cleanup(cleanup)
+	return cleanup
 }
 
 func TestGitHub_FetchRelease_Mocked(t *testing.T) {

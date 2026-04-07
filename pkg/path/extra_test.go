@@ -7,14 +7,25 @@ import (
 )
 
 func TestFindConfigFile(t *testing.T) {
-	// No config anywhere → returns empty
+	// Isolate env so an ancestor PATH_BIN/PATH_BASE can't influence the walk
+	t.Setenv("PATH_BIN", "")
+	t.Setenv("PATH_BASE", "")
+
+	// No config anywhere → returns empty (use a deeply nested temp dir so no
+	// ancestor in /tmp accidentally has a b.yaml)
 	dir := t.TempDir()
-	t.Chdir(dir)
+	deep := filepath.Join(dir, "a", "b", "c")
+	if err := os.MkdirAll(deep, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(deep)
 	p, err := FindConfigFile()
 	if err != nil {
 		t.Errorf("err: %v", err)
 	}
-	_ = p // may be non-empty if ancestor has a config; that's ok
+	if p != "" {
+		t.Errorf("expected empty for no-config case, got %q", p)
+	}
 
 	// With a config in .bin/
 	dir2 := t.TempDir()

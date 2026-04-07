@@ -64,10 +64,19 @@ func TestMockIO(t *testing.T) {
 func TestChangeDirAndCreateProject(t *testing.T) {
 	dir := TempDir(t)
 	ChangeDir(t, dir)
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
 	// Resolve symlinks for macOS /private/tmp quirks
-	resDir, _ := filepath.EvalSymlinks(dir)
-	resCwd, _ := filepath.EvalSymlinks(cwd)
+	resDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(dir): %v", err)
+	}
+	resCwd, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(cwd): %v", err)
+	}
 	if resCwd != resDir {
 		t.Errorf("cwd=%q want %q", resCwd, resDir)
 	}

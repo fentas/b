@@ -29,10 +29,20 @@ func setupLocalBareRepo(t *testing.T) (string, string) {
 	run("git", "-C", work, "config", "user.name", "T")
 	run("git", "-C", work, "config", "commit.gpgsign", "false")
 
-	_ = os.MkdirAll(filepath.Join(work, "cfg"), 0755)
-	_ = os.WriteFile(filepath.Join(work, "cfg", "a.yaml"), []byte("key: val\n"), 0644)
-	_ = os.WriteFile(filepath.Join(work, "cfg", "b.yaml"), []byte("other: thing\n"), 0644)
-	_ = os.WriteFile(filepath.Join(work, "README.md"), []byte("readme"), 0644)
+	if err := os.MkdirAll(filepath.Join(work, "cfg"), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	for _, f := range []struct {
+		path, content string
+	}{
+		{filepath.Join(work, "cfg", "a.yaml"), "key: val\n"},
+		{filepath.Join(work, "cfg", "b.yaml"), "other: thing\n"},
+		{filepath.Join(work, "README.md"), "readme"},
+	} {
+		if err := os.WriteFile(f.path, []byte(f.content), 0644); err != nil {
+			t.Fatalf("WriteFile %s: %v", f.path, err)
+		}
+	}
 	run("git", "-C", work, "add", "-A")
 	run("git", "-C", work, "commit", "-m", "init", "--no-gpg-sign")
 
@@ -167,7 +177,9 @@ func TestSyncEnv_LocalMergeAndClient(t *testing.T) {
 	run("git", "-C", work, "config", "user.name", "T")
 	run("git", "-C", work, "config", "commit.gpgsign", "false")
 
-	_ = os.WriteFile(filepath.Join(work, "cfg.yaml"), []byte("a: 1\n"), 0644)
+	if err := os.WriteFile(filepath.Join(work, "cfg.yaml"), []byte("a: 1\n"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 	run("git", "-C", work, "add", "-A")
 	run("git", "-C", work, "commit", "-m", "v1", "--no-gpg-sign")
 	run("git", "clone", "--bare", "-q", work, bare)
@@ -178,7 +190,7 @@ func TestSyncEnv_LocalMergeAndClient(t *testing.T) {
 	cfg := EnvConfig{
 		Ref: bare,
 		Files: map[string]envmatch.GlobConfig{
-			"cfg.yaml": {Dest: "cfg.yaml"},
+			"cfg.yaml": {Dest: "out"},
 		},
 	}
 	if _, err := SyncEnv(cfg, project, t.TempDir(), nil); err != nil {
@@ -186,13 +198,18 @@ func TestSyncEnv_LocalMergeAndClient(t *testing.T) {
 	}
 
 	// Modify upstream
-	_ = os.WriteFile(filepath.Join(work, "cfg.yaml"), []byte("a: 1\nb: 2\n"), 0644)
+	if err := os.WriteFile(filepath.Join(work, "cfg.yaml"), []byte("a: 1\nb: 2\n"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 	run("git", "-C", work, "commit", "-am", "v2", "--no-gpg-sign")
 	// Update bare from work
 	run("git", "-C", work, "push", "--quiet", bare, "HEAD")
 
 	// Modify the local file (to trigger merge/client path)
-	_ = os.WriteFile(filepath.Join(project, "cfg.yaml"), []byte("c: 3\na: 1\n"), 0644)
+	localFile := filepath.Join(project, "out", "cfg.yaml")
+	if err := os.WriteFile(localFile, []byte("c: 3\na: 1\n"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 
 	// With StrategyClient — keeps local
 	lockEntry := mockLockEntryWithFile(firstSha, "cfg.yaml", "cfg.yaml")
@@ -206,7 +223,9 @@ func TestSyncEnv_LocalMergeAndClient(t *testing.T) {
 	cfgMerge := cfg
 	cfgMerge.Strategy = StrategyMerge
 	// Reset local
-	_ = os.WriteFile(filepath.Join(project, "cfg.yaml"), []byte("c: 3\na: 1\n"), 0644)
+	if err := os.WriteFile(localFile, []byte("c: 3\na: 1\n"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 	_, _ = SyncEnv(cfgMerge, project, t.TempDir(), lockEntry)
 }
 

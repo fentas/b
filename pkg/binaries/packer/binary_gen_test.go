@@ -2,16 +2,21 @@ package packer
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/fentas/b/pkg/binaries"
 	"github.com/fentas/b/pkg/binary"
 )
 
-func safeCall(fn func()) {
-	defer func() { _ = recover() }()
+// safeCall runs fn and reports any panic via t.Errorf so that unexpected
+// closure regressions are still surfaced.
+func safeCall(t *testing.T, label string, fn func()) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("closure %q panicked: %v", label, r)
+		}
+	}()
 	fn()
 }
 
@@ -24,35 +29,22 @@ func TestBinary_packer(t *testing.T) {
 	if b == nil {
 		t.Fatal("Binary(opts) returned nil")
 	}
-	tmp := t.TempDir()
-	t.Setenv("PATH_BIN", tmp)
-	fake := filepath.Join(tmp, b.Name)
-	_ = os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0755)
 
+	// Synthetic Binary used to invoke the URL/file callbacks. We deliberately
+	// do NOT call VersionLocalF because it executes the real binary and parses
+	// its output — that's not testable in unit tests, only via integration.
 	tmpb := &binary.Binary{
 		Name:       b.Name,
 		Version:    "v1.0.0",
 		GitHubRepo: b.GitHubRepo,
-		File:       fake,
 	}
-	safeCall(func() {
-		if b.URLF != nil {
-			_, _ = b.URLF(tmpb)
-		}
-	})
-	safeCall(func() {
-		if b.GitHubFileF != nil {
-			_, _ = b.GitHubFileF(tmpb)
-		}
-	})
-	safeCall(func() {
-		if b.TarFileF != nil {
-			_, _ = b.TarFileF(tmpb)
-		}
-	})
-	safeCall(func() {
-		if b.VersionLocalF != nil {
-			_, _ = b.VersionLocalF(tmpb)
-		}
-	})
+	if b.URLF != nil {
+		safeCall(t, "URLF", func() { _, _ = b.URLF(tmpb) })
+	}
+	if b.GitHubFileF != nil {
+		safeCall(t, "GitHubFileF", func() { _, _ = b.GitHubFileF(tmpb) })
+	}
+	if b.TarFileF != nil {
+		safeCall(t, "TarFileF", func() { _, _ = b.TarFileF(tmpb) })
+	}
 }
