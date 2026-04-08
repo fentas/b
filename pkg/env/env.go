@@ -301,6 +301,37 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			return spliced, nil
 		}
 
+		// applyPins restores any keys in the consumer's local file that
+		// carry a `b.pin: true` annotation, replacing them in the
+		// to-be-written content. This runs after the merge/splice
+		// pipeline so it works uniformly across all strategies and
+		// regardless of whether a select filter is in play. YAML only
+		// for now; non-YAML files pass through unchanged.
+		applyPins := func(pending []byte) ([]byte, error) {
+			// Pinning is YAML-only today. Short-circuit non-YAML
+			// destinations BEFORE the os.ReadFile call so the I/O
+			// path can't fail (and surprise users) on JSON / text
+			// files that the helper would always pass through
+			// anyway.
+			ext := strings.ToLower(filepath.Ext(m.SourcePath))
+			if ext != ".yaml" && ext != ".yml" {
+				return pending, nil
+			}
+			localFull, readErr := os.ReadFile(destPath)
+			if readErr != nil {
+				if os.IsNotExist(readErr) {
+					// File doesn't exist yet → no local pins to honor.
+					return pending, nil
+				}
+				// Permission errors or other I/O failures must be
+				// surfaced — silently skipping pin restoration would
+				// hide a real problem and produce surprising sync
+				// output where pinned keys appear to be ignored.
+				return nil, fmt.Errorf("reading local for pin restoration %s: %w", destPath, readErr)
+			}
+			return applyPinsYAML(localFull, pending, m.SourcePath)
+		}
+
 		upstreamHash := fmt.Sprintf("%x", sha256.Sum256(content))
 
 		// Determine file mode from upstream
@@ -373,12 +404,42 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			if err != nil {
 				return nil, err
 			}
-			if !cfg.DryRun {
-				if err := writeFile(destPath, target, fileMode); err != nil {
-					return nil, err
-				}
+			target, err = applyPins(target)
+			if err != nil {
+				return nil, fmt.Errorf("applying pins: %w", err)
 			}
 			finalHash = fmt.Sprintf("%x", sha256.Sum256(target))
+			// Pin restoration intentionally produces a target that
+			// can equal the on-disk file even when the upstream hash
+			// differs (the pinned keys make the file diverge from
+			// upstream). Skip the write when target already matches
+			// on-disk so we don't churn mtime / file watchers on
+			// every sync of a pinned file.
+			if !cfg.DryRun {
+				localHash, _ := lock.SHA256File(destPath)
+				if localHash != finalHash {
+					if err := writeFile(destPath, target, fileMode); err != nil {
+						return nil, err
+					}
+				} else {
+					// Content unchanged but upstream may have
+					// flipped the file mode (e.g. 644→755).
+					// writeFile would normally do this; apply
+					// it explicitly when we skip the write so
+					// permissions stay in sync.
+					if info, statErr := os.Stat(destPath); statErr == nil && info.Mode().Perm() != fileMode {
+						if chmodErr := os.Chmod(destPath, fileMode); chmodErr != nil {
+							return nil, fmt.Errorf("updating permissions for %s: %w", destPath, chmodErr)
+						}
+					}
+					// Reflect reality in the plan: nothing
+					// changed on disk, so the row is
+					// unchanged, not replaced. Common when
+					// upstream changes only affect pinned
+					// subtrees.
+					status = "unchanged"
+				}
+			}
 		} else {
 			switch fileStrategy {
 			case StrategyClient:
@@ -403,6 +464,10 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 					target, tErr := computeTargetBytes()
 					if tErr != nil {
 						return nil, tErr
+					}
+					target, tErr = applyPins(target)
+					if tErr != nil {
+						return nil, fmt.Errorf("applying pins: %w", tErr)
 					}
 					status = "replaced (merge failed: " + mergeErr.Error() + ")"
 					if !cfg.DryRun {
@@ -429,6 +494,10 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 						}
 						spliced = spliceOut
 					}
+					spliced, err = applyPins(spliced)
+					if err != nil {
+						return nil, fmt.Errorf("applying pins: %w", err)
+					}
 					if hasConflict {
 						status = "conflict"
 						conflicts++
@@ -452,6 +521,10 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 				target, err := computeTargetBytes()
 				if err != nil {
 					return nil, err
+				}
+				target, err = applyPins(target)
+				if err != nil {
+					return nil, fmt.Errorf("applying pins: %w", err)
 				}
 				status = "replaced (local changes overwritten)"
 				if !cfg.DryRun {
