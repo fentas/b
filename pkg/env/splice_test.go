@@ -1,6 +1,7 @@
 package env
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -84,6 +85,172 @@ envs:
 	}
 	if !strings.Contains(outStr, "docs/README.md") {
 		t.Errorf("envs dest dropped: %s", outStr)
+	}
+}
+
+// TestUsesCRLF covers the strict CRLF detector. A file is only CRLF
+// when at least one \r\n is present AND every \n is preceded by \r;
+// mixed-ending files (mostly LF with a stray CRLF) stay LF so the
+// splice doesn't make the mixing worse.
+func TestUsesCRLF(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"empty", "", false},
+		{"lf only", "a\nb\n", false},
+		{"crlf only", "a\r\nb\r\n", true},
+		{"mostly lf with stray crlf", "a\nb\r\nc\n", false},
+		{"mostly crlf with stray lf", "a\r\nb\nc\r\n", false},
+		{"single line no newline", "abc", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := usesCRLF([]byte(c.in)); got != c.want {
+				t.Errorf("usesCRLF(%q) = %v, want %v", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+// TestSpliceYAMLByteLevel_PreservesCRLFLineEndings verifies that a
+// local file using Windows-style CRLF endings stays CRLF after the
+// splice. yaml.v3 always emits LF, so without the CRLF normalization
+// path the spliced regions would mix endings with the verbatim
+// regions and produce noisy diffs on every sync from a Windows
+// consumer.
+func TestSpliceYAMLByteLevel_PreservesCRLFLineEndings(t *testing.T) {
+	// Build a local file with explicit CRLF separators.
+	local := []byte("binaries:\r\n  kubectl: {}\r\n\r\nenvs:\r\n  github.com/x/y: {}\r\n")
+	merged := []byte("binaries:\n  kubectl: {}\n  helm: {}\n")
+	out, err := spliceSelectedScope(local, merged, []string{"binaries"}, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	// Every newline in the output should be CRLF — no bare LF. The
+	// loop below is the actual check (it walks each '\n' and
+	// requires a '\r' immediately before it). The naive
+	// bytes.Contains check that used to live here was a no-op
+	// because CRLF itself contains '\n'.
+	for i := 0; i < len(out); i++ {
+		if out[i] == '\n' {
+			if i == 0 || out[i-1] != '\r' {
+				t.Errorf("bare LF at byte %d in CRLF file:\n%q", i, out)
+				break
+			}
+		}
+	}
+	// Out-of-scope envs section is byte-identical including its CRLFs.
+	envsStart := bytes.Index(local, []byte("envs:"))
+	if envsStart == -1 {
+		t.Fatalf("test fixture missing envs section:\n%q", local)
+	}
+	outEnvsStart := bytes.Index(out, []byte("envs:"))
+	if outEnvsStart == -1 {
+		t.Fatalf("spliced output missing envs section:\n%q", out)
+	}
+	if !bytes.Equal(local[envsStart:], out[outEnvsStart:]) {
+		t.Errorf("envs section not byte-identical under CRLF")
+	}
+}
+
+// TestSpliceYAMLByteLevel_AppendsNewScopedKey verifies the byte-level
+// splice's "additions" path: when a scoped top-level key exists in
+// merged but NOT in local, it must be appended at EOF without
+// disturbing the existing bytes and with a separating newline.
+func TestSpliceYAMLByteLevel_AppendsNewScopedKey(t *testing.T) {
+	// Local has only out-of-scope keys (envs), no binaries.
+	local := []byte(`envs:
+  github.com/keep/me:
+    files:
+      a.yaml: docs/a.yaml
+`)
+	// Merged introduces binaries. The splice should append it at EOF.
+	merged := []byte(`binaries:
+  kubectl: {}
+`)
+	out, err := spliceSelectedScope(local, merged, []string{"binaries"}, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	outStr := string(out)
+	// The original envs section must come first and be byte-identical.
+	if !bytes.HasPrefix(out, local) {
+		t.Errorf("local prefix not preserved verbatim:\nlocal: %q\nout: %q", local, outStr)
+	}
+	// The merged binaries content must follow.
+	if !strings.Contains(outStr, "binaries:") || !strings.Contains(outStr, "kubectl") {
+		t.Errorf("appended binaries missing:\n%s", outStr)
+	}
+	// The append must be separated by a newline (no fused last line).
+	binariesIdx := bytes.Index(out, []byte("binaries:"))
+	if binariesIdx <= 0 || out[binariesIdx-1] != '\n' {
+		t.Errorf("appended block not separated by newline at %d:\n%q", binariesIdx, outStr)
+	}
+}
+
+// TestSpliceYAMLByteLevel_PreservesOutOfScopeBytesVerbatim verifies
+// that the format-preserving byte-level splice keeps out-of-scope
+// content byte-identical to the input. The previous structural
+// splice re-encoded the whole document with the yaml.v3 encoder,
+// which would normalize whitespace, quoting, and field ordering
+// even for keys the splice didn't touch — producing noisy git
+// diffs on every successful merge sync.
+func TestSpliceYAMLByteLevel_PreservesOutOfScopeBytesVerbatim(t *testing.T) {
+	// Local file uses non-default formatting choices (4-space
+	// indent, double-quoted values, trailing comments) that the
+	// yaml.v3 emitter would normalize away.
+	local := []byte(`# Top of file
+binaries:
+    kubectl: {}
+    kustomize: {}
+
+envs:
+    "github.com/keep/me":     # an inline comment
+        files:
+            "a.yaml":  "docs/a.yaml"
+        # trailing comment inside envs
+`)
+	merged := []byte(`binaries:
+  kubectl: {}
+  kustomize: {}
+  tilt: {}
+`)
+	out, err := spliceSelectedScope(local, merged, []string{"binaries"}, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	outStr := string(out)
+
+	// 1) merged binaries content present.
+	if !strings.Contains(outStr, "tilt") {
+		t.Errorf("merged tilt missing, got:\n%s", outStr)
+	}
+
+	// 2) Out-of-scope envs section preserved BYTE-FOR-BYTE. The
+	// check is intentionally an exact slice comparison: we cut the
+	// `envs:` block out of both the original local input and the
+	// spliced output and compare them directly. A reformatter that
+	// changed any whitespace, quoting, or comment placement inside
+	// this region would fail the comparison even if the surrounding
+	// lines still matched. The local input was crafted to use
+	// 4-space indent, double-quoted keys, an inline comment, and
+	// a trailing comment — every one of which the yaml.v3 emitter
+	// would normally rewrite.
+	localEnvsStart := bytes.Index(local, []byte("envs:"))
+	outEnvsStart := bytes.Index(out, []byte("envs:"))
+	if localEnvsStart < 0 || outEnvsStart < 0 {
+		t.Fatalf("envs: marker missing — local=%d out=%d\n%s", localEnvsStart, outEnvsStart, outStr)
+	}
+	if !bytes.Equal(local[localEnvsStart:], out[outEnvsStart:]) {
+		t.Errorf("envs section not byte-identical:\nwant:\n%q\ngot:\n%q",
+			local[localEnvsStart:], out[outEnvsStart:])
+	}
+
+	// 3) Top-of-file comment preserved.
+	if !strings.Contains(outStr, "# Top of file") {
+		t.Errorf("header comment lost: %s", outStr)
 	}
 }
 
