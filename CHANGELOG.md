@@ -1,5 +1,20 @@
 # Changelog
 
+## [4.14.0](https://github.com/fentas/b/compare/v4.13.0...v4.14.0) (2026-04-08)
+
+
+### Features
+
+* **cli:** b env resolve for merge conflicts ([#125](https://github.com/fentas/b/issues/125) phase 4) ([#138](https://github.com/fentas/b/issues/138)) ([b3d00c8](https://github.com/fentas/b/commit/b3d00c8d41c12ec2d907b7fc2db566024195a92c))
+* **cli:** plan-json polish — destructive row in error + effectiveDryRun helper ([#132](https://github.com/fentas/b/issues/132)) ([4ad5dfa](https://github.com/fentas/b/commit/4ad5dfacb02308e565de5f7251bc93e67962f2b5))
+* **cli:** surface conflict markers in env status ([#139](https://github.com/fentas/b/issues/139)) ([1e54c73](https://github.com/fentas/b/commit/1e54c7336ee2e73ac32eaee2de6e92afee533a22))
+* **env:** format-preserving byte-level YAML splice fast path ([#133](https://github.com/fentas/b/issues/133)) ([94cd711](https://github.com/fentas/b/commit/94cd71105a32e833115ff9313b0d4af985444ef8))
+* **env:** JSON splice support for scoped selects ([#135](https://github.com/fentas/b/issues/135)) ([89ccf9d](https://github.com/fentas/b/commit/89ccf9d91826930640f415d14766697bab0d765d))
+* **env:** orphan-file delete plumbing ([#125](https://github.com/fentas/b/issues/125) phase 3) ([#137](https://github.com/fentas/b/issues/137)) ([5891781](https://github.com/fentas/b/commit/589178136ede3145fdf9753652b4347636092b3f))
+* **env:** per-key b.pin annotation ([#125](https://github.com/fentas/b/issues/125) phase 2) ([#136](https://github.com/fentas/b/issues/136)) ([9ed59db](https://github.com/fentas/b/commit/9ed59db88c16ec0bf490c89e5c516199a95c0938))
+* **env:** structural 3-way merge for YAML/JSON ([#134](https://github.com/fentas/b/issues/134)) ([fd787b0](https://github.com/fentas/b/commit/fd787b0064f620049e657df99cab94a17f417693))
+* **env:** wrapKeyFor extracts leading identifier for filter expressions ([#131](https://github.com/fentas/b/issues/131)) ([f542f28](https://github.com/fentas/b/commit/f542f28059e8ce0111f5a80d03fb39befbc2b17f))
+
 ## [4.13.0](https://github.com/fentas/b/compare/v4.12.0...v4.13.0) (2026-04-07)
 
 
