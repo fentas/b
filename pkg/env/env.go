@@ -113,9 +113,15 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		allPresent := true
 		for _, f := range lockEntry.Files {
 			dest := filepath.Join(projectRoot, f.Dest)
-			if _, err := os.Stat(dest); os.IsNotExist(err) {
-				allPresent = false
-				break
+			if err := ValidatePathUnderRoot(projectRoot, dest); err != nil {
+				return nil, fmt.Errorf("lock entry has invalid dest %q: %w", f.Dest, err)
+			}
+			if _, err := os.Stat(dest); err != nil {
+				if os.IsNotExist(err) {
+					allPresent = false
+					break
+				}
+				return nil, fmt.Errorf("checking synced env file %q: %w", dest, err)
 			}
 		}
 		if allPresent {
