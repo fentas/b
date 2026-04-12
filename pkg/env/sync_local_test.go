@@ -223,6 +223,67 @@ func TestSyncEnv_LocalSkippedWhenUpToDate(t *testing.T) {
 	}
 }
 
+// TestSyncEnv_LocalResyncWhenFileMissing verifies that SyncEnv re-extracts
+// files when the commit hasn't changed but locked files are missing on disk.
+// This is the regression test for the bug where `b install` / `b update`
+// reported "(up to date)" while `b env status` showed missing files.
+func TestSyncEnv_LocalResyncWhenFileMissing(t *testing.T) {
+	bare, commit := setupLocalBareRepo(t)
+	project := t.TempDir()
+
+	cfg := EnvConfig{
+		Ref:      bare,
+		Strategy: StrategyReplace,
+		Files: map[string]envmatch.GlobConfig{
+			"cfg/*.yaml": {Dest: "configs"},
+		},
+	}
+
+	// First sync — populates files on disk.
+	res, err := SyncEnv(cfg, project, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+	if len(res.Files) != 2 {
+		t.Fatalf("want 2 files, got %d", len(res.Files))
+	}
+
+	// Build a lock entry matching the current commit with the synced files.
+	lockEntry := &lock.EnvEntry{
+		Commit: commit,
+		Files:  make([]lock.LockFile, len(res.Files)),
+	}
+	for i, f := range res.Files {
+		lockEntry.Files[i] = lock.LockFile{
+			Path:   f.Path,
+			Dest:   f.Dest,
+			SHA256: f.SHA256,
+		}
+	}
+
+	// Delete the synced files to simulate the user's scenario.
+	if err := os.RemoveAll(filepath.Join(project, "configs")); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+
+	// Re-sync with the same commit — should NOT skip, should re-extract.
+	res2, err := SyncEnv(cfg, project, t.TempDir(), lockEntry)
+	if err != nil {
+		t.Fatalf("re-sync: %v", err)
+	}
+	if res2.Skipped {
+		t.Fatal("expected Skipped=false when locked files are missing on disk")
+	}
+
+	// Verify files are back on disk.
+	for _, f := range []string{"a.yaml", "b.yaml"} {
+		p := filepath.Join(project, "configs", f)
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected %s to be restored: %v", f, err)
+		}
+	}
+}
+
 func TestSyncEnv_LocalDryRun(t *testing.T) {
 	bare, _ := setupLocalBareRepo(t)
 	project := t.TempDir()

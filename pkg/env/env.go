@@ -109,14 +109,25 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 	// NOTE: This skips when the commit hasn't changed. If only the local config
 	// changed (e.g. select filters), use --force to re-sync.
 	if cfg.ForceCommit == "" && lockEntry != nil && lockEntry.Commit == commit {
-		return &SyncResult{
-			Ref:     baseRef,
-			Label:   cfg.Label,
-			Version: cfg.Version,
-			Commit:  commit,
-			Skipped: true,
-			Message: "(up to date)",
-		}, nil
+		// Verify locked files still exist on disk; re-sync if any are missing.
+		allPresent := true
+		for _, f := range lockEntry.Files {
+			dest := filepath.Join(projectRoot, f.Dest)
+			if _, err := os.Stat(dest); os.IsNotExist(err) {
+				allPresent = false
+				break
+			}
+		}
+		if allPresent {
+			return &SyncResult{
+				Ref:     baseRef,
+				Label:   cfg.Label,
+				Version: cfg.Version,
+				Commit:  commit,
+				Skipped: true,
+				Message: "(up to date)",
+			}, nil
+		}
 	}
 
 	// Run pre-sync hook (skip in dry-run mode)
