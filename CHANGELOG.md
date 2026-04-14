@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.14.1](https://github.com/fentas/b/compare/v4.14.0...v4.14.1) (2026-04-12)
+
+
+### Bug Fixes
+
+* **env:** re-sync when locked files are missing on disk ([#141](https://github.com/fentas/b/issues/141)) ([8cb9bf2](https://github.com/fentas/b/commit/8cb9bf20e1e43676293bb29fdc1da2aaf8ef3982))
+
 ## [4.14.0](https://github.com/fentas/b/compare/v4.13.0...v4.14.0) (2026-04-08)
 
 
