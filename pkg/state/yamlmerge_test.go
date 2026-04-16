@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/fentas/b/pkg/binary"
+	"github.com/fentas/b/pkg/envmatch"
 	"gopkg.in/yaml.v3"
 )
 
@@ -472,6 +473,13 @@ func TestManagedKey_MatchesMarshalOutput(t *testing.T) {
 			Group:       "core",
 			OnPreSync:   "echo pre",
 			OnPostSync:  "echo post",
+			Files: map[string]envmatch.GlobConfig{
+				"manifests/**": {
+					Dest:   "out/",
+					Ignore: []string{"*.bak"},
+					Select: []string{"binaries"},
+				},
+			},
 		},
 	}
 	envMarshal, err := envSample.MarshalYAML()
@@ -499,6 +507,40 @@ func TestManagedKey_MatchesMarshalOutput(t *testing.T) {
 		}
 		if !managedKey([]string{"profiles", "base"}, key) {
 			t.Errorf("managedKey([profiles <name>], %q) = false — marshaler emits this key", key)
+		}
+	}
+
+	// Drill into the files subtree: the glob key at depth 3 must be managed,
+	// and every field the marshaler emits under it at depth 4 must be managed
+	// (dest/ignore/select). Anything else at depth 4 must not be.
+	filesAny, ok := envEntry["files"]
+	if !ok {
+		t.Fatal("EnvList.MarshalYAML did not emit 'files' — drift-guard cannot validate nested schema")
+	}
+	filesMap, ok := filesAny.(map[string]interface{})
+	if !ok {
+		t.Fatalf("envEntry['files'] is %T, want map[string]interface{}", filesAny)
+	}
+	if !managedKey([]string{"envs", "github.com/org/infra", "files"}, "manifests/**") {
+		t.Error("managedKey at envs.<name>.files — glob key must be managed so deletions propagate")
+	}
+	globAny, ok := filesMap["manifests/**"]
+	if !ok {
+		t.Fatalf("files['manifests/**'] missing: %v", filesMap)
+	}
+	globMap, ok := globAny.(map[string]interface{})
+	if !ok {
+		t.Fatalf("files['manifests/**'] is %T, want map[string]interface{}", globAny)
+	}
+	for key := range globMap {
+		if !managedKey([]string{"envs", "github.com/org/infra", "files", "manifests/**"}, key) {
+			t.Errorf("managedKey at envs.<name>.files.<glob>, key %q = false — marshaler emits this", key)
+		}
+	}
+	// Custom unknown fields under files.<glob> must NOT be managed.
+	for _, custom := range []string{"owner", "notes"} {
+		if managedKey([]string{"envs", "github.com/org/infra", "files", "manifests/**"}, custom) {
+			t.Errorf("managedKey at envs.<name>.files.<glob>, key %q = true — user custom field must be preserved", custom)
 		}
 	}
 
