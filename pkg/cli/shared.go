@@ -392,9 +392,25 @@ func resolveAmbiguousAssets(binaries []*binary.Binary, quiet bool, io *streams.I
 		}
 		b.ResolvedAsset = asset
 		if interactive && b.AssetFilter == "" {
-			b.AssetFilter = asset.Name
+			b.AssetFilter = escapeAssetGlob(asset.Name)
 		}
 	}
+}
+
+// escapeAssetGlob escapes glob metacharacters in an asset filename so that
+// later MatchAssets calls (which use filepath.Match) treat it as a literal
+// name. Without this, an asset whose filename contains '*', '?' or '['
+// could either fail to match or match unintended files on re-install.
+func escapeAssetGlob(name string) string {
+	// filepath.Match recognises '*', '?' and '[...]'. A bare '[' with no
+	// matching ']' makes the pattern invalid. Wrapping each metacharacter
+	// in its own class turns it into a literal.
+	r := strings.NewReplacer(
+		"*", "[*]",
+		"?", "[?]",
+		"[", "[[]",
+	)
+	return r.Replace(name)
 }
 
 // firstLine returns the first line of a string, trimming trailing CR/LF.

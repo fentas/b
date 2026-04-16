@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -355,8 +356,41 @@ func TestResolveAmbiguousAssets_Interactive_PersistsChoice(t *testing.T) {
 	if b.AssetFilter == "" {
 		t.Error("interactive pick should persist to AssetFilter for 'b install --add'")
 	}
-	if b.AssetFilter != b.ResolvedAsset.Name {
-		t.Errorf("AssetFilter = %q, want %q (same as picked asset)", b.AssetFilter, b.ResolvedAsset.Name)
+	// AssetFilter may have glob metachars escaped; the correct invariant is
+	// that it matches the chosen asset's filename literally.
+	if m, err := filepath.Match(b.AssetFilter, b.ResolvedAsset.Name); err != nil || !m {
+		t.Errorf("AssetFilter=%q must match ResolvedAsset.Name=%q (matched=%v err=%v)",
+			b.AssetFilter, b.ResolvedAsset.Name, m, err)
+	}
+}
+
+// TestEscapeAssetGlob verifies that glob metacharacters in asset filenames
+// are escaped so filepath.Match treats the persisted AssetFilter as a
+// literal name on subsequent runs.
+func TestEscapeAssetGlob(t *testing.T) {
+	tests := []string{
+		"argsh",          // no metachars
+		"argsh-so-linux", // dashes fine
+		"foo*bar.tar.gz", // star
+		"what?.zip",      // question mark
+		"a[tag]b",        // brackets
+		"mix*of?[all]",   // mix
+	}
+	for _, in := range tests {
+		pattern := escapeAssetGlob(in)
+		matched, err := filepath.Match(pattern, in)
+		if err != nil {
+			t.Errorf("filepath.Match(%q, %q) error: %v", pattern, in, err)
+		}
+		if !matched {
+			t.Errorf("escaped pattern %q must match its original %q", pattern, in)
+		}
+		// And it must not match an altered name (sanity check).
+		if in != "x" {
+			if m, _ := filepath.Match(pattern, "x"+in); m {
+				t.Errorf("pattern %q unexpectedly matched %q", pattern, "x"+in)
+			}
+		}
 	}
 }
 
