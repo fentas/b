@@ -21,13 +21,17 @@ var (
 		"386":   {"386", "i386", "i686", "x86", "32bit", "32-bit"},
 		"arm":   {"armv7", "armv6", "arm"},
 	}
-	// File extensions to filter out (not actual binaries).
+	// File extensions to filter out (not actual CLI binaries).
 	ignoreExtensions = []string{
 		".sha256", ".sha256sum", ".sha512", ".sha512sum",
 		".sig", ".asc", ".pem",
 		".txt", ".md", ".json",
 		".sbom", ".spdx",
 		".deb", ".rpm", ".msi", ".pkg", ".apk",
+		// Libraries / plugins / bundles — not executables.
+		".so", ".dylib", ".dll", ".a", ".lib",
+		".jar", ".aar",
+		".vsix", // VS Code extension bundle
 	}
 	// Archive extensions we can handle.
 	archiveExtensions = []string{
@@ -88,23 +92,33 @@ func MatchAssets(assets []Asset, repoName, assetFilter string) []Scored {
 	}
 
 	var candidates []Scored
+	repoLower := strings.ToLower(repoName)
 
 	for i := range assets {
 		a := &assets[i]
 		name := a.Name
 		lower := strings.ToLower(name)
 
-		// Skip known non-binary extensions
-		if shouldIgnore(lower) {
-			continue
-		}
-
-		// Apply asset filter glob if provided
+		// Apply asset filter glob if provided — explicit filter takes priority
+		// over the non-binary extension blocklist (user knows what they want).
 		if assetFilter != "" {
 			matched, _ := filepath.Match(filterLower, lower)
 			if !matched {
 				continue
 			}
+		} else if shouldIgnore(lower) {
+			// No filter — skip known non-binary extensions.
+			continue
+		}
+
+		// Portable fallback: an asset whose filename equals the repo name
+		// (optionally with a script extension like .sh/.py/.pl) is likely a
+		// platform-independent script or universal binary. Score it the
+		// same as a typical OS/arch-matched asset so it's surfaced as a
+		// candidate (and triggers the interactive picker when tied).
+		if repoLower != "" && isPortableName(lower, repoLower) {
+			candidates = append(candidates, Scored{Asset: a, Score: 13})
+			continue
 		}
 
 		// Must match OS
@@ -175,6 +189,26 @@ func DetectArchiveType(name string) string {
 		return "zip"
 	}
 	return ""
+}
+
+// portableScriptExts are extensions commonly used by portable (interpreted)
+// scripts that don't target a specific OS/arch.
+var portableScriptExts = []string{".sh", ".py", ".pl", ".rb", ".js"}
+
+// isPortableName reports whether assetLower is the repo name on its own
+// (e.g. "argsh") or the repo name with a common script extension
+// (e.g. "tool.sh"). Used to keep platform-independent assets as candidates
+// even though they contain no OS/arch marker.
+func isPortableName(assetLower, repoLower string) bool {
+	if assetLower == repoLower {
+		return true
+	}
+	for _, ext := range portableScriptExts {
+		if assetLower == repoLower+ext {
+			return true
+		}
+	}
+	return false
 }
 
 // shouldIgnore returns true if the filename should be skipped.

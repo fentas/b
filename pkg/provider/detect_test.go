@@ -157,6 +157,76 @@ func TestMatchAssetWithFilter(t *testing.T) {
 	}
 }
 
+// TestMatchAssets_ArgshScriptIsVisible reproduces the argsh release layout
+// where the main asset is a bare portable script and the rest are shared
+// libraries or VS Code bundles. The bare script must appear as a candidate.
+func TestMatchAssets_ArgshScriptIsVisible(t *testing.T) {
+	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+		t.Skip("test requires linux/amd64")
+	}
+	assets := []Asset{
+		{Name: "argsh"},                  // portable bash script (THE binary)
+		{Name: "argsh-linux-amd64.so"},   // shared library
+		{Name: "argsh-linux-arm64.so"},   // shared library
+		{Name: "argsh-linux-x64.vsix"},   // VS Code extension
+		{Name: "argsh-so-linux-amd64"},   // shared library (no .so ext)
+		{Name: "argsh-darwin-arm64.vsix"},
+		{Name: "argsh-darwin-x64.vsix"},
+	}
+	candidates := MatchAssets(assets, "argsh", "")
+
+	// The bare "argsh" script must tie with the top-scored candidate so the
+	// interactive picker surfaces it as a choice.
+	if len(candidates) == 0 {
+		t.Fatal("expected candidates, got none")
+	}
+	topScore := candidates[0].Score
+	foundBare := false
+	for _, c := range candidates {
+		if c.Asset.Name == "argsh" && c.Score == topScore {
+			foundBare = true
+		}
+	}
+	if !foundBare {
+		names := make([]string, len(candidates))
+		for i, c := range candidates {
+			names[i] = c.Asset.Name
+		}
+		t.Errorf("bare 'argsh' script missing or not top-scored; candidates: %v", names)
+	}
+
+	// Libraries (.so, .vsix) must be filtered out by default.
+	for _, c := range candidates {
+		switch c.Asset.Name {
+		case "argsh-linux-amd64.so", "argsh-linux-arm64.so",
+			"argsh-linux-x64.vsix", "argsh-darwin-arm64.vsix", "argsh-darwin-x64.vsix":
+			t.Errorf("library asset %q should have been filtered", c.Asset.Name)
+		}
+	}
+}
+
+// TestIsPortableName covers the portable script name detection helper.
+func TestIsPortableName(t *testing.T) {
+	tests := []struct {
+		asset string
+		repo  string
+		want  bool
+	}{
+		{"argsh", "argsh", true},
+		{"argsh.sh", "argsh", true},
+		{"tool.py", "tool", true},
+		{"argsh-linux-amd64", "argsh", false},
+		{"argsh.so", "argsh", false}, // handled by extension filter, not portable fallback
+		{"other", "argsh", false},
+	}
+	for _, tt := range tests {
+		got := isPortableName(tt.asset, tt.repo)
+		if got != tt.want {
+			t.Errorf("isPortableName(%q, %q) = %v, want %v", tt.asset, tt.repo, got, tt.want)
+		}
+	}
+}
+
 // TestMatchAssets_SortedByScore tests that MatchAssets returns sorted results.
 func TestMatchAssets_SortedByScore(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
