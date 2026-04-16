@@ -209,14 +209,16 @@ func BinaryName(ref string) string {
 	if i := strings.LastIndex(r, "@"); i > 0 {
 		r = r[:i]
 	}
+	// Tolerate trailing slashes like "github.com/org/repo/" before further
+	// parsing so they don't break tag stripping or the final segment split.
+	r = strings.TrimRight(r, "/")
 	// Strip docker-style "image:tag" — only when ":" occurs after the last "/"
 	// so registry ports like "localhost:5000/org/image" are preserved.
 	lastSlash := strings.LastIndex(r, "/")
 	if i := strings.LastIndex(r, ":"); i > lastSlash && i > 0 {
 		r = r[:i]
 	}
-	// Last path segment (tolerate trailing slashes like "github.com/org/repo/").
-	r = strings.TrimRight(r, "/")
+	// Last path segment.
 	parts := strings.Split(r, "/")
 	return parts[len(parts)-1]
 }

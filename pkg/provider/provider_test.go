@@ -80,6 +80,9 @@ func TestBinaryName(t *testing.T) {
 		{"github.com/arg-sh/argsh///", "argsh"},
 		{"argsh/", "argsh"},
 		{"docker://docker@cli:/usr/local/bin/docker/", "docker"},
+		// Trailing slash combined with docker-style "image:tag" still strips the tag.
+		{"oci://alpine:3.19/", "alpine"},
+		{"oci://ghcr.io/org/img:v1/", "img"},
 	}
 
 	for _, tt := range tests {
