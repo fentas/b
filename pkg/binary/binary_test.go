@@ -273,7 +273,6 @@ func TestBinary_EnsureBinary_UpdateWhenLocalVersionUnknown(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmp, "broken"), []byte("stale"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	downloadCalled := false
 	b := &Binary{
 		Name: "broken",
 		// No pin.
@@ -287,14 +286,19 @@ func TestBinary_EnsureBinary_UpdateWhenLocalVersionUnknown(t *testing.T) {
 			// VersionLocalF has no version to report.
 			return "", os.ErrNotExist
 		},
-		// No URL/URLF/GitHubRepo so DownloadBinary will return an error —
-		// we use that as a sentinel that the skip path was bypassed.
+		// No URL/URLF/GitHubRepo so DownloadBinary will fail with
+		// "no URL provided". That error is our sentinel: it proves the
+		// download branch ran instead of the broken skip path. Before
+		// the fix EnsureBinary returned nil here (Version=="" ==
+		// Enforced=="") and the preset silently appeared up to date.
 	}
 	err := b.EnsureBinary(true)
 	if err == nil {
 		t.Fatal("expected DownloadBinary to be attempted (and fail without a download source), got nil")
 	}
-	_ = downloadCalled
+	if !strings.Contains(err.Error(), "no URL provided") {
+		t.Errorf("expected the 'no URL provided' sentinel error, got: %v", err)
+	}
 }
 
 // --- exec.go ---
