@@ -156,3 +156,103 @@ key2: value2
 		t.Errorf("sub comment should be preserved, got:\n%s", out)
 	}
 }
+
+// TestSaveConfig_PreservesUnknownTopLevelKeys is a regression test for a
+// bug where 'b install --add' wiped any top-level keys that weren't part
+// of the b.yaml schema (e.g. a user-defined 'groups:' section used by
+// external tooling).
+func TestSaveConfig_PreservesUnknownTopLevelKeys(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "b.yaml")
+
+	initial := `binaries:
+  jq: {}
+
+# User-defined top-level section used by external tooling.
+groups:
+  core:
+    - jq
+  optional:
+    - kubectl
+`
+	if err := os.WriteFile(configPath, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := LoadConfigFromPath(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+
+	// Simulate 'b install --add kubectl'
+	config.Binaries = append(config.Binaries, &binary.LocalBinary{Name: "kubectl"})
+
+	if err := SaveConfig(config, configPath); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	result, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(result)
+
+	if !strings.Contains(got, "kubectl") {
+		t.Errorf("expected newly added binary 'kubectl', got:\n%s", got)
+	}
+	if !strings.Contains(got, "groups:") {
+		t.Errorf("top-level 'groups:' was wiped by SaveConfig, got:\n%s", got)
+	}
+	if !strings.Contains(got, "- jq") || !strings.Contains(got, "- kubectl") {
+		t.Errorf("'groups' nested content was not preserved, got:\n%s", got)
+	}
+}
+
+// TestSaveConfig_PreservesUnknownBinaryFields is a regression test for the
+// same bug at the binary-entry level: a user may annotate binaries with
+// custom fields ('groups', 'team', 'owner', ...) that b doesn't know
+// about, and SaveConfig must not drop them.
+func TestSaveConfig_PreservesUnknownBinaryFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "b.yaml")
+
+	initial := `binaries:
+  jq:
+    groups: [core, cli]
+    owner: platform-team
+  kubectl:
+    groups: [core]
+`
+	if err := os.WriteFile(configPath, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := LoadConfigFromPath(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+
+	// Simulate 'b install --add yq' → add a new binary.
+	config.Binaries = append(config.Binaries, &binary.LocalBinary{Name: "yq"})
+
+	if err := SaveConfig(config, configPath); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	result, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(result)
+
+	if !strings.Contains(got, "yq") {
+		t.Errorf("expected newly added binary 'yq', got:\n%s", got)
+	}
+	// Custom per-binary fields must survive a round-trip through SaveConfig.
+	if !strings.Contains(got, "groups:") {
+		t.Errorf("per-binary 'groups' field was wiped, got:\n%s", got)
+	}
+	if !strings.Contains(got, "owner: platform-team") {
+		t.Errorf("per-binary 'owner' field was wiped, got:\n%s", got)
+	}
+}
