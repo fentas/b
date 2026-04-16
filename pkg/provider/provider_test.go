@@ -75,6 +75,18 @@ func TestBinaryName(t *testing.T) {
 		{"oci://alpine", "alpine"},
 		// Registry port must not be mistaken for path.
 		{"oci://localhost:5000/org/img", "img"},
+		// Tolerate trailing slashes — the last non-empty segment wins.
+		{"github.com/arg-sh/argsh/", "argsh"},
+		{"github.com/arg-sh/argsh///", "argsh"},
+		{"argsh/", "argsh"},
+		{"docker://docker@cli:/usr/local/bin/docker/", "docker"},
+		// Trailing slash combined with docker-style "image:tag" still strips the tag.
+		{"oci://alpine:3.19/", "alpine"},
+		{"oci://ghcr.io/org/img:v1/", "img"},
+		// Docker/OCI with ":/<path>" where path ends in '/' (directory-like)
+		// falls back to the image name, not the last path segment.
+		{"oci://ghcr.io/org/img:/bin/tool/", "img"},
+		{"docker://alpine@3.19:/opt/bin/", "alpine"},
 	}
 
 	for _, tt := range tests {
