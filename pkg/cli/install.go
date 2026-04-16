@@ -371,21 +371,32 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			//     outages.
 			//   - malformed ref → ("", err): surface as a warning so the
 			//     user sees the actionable problem.
+			//
+			// Carry a previous digest forward only when the previous lock
+			// entry refers to the same Source/Provider — otherwise we'd
+			// associate an old image's digest with a new Source, which
+			// could produce coincidental false "up to date" skips later.
+			preserveDigest := func() {
+				prev := lk.FindBinary(b.Name)
+				if prev == nil || prev.Source != entry.Source {
+					return
+				}
+				if prev.Provider != "" && entry.Provider != "" && prev.Provider != entry.Provider {
+					return
+				}
+				entry.Digest = prev.Digest
+			}
 			if p, err := provider.Detect(b.ProviderRef); err == nil {
 				if dr, ok := p.(provider.DigestResolver); ok {
 					digest, dErr := dr.ResolveDigest(b.ProviderRef, b.Version)
 					switch {
 					case dErr != nil:
 						fmt.Fprintf(o.IO.ErrOut, "Warning: resolving digest for %s (%s): %v\n", b.Name, b.ProviderRef, dErr)
-						if prev := lk.FindBinary(b.Name); prev != nil {
-							entry.Digest = prev.Digest
-						}
+						preserveDigest()
 					case digest != "":
 						entry.Digest = digest
 					default:
-						if prev := lk.FindBinary(b.Name); prev != nil {
-							entry.Digest = prev.Digest
-						}
+						preserveDigest()
 					}
 				}
 			}

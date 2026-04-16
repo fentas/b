@@ -974,6 +974,17 @@ func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDiges
 		if entry == nil {
 			continue
 		}
+		// If the lock entry's Source drifted from the configured
+		// ProviderRef (e.g. the user edited b.yaml in place and changed
+		// the ref but kept the derived binary name), don't rewrite the
+		// entry's Digest/SHA256 here — that would mix a stale Source
+		// with fresh content identity and break future skip checks via
+		// digestMatchesLock. An 'install --add' flow is the correct
+		// way to update Source/Provider; this refresh is conservative
+		// on purpose.
+		if entry.Source != "" && entry.Source != b.ProviderRef {
+			continue
+		}
 		hash, err := lock.SHA256File(b.File)
 		if err != nil {
 			continue
