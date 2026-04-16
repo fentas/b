@@ -124,13 +124,18 @@ binaries:
     alias: renvsubst      # alias to renvsubst
   kubectl:
     file: ../kc           # custom path (relative to config)
-  # Install from any provider by ref (GitHub, GitLab, Gitea, go://, docker://, git://)
+  # Install from any provider by ref (GitHub, GitLab, Gitea, go://, docker://, oci://, git://)
   github.com/sharkdp/bat:
     version: v0.24.0
   # Install from a git repo (local or remote)
   git:///home/user/myproject:.scripts/tool:
   git://github.com/org/repo:bin/app:
     version: v1.0
+  # Install from an OCI registry (daemonless — works without docker)
+  oci://ghcr.io/org/img:
+    version: v1.0
+  oci://docker::/usr/local/bin/docker:
+    version: cli
 
 envs:
   # Sync files from upstream git repos
@@ -167,6 +172,8 @@ Set environment variables to authenticate with providers for higher rate limits 
 | `GITHUB_TOKEN` | GitHub |
 | `GITLAB_TOKEN` | GitLab |
 | `GITEA_TOKEN` | Gitea / Forgejo (Codeberg) |
+
+For `oci://` the daemonless client reuses your local registry auth from `~/.docker/config.json` (or the `DOCKER_CONFIG` override) — the same credentials `docker login` writes.
 
 &nbsp;
 
