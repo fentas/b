@@ -167,13 +167,14 @@ func mergeMappingsPath(dst, src *yaml.Node, path []string, managed func([]string
 			if dstKey.Value == srcKey.Value {
 				found = true
 				// Handle the envs/profiles files.<glob> shorthand: marshal may
-				// emit the glob value as a scalar (just the dest path) while
-				// the existing tree has it as a map that may contain user-only
-				// keys (e.g. 'owner:'). Upgrade the scalar to a managed-only
-				// map so the merge preserves the user keys.
+				// emit the glob value as a scalar (bare key or a dest string)
+				// while the existing tree has it as a map that may contain
+				// user-only keys (e.g. 'owner:'). Upgrade the scalar to an
+				// equivalent map so the merge preserves the user keys without
+				// inventing a synthetic 'dest: ""'.
 				if isFilesGlobPath(append(path, dstKey.Value)) &&
 					dstVal.Kind == yaml.MappingNode && srcVal.Kind == yaml.ScalarNode {
-					srcVal = scalarDestToMap(srcVal)
+					srcVal = filesGlobScalarToMap(srcVal)
 				}
 				// If both are mappings, recurse
 				if dstVal.Kind == yaml.MappingNode && srcVal.Kind == yaml.MappingNode {
@@ -239,10 +240,21 @@ func isFilesGlobPath(path []string) bool {
 	return len(path) == 4 && (path[0] == "envs" || path[0] == "profiles") && path[2] == "files"
 }
 
-// scalarDestToMap expands a scalar file shorthand ("dest-path") into the
-// equivalent mapping {dest: "dest-path"} so mergeMappingsPath can merge it
-// against an existing mapping value and preserve unknown keys.
-func scalarDestToMap(scalar *yaml.Node) *yaml.Node {
+// filesGlobScalarToMap expands the two scalar shorthands that EnvList.MarshalYAML
+// emits under files.<glob> into an equivalent mapping so mergeMappingsPath
+// can merge them against an existing mapping value and preserve unknown keys:
+//
+//   - !!null (bare key, e.g. "manifests/**":) → empty mapping. Marshaling
+//     GlobConfig{} deliberately omits dest/ignore/select, so we must NOT
+//     synthesize a "dest: \"\"" which would alter the saved shape.
+//   - a !!str dest path (e.g. "manifests/**": out/) → {dest: <path>}.
+func filesGlobScalarToMap(scalar *yaml.Node) *yaml.Node {
+	if scalar.Tag == "!!null" || scalar.Value == "" {
+		return &yaml.Node{
+			Kind: yaml.MappingNode,
+			Tag:  "!!map",
+		}
+	}
 	return &yaml.Node{
 		Kind: yaml.MappingNode,
 		Tag:  "!!map",

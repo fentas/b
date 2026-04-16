@@ -328,7 +328,10 @@ envs:
 		t.Fatalf("SaveConfig: %v", err)
 	}
 
-	result, _ := os.ReadFile(configPath)
+	result, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile after save: %v", err)
+	}
 	got := string(result)
 
 	var saved struct {
@@ -350,6 +353,66 @@ envs:
 	}
 	if owner, _ := glob["owner"].(string); owner != "platform-team" {
 		t.Errorf("user-owned 'owner' field was wiped, got %q\nfull:\n%s", owner, got)
+	}
+}
+
+// TestSaveConfig_PreservesBareFileGlob is the null-scalar shorthand variant
+// of TestSaveConfig_PreservesUnknownFilesGlobFields. The marshaler emits
+// 'files.<glob>:' as a bare key (null scalar) when the GlobConfig is empty,
+// but the existing file may have a mapping with user-owned keys under it.
+// The merge must preserve those keys instead of synthesising a 'dest: ""'.
+func TestSaveConfig_PreservesBareFileGlob(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "b.yaml")
+
+	// 'dest:' is absent here; on reload+save EnvList emits the bare-key
+	// shorthand for this glob.
+	initial := `binaries:
+  jq: {}
+envs:
+  github.com/org/infra:
+    files:
+      "manifests/**":
+        owner: platform-team
+`
+	if err := os.WriteFile(configPath, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := LoadConfigFromPath(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	config.Binaries = append(config.Binaries, &binary.LocalBinary{Name: "yq"})
+	if err := SaveConfig(config, configPath); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	result, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	got := string(result)
+
+	// A synthetic 'dest: ""' must NOT have been invented.
+	if strings.Contains(got, `dest: ""`) || strings.Contains(got, "dest: ''") {
+		t.Errorf("merge invented a synthetic dest:\n%s", got)
+	}
+
+	var saved struct {
+		Envs map[string]struct {
+			Files map[string]map[string]interface{} `yaml:"files"`
+		} `yaml:"envs"`
+	}
+	if err := yaml.Unmarshal(result, &saved); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, got)
+	}
+	glob, ok := saved.Envs["github.com/org/infra"].Files["manifests/**"]
+	if !ok {
+		t.Fatalf("glob entry missing from saved file:\n%s", got)
+	}
+	if owner, _ := glob["owner"].(string); owner != "platform-team" {
+		t.Errorf("user 'owner' lost from bare-key glob, got %q\nfull:\n%s", owner, got)
 	}
 }
 
