@@ -364,11 +364,17 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			entry.Provider = b.ProviderType
 			// For providers that expose a stable content digest (docker://,
 			// oci://) record it so `b update` can skip re-pulls when the
-			// tag's manifest hasn't moved upstream.
+			// tag's manifest hasn't moved upstream. If ResolveDigest fails
+			// or returns empty (transient registry/auth issue), preserve
+			// whatever digest the lock already had — clobbering it with ""
+			// would lose the ability to skip future re-pulls until the
+			// next successful resolve.
 			if p, err := provider.Detect(b.ProviderRef); err == nil {
 				if dr, ok := p.(provider.DigestResolver); ok {
 					if digest, _ := dr.ResolveDigest(b.ProviderRef, b.Version); digest != "" {
 						entry.Digest = digest
+					} else if prev := lk.FindBinary(b.Name); prev != nil {
+						entry.Digest = prev.Digest
 					}
 				}
 			}

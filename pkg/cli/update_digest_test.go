@@ -43,82 +43,78 @@ func init() {
 	provider.Register(globalFakeDigest)
 }
 
-// TestDigestUnchanged_Matches returns true only when fresh == locked.
-func TestDigestUnchanged_Matches(t *testing.T) {
-	globalFakeDigest.digest.Store("sha256:aaa")
-
+// TestDigestMatchesLock_Matches returns true only when fresh == locked.
+func TestDigestMatchesLock_Matches(t *testing.T) {
 	lk := &lock.Lock{
 		Binaries: []lock.BinEntry{
 			{Name: "tool", Source: "fakedigest://example", Digest: "sha256:aaa"},
 		},
 	}
 	b := &binary.Binary{Name: "tool", AutoDetect: true, ProviderRef: "fakedigest://example"}
-
-	if !digestUnchanged(b, lk) {
-		t.Error("expected digestUnchanged=true when fresh and locked match")
+	if !digestMatchesLock(b, lk, "sha256:aaa") {
+		t.Error("expected match when fresh and locked match")
 	}
 }
 
-// TestDigestUnchanged_Different returns false so update proceeds.
-func TestDigestUnchanged_Different(t *testing.T) {
-	globalFakeDigest.digest.Store("sha256:new")
+// TestDigestMatchesLock_Different returns false so update proceeds.
+func TestDigestMatchesLock_Different(t *testing.T) {
 	lk := &lock.Lock{
 		Binaries: []lock.BinEntry{
 			{Name: "tool", Source: "fakedigest://example", Digest: "sha256:old"},
 		},
 	}
 	b := &binary.Binary{Name: "tool", AutoDetect: true, ProviderRef: "fakedigest://example"}
-
-	if digestUnchanged(b, lk) {
-		t.Error("expected digestUnchanged=false when fresh and locked differ")
+	if digestMatchesLock(b, lk, "sha256:new") {
+		t.Error("expected mismatch when fresh and locked differ")
 	}
 }
 
-// TestDigestUnchanged_NoLock — first install (lock has no digest yet).
+// TestDigestMatchesLock_NoLockedDigest — first install (lock has no digest).
 // Must return false so the caller re-downloads (and populates the digest).
-func TestDigestUnchanged_NoLockedDigest(t *testing.T) {
-	globalFakeDigest.digest.Store("sha256:aaa")
+func TestDigestMatchesLock_NoLockedDigest(t *testing.T) {
 	lk := &lock.Lock{
 		Binaries: []lock.BinEntry{
-			// No Digest set — legacy entry or freshly-installed without digest.
+			// Legacy entry or freshly-installed without digest.
 			{Name: "tool", Source: "fakedigest://example"},
 		},
 	}
 	b := &binary.Binary{Name: "tool", AutoDetect: true, ProviderRef: "fakedigest://example"}
-
-	if digestUnchanged(b, lk) {
-		t.Error("expected digestUnchanged=false when lock has no digest")
+	if digestMatchesLock(b, lk, "sha256:aaa") {
+		t.Error("expected false when lock has no digest")
 	}
 }
 
-// TestDigestUnchanged_ResolverReturnsEmpty — registry unreachable etc.
-// Must return false so we don't wrongly skip.
-func TestDigestUnchanged_ResolverEmpty(t *testing.T) {
-	globalFakeDigest.digest.Store("") // resolver returns empty
+// TestDigestMatchesLock_FreshEmpty — caller couldn't resolve (registry
+// unreachable etc). Must return false so we don't wrongly skip.
+func TestDigestMatchesLock_FreshEmpty(t *testing.T) {
 	lk := &lock.Lock{
 		Binaries: []lock.BinEntry{
 			{Name: "tool", Source: "fakedigest://example", Digest: "sha256:aaa"},
 		},
 	}
 	b := &binary.Binary{Name: "tool", AutoDetect: true, ProviderRef: "fakedigest://example"}
-
-	if digestUnchanged(b, lk) {
-		t.Error("expected digestUnchanged=false when resolver returns empty — we can't prove it's current")
+	if digestMatchesLock(b, lk, "") {
+		t.Error("expected false when fresh digest is empty — we can't prove it's current")
 	}
 }
 
-// TestDigestUnchanged_NonDigestProvider — e.g. github preset.
-// Must return false so the existing update path runs.
-func TestDigestUnchanged_NonDigestProvider(t *testing.T) {
-	lk := &lock.Lock{
-		Binaries: []lock.BinEntry{
-			{Name: "jq", Source: "github.com/jqlang/jq", Digest: "should-be-ignored"},
-		},
+// TestDigestMatchesLock_NoLock — no lockfile at all. Must return false so
+// the caller falls through to a regular update.
+func TestDigestMatchesLock_NoLock(t *testing.T) {
+	b := &binary.Binary{Name: "tool", AutoDetect: true, ProviderRef: "fakedigest://example"}
+	if digestMatchesLock(b, nil, "sha256:aaa") {
+		t.Error("expected false when lk is nil")
 	}
-	b := &binary.Binary{Name: "jq", AutoDetect: true, ProviderRef: "github.com/jqlang/jq"}
+}
 
-	if digestUnchanged(b, lk) {
-		t.Error("non-digest providers must never short-circuit update")
+// TestDigestMatchesLock_MissingProviderRef guards the empty ProviderRef
+// path — a preset binary without AutoDetect must never be treated as
+// digest-capable.
+func TestDigestMatchesLock_MissingProviderRef(t *testing.T) {
+	lk := &lock.Lock{Binaries: []lock.BinEntry{{Name: "tool", Digest: "sha256:aaa"}}}
+	b := &binary.Binary{Name: "tool"} // no ProviderRef
+	if digestMatchesLock(b, lk, "sha256:aaa") {
+		t.Error("expected false when ProviderRef is empty")
 	}
 }
 
@@ -135,5 +131,20 @@ func TestIsDigestProvider(t *testing.T) {
 	}
 	if isDigestProvider("github.com/jqlang/jq") {
 		t.Error("github provider must not report as digest-capable")
+	}
+}
+
+// TestProviderDigestResolver returns the resolver for digest-capable
+// providers and (nil, false) otherwise.
+func TestProviderDigestResolver(t *testing.T) {
+	dr, ok := providerDigestResolver("fakedigest://x")
+	if !ok || dr == nil {
+		t.Error("expected resolver for fakedigest://")
+	}
+	if _, ok := providerDigestResolver("github.com/derailed/k9s"); ok {
+		t.Error("github provider must not be digest-capable")
+	}
+	if _, ok := providerDigestResolver("not-a-ref"); ok {
+		t.Error("unknown ref must not be digest-capable")
 	}
 }
