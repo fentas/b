@@ -374,8 +374,22 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 	return lock.WriteLock(lockDir, lk, o.bVersion)
 }
 
-// parseBinaryArg parses binary argument in format "name" or "name@version"
+// parseBinaryArg parses binary argument in format "name" or "name@version".
+// For docker://oci:// refs with "::<path>" suffix, the path is preserved on
+// name and not misinterpreted as part of @version.
 func parseBinaryArg(arg string) (name, version string) {
+	// docker://oci:// with "::<path>" — isolate the image portion for @ scan.
+	if strings.HasPrefix(arg, "docker://") || strings.HasPrefix(arg, "oci://") {
+		imgPart, pathPart := arg, ""
+		if i := strings.Index(arg, "::"); i >= 0 {
+			imgPart = arg[:i]
+			pathPart = arg[i:]
+		}
+		if i := strings.LastIndex(imgPart, "@"); i > 0 {
+			return imgPart[:i] + pathPart, imgPart[i+1:]
+		}
+		return arg, ""
+	}
 	parts := strings.SplitN(arg, "@", 2)
 	name = parts[0]
 	if len(parts) > 1 {
@@ -391,12 +405,21 @@ func parseBinaryArg(arg string) (name, version string) {
 // Returns the parsed envInstall, how many additional args were consumed, and whether it matched.
 func parseSCPArg(arg string, remaining []string) (envInstall, int, bool) {
 	// Look for colon that signals SCP syntax — must come after a ref (contains /)
-	// and before a glob. Skip protocol prefixes (go://, docker://).
+	// and before a glob. Skip protocol prefixes (go://, docker://, oci://) and
+	// the "::<path>" separator used by docker://oci:// for explicit binary paths.
 	colonIdx := -1
 	for i := range arg {
 		if arg[i] == ':' {
-			// Skip protocol prefixes (e.g. go://, docker://)
+			// Skip protocol prefixes (e.g. go://, docker://, oci://)
 			if i+2 < len(arg) && arg[i+1] == '/' && arg[i+2] == '/' {
+				continue
+			}
+			// Skip docker://oci:// "::<path>" binary-path separator
+			if i+1 < len(arg) && arg[i+1] == ':' {
+				continue
+			}
+			// Also skip the colon that is the second ':' of '::'
+			if i > 0 && arg[i-1] == ':' {
 				continue
 			}
 			// Must be preceded by something that looks like a ref (contains /)

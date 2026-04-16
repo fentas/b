@@ -53,21 +53,59 @@ func Detect(ref string) (Provider, error) {
 
 // ParseRef splits a ref like "github.com/org/repo@v1.0" into
 // (github.com/org/repo, v1.0). Version may be empty.
+//
+// For docker:///oci:// refs, the optional "::<in-container-path>" suffix
+// is preserved on base (stripped only for the @ scan), and the tag ends
+// up in version. E.g. "docker://docker@cli::/usr/local/bin/docker" →
+// ("docker://docker::/usr/local/bin/docker", "cli").
 func ParseRef(ref string) (base, version string) {
+	// For image refs, scan for @ on the image-only slice so paths are ignored.
+	if strings.HasPrefix(ref, "docker://") || strings.HasPrefix(ref, "oci://") {
+		imgPart, pathPart := ref, ""
+		if i := strings.Index(ref, "::"); i >= 0 {
+			imgPart = ref[:i]
+			pathPart = ref[i:]
+		}
+		if i := strings.LastIndex(imgPart, "@"); i > 0 {
+			return imgPart[:i] + pathPart, imgPart[i+1:]
+		}
+		return ref, ""
+	}
 	if i := strings.LastIndex(ref, "@"); i > 0 {
 		return ref[:i], ref[i+1:]
 	}
 	return ref, ""
 }
 
+// ParseImageRef parses a docker://oci:// ref into (image, tag, path).
+//
+//	docker://alpine                              → ("alpine", "", "")
+//	docker://alpine@3.19                         → ("alpine", "3.19", "")
+//	docker://docker@cli::/usr/local/bin/docker   → ("docker", "cli", "/usr/local/bin/docker")
+//	oci://ghcr.io/org/img@v1::/bin/tool          → ("ghcr.io/org/img", "v1", "/bin/tool")
+//
+// The prefix (docker://oci://) must already be stripped.
+func ParseImageRef(ref string) (image, tag, inContainerPath string) {
+	if i := strings.Index(ref, "::"); i >= 0 {
+		inContainerPath = ref[i+2:]
+		ref = ref[:i]
+	}
+	if i := strings.LastIndex(ref, "@"); i > 0 {
+		tag = ref[i+1:]
+		ref = ref[:i]
+	}
+	image = ref
+	return
+}
+
 // IsReleaseProvider returns true if the provider uses FetchRelease for downloads
-// (i.e. GitHub, GitLab, Gitea). Returns false for go://, docker://, git://.
+// (i.e. GitHub, GitLab, Gitea). Returns false for go://, docker://, oci://, git://.
 func IsReleaseProvider(p Provider) bool {
 	if p == nil {
 		return false
 	}
 	switch p.(type) {
-	case *GoInstall, *Docker, *Git:
+	case *GoInstall, *Docker, *OCI, *Git:
 		return false
 	default:
 		return true
@@ -91,6 +129,7 @@ func IsProviderRef(s string) bool {
 //
 //	"go://github.com/jrhouston/tfk8s" → "tfk8s",
 //	"docker://hashicorp/terraform" → "terraform"
+//	"docker://docker@cli::/usr/local/bin/docker" → "docker"
 func BinaryName(ref string) string {
 	// git:// refs use the filepath part (after :) as the binary name
 	if strings.HasPrefix(ref, "git://") {
@@ -103,6 +142,15 @@ func BinaryName(ref string) string {
 		if i := strings.Index(r, ":"); i >= 0 {
 			filePart := r[i+1:]
 			parts := strings.Split(filePart, "/")
+			return parts[len(parts)-1]
+		}
+	}
+
+	// docker:///oci:// with "::<path>" — binary name is basename of path.
+	if strings.HasPrefix(ref, "docker://") || strings.HasPrefix(ref, "oci://") {
+		if i := strings.Index(ref, "::"); i >= 0 {
+			p := ref[i+2:]
+			parts := strings.Split(p, "/")
 			return parts[len(parts)-1]
 		}
 	}

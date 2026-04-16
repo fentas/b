@@ -32,14 +32,20 @@ func (d *Docker) FetchRelease(ref, version string) (*Release, error) {
 
 // Install pulls the image, creates a container, copies the binary out, and cleans up.
 // searchPaths are the paths to search for the binary inside the container.
+// If the ref includes "::<path>", that path is used as the single search path.
 func (d *Docker) Install(ref, version, destDir string, searchPaths []string) (string, error) {
 	runtime, err := detectContainerRuntime()
 	if err != nil {
 		return "", err
 	}
 
-	image := dockerImage(ref)
+	rest := strings.TrimPrefix(ref, "docker://")
+	image, refTag, inContainerPath := ParseImageRef(rest)
+
 	tag := version
+	if tag == "" {
+		tag = refTag
+	}
 	if tag == "" {
 		tag = "latest"
 	}
@@ -61,8 +67,10 @@ func (d *Docker) Install(ref, version, destDir string, searchPaths []string) (st
 	containerID := strings.TrimSpace(string(out))
 	defer exec.Command(runtime, "rm", containerID).Run()
 
-	// Try to copy binary from known paths
-	if searchPaths == nil {
+	// Determine search paths: explicit "::<path>" overrides everything.
+	if inContainerPath != "" {
+		searchPaths = []string{inContainerPath}
+	} else if searchPaths == nil {
 		searchPaths = []string{
 			"/usr/local/bin/" + name,
 			"/usr/bin/" + name,
@@ -90,15 +98,16 @@ func (d *Docker) Install(ref, version, destDir string, searchPaths []string) (st
 	return "", fmt.Errorf("binary %q not found in image %s at paths: %v", name, imageRef, searchPaths)
 }
 
+// dockerImage returns the image name (without tag/path) for legacy callers
+// and tests. Prefer ParseImageRef for new code.
 func dockerImage(ref string) string {
 	r := strings.TrimPrefix(ref, "docker://")
-	// Strip version (handled separately)
-	r, _ = ParseRef(r)
-	// Also strip docker-style tag after colon
-	if i := strings.LastIndex(r, ":"); i > 0 {
-		r = r[:i]
+	image, _, _ := ParseImageRef(r)
+	// Also strip docker-style "image:tag" when no explicit @ was given.
+	if i := strings.LastIndex(image, ":"); i > 0 {
+		image = image[:i]
 	}
-	return r
+	return image
 }
 
 func detectContainerRuntime() (string, error) {
