@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.15.1](https://github.com/fentas/b/compare/v4.15.0...v4.15.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* **provider:** BinaryName returns empty for refs with trailing slash ([#145](https://github.com/fentas/b/issues/145)) ([b4d8ce4](https://github.com/fentas/b/commit/b4d8ce44682ae942ae0b8190d636ae76ecec94ad))
+* **provider:** surface portable scripts, filter libs; persist interactive pick ([#147](https://github.com/fentas/b/issues/147)) ([1d8f7e9](https://github.com/fentas/b/commit/1d8f7e9bb10093d41f7912455a57aba6abf94357))
+
 ## [4.15.0](https://github.com/fentas/b/compare/v4.14.1...v4.15.0) (2026-04-16)
 
 
