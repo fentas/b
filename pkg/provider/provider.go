@@ -95,10 +95,14 @@ func SplitImagePath(ref string) (imagePart, pathPart string) {
 //
 //	alpine                             → ("alpine", "", "")
 //	alpine@3.19                        → ("alpine", "3.19", "")
+//	alpine:3.19                        → ("alpine", "3.19", "")   // docker-style, tolerated
 //	docker@cli:/usr/local/bin/docker   → ("docker", "cli", "/usr/local/bin/docker")
 //	ghcr.io/org/img@v1:/bin/tool       → ("ghcr.io/org/img", "v1", "/bin/tool")
+//	localhost:5000/org/img             → ("localhost:5000/org/img", "", "")
 //
-// The prefix (docker:// or oci://) must already be stripped.
+// The prefix (docker:// or oci://) must already be stripped. Docker-style
+// "image:tag" is accepted for convenience (a copy-paste from docker docs)
+// but the preferred syntax remains "@tag" to stay consistent across providers.
 func ParseImageRef(ref string) (image, tag, inContainerPath string) {
 	imagePart, pathPart := SplitImagePath(ref)
 	if pathPart != "" {
@@ -108,6 +112,14 @@ func ParseImageRef(ref string) (image, tag, inContainerPath string) {
 	if i := strings.LastIndex(ref, "@"); i > 0 {
 		tag = ref[i+1:]
 		ref = ref[:i]
+	} else {
+		// Also accept docker-style "image:tag" — only when ':' is after the
+		// last '/' so registry ports ("localhost:5000/org/img") are preserved.
+		lastSlash := strings.LastIndex(ref, "/")
+		if i := strings.LastIndex(ref, ":"); i > lastSlash && i > 0 {
+			tag = ref[i+1:]
+			ref = ref[:i]
+		}
 	}
 	image = ref
 	return

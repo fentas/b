@@ -167,6 +167,54 @@ func TestExtractBinaryFromLayer_RecordsWhiteouts(t *testing.T) {
 	}
 }
 
+func TestExtractBinaryFromLayer_FallsBackWhenFirstWhitedOut(t *testing.T) {
+	// Layer contains both candidates; the higher-priority one is whited out
+	// by a newer layer, so the lower-priority candidate must be extracted.
+	entries := []tar.Header{
+		{Name: "usr/local/bin/tool", Typeflag: tar.TypeReg, Mode: 0755},
+		{Name: "usr/bin/tool", Typeflag: tar.TypeReg, Mode: 0755},
+	}
+	contents := map[string][]byte{
+		"usr/local/bin/tool": []byte("blocked"),
+		"usr/bin/tool":       []byte("fallback"),
+	}
+	layer := fakeLayer(t, entries, contents)
+
+	dest := filepath.Join(t.TempDir(), "out")
+	whiteouts := map[string]bool{"/usr/local/bin/tool": true}
+	searchPaths := []string{"/usr/local/bin/tool", "/usr/bin/tool"}
+	found, err := extractBinaryFromLayer(layer, searchPaths, dest, whiteouts)
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if !found {
+		t.Fatal("expected fallback candidate to be extracted")
+	}
+	body, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read dest: %v", err)
+	}
+	if string(body) != "fallback" {
+		t.Errorf("got %q, want %q", body, "fallback")
+	}
+}
+
+func TestExtractBinaryFromLayer_AcceptsLegacyRegular(t *testing.T) {
+	// Legacy NUL-typeflag regular file must be accepted via FileInfo.IsRegular().
+	entries := []tar.Header{
+		{Name: "usr/bin/tool", Typeflag: 0x00, Mode: 0755},
+	}
+	layer := fakeLayer(t, entries, map[string][]byte{"usr/bin/tool": []byte("x")})
+	dest := filepath.Join(t.TempDir(), "out")
+	found, err := extractBinaryFromLayer(layer, []string{"/usr/bin/tool"}, dest, map[string]bool{})
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if !found {
+		t.Error("legacy NUL typeflag regular file should be accepted")
+	}
+}
+
 func TestExtractBinaryFromLayer_OpaqueDirBlocksDescendant(t *testing.T) {
 	// An opaque-dir whiteout on "/usr/local/bin/" should block extraction of
 	// /usr/local/bin/tool from an older layer.

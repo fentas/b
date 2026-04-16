@@ -61,6 +61,9 @@ func TestParseImageRef(t *testing.T) {
 		// Registry port is preserved, not mistaken for path.
 		{"localhost:5000/org/img@v1:/bin/tool", "localhost:5000/org/img", "v1", "/bin/tool"},
 		{"localhost:5000/org/img", "localhost:5000/org/img", "", ""},
+		// Docker-style "image:tag" is tolerated as a copy-paste convenience.
+		{"alpine:3.19", "alpine", "3.19", ""},
+		{"ghcr.io/org/img:v1", "ghcr.io/org/img", "v1", ""},
 	}
 	for _, tt := range tests {
 		img, tag, p := ParseImageRef(tt.in)

@@ -375,24 +375,10 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 }
 
 // parseBinaryArg parses binary argument in format "name" or "name@version".
-// For docker:// or oci:// refs with a ":/<path>" suffix, the path is preserved
-// on name and not misinterpreted as part of @version.
+// Delegates to provider.ParseRef which already handles the docker://oci://
+// quirk of preserving a ":/<path>" suffix on name.
 func parseBinaryArg(arg string) (name, version string) {
-	// docker:// or oci:// — isolate the image portion for @ scan so ":/path"
-	// (e.g. "docker://docker@cli:/usr/local/bin/docker") is preserved.
-	if strings.HasPrefix(arg, "docker://") || strings.HasPrefix(arg, "oci://") {
-		imgPart, pathPart := provider.SplitImagePath(arg)
-		if i := strings.LastIndex(imgPart, "@"); i > 0 {
-			return imgPart[:i] + pathPart, imgPart[i+1:]
-		}
-		return arg, ""
-	}
-	parts := strings.SplitN(arg, "@", 2)
-	name = parts[0]
-	if len(parts) > 1 {
-		version = parts[1]
-	}
-	return
+	return provider.ParseRef(arg)
 }
 
 // parseSCPArg tries to parse an SCP-style env install:

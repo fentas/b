@@ -188,11 +188,19 @@ func extractBinaryFromLayer(l v1.Layer, searchPaths []string, dest string, white
 			continue
 		}
 
-		if hdr.Typeflag != tar.TypeReg {
+		// Accept any regular file; some tar encodings use the legacy NUL
+		// typeflag (TypeRegA) which FileInfo.Mode().IsRegular() handles
+		// along with the modern '0' TypeReg.
+		if !hdr.FileInfo().Mode().IsRegular() {
 			continue
 		}
 		priority, ok := targets[name]
 		if !ok || priority >= bestPriority {
+			continue
+		}
+		// Skip candidates that a newer layer has whited out; keep looking
+		// for the next-best unblocked match in this same tar stream.
+		if isWhiteoutBlocked(name, whiteouts) {
 			continue
 		}
 		// Write to a temp file first; rename once we're confident this is
@@ -225,26 +233,11 @@ func extractBinaryFromLayer(l v1.Layer, searchPaths []string, dest string, white
 	if tmpPath == "" {
 		return false, nil
 	}
-	// If a newer layer whited out this path (or an ancestor directory
-	// opaque-marker), don't use the file we found here.
-	if isWhiteoutBlocked(findMatchedPath(searchPaths, bestPriority), whiteouts) {
-		cleanup()
-		return false, nil
-	}
 	if err := os.Rename(tmpPath, dest); err != nil {
 		_ = os.Remove(tmpPath)
 		return false, fmt.Errorf("moving extracted file into place: %w", err)
 	}
 	return true, nil
-}
-
-// findMatchedPath returns the searchPaths entry at the given priority index,
-// normalised to absolute form.
-func findMatchedPath(searchPaths []string, priority int) string {
-	if priority < 0 || priority >= len(searchPaths) {
-		return ""
-	}
-	return path.Clean("/" + strings.TrimPrefix(searchPaths[priority], "/"))
 }
 
 // isWhiteoutBlocked reports whether target (or any ancestor dir marked opaque)
