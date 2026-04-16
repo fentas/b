@@ -75,6 +75,11 @@ func TestBinaryName(t *testing.T) {
 		{"oci://alpine", "alpine"},
 		// Registry port must not be mistaken for path.
 		{"oci://localhost:5000/org/img", "img"},
+		// Tolerate trailing slashes — the last non-empty segment wins.
+		{"github.com/arg-sh/argsh/", "argsh"},
+		{"github.com/arg-sh/argsh///", "argsh"},
+		{"argsh/", "argsh"},
+		{"docker://docker@cli:/usr/local/bin/docker/", "docker"},
 	}
 
 	for _, tt := range tests {

@@ -215,7 +215,8 @@ func BinaryName(ref string) string {
 	if i := strings.LastIndex(r, ":"); i > lastSlash && i > 0 {
 		r = r[:i]
 	}
-	// Last path segment
+	// Last path segment (tolerate trailing slashes like "github.com/org/repo/").
+	r = strings.TrimRight(r, "/")
 	parts := strings.Split(r, "/")
 	return parts[len(parts)-1]
 }
