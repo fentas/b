@@ -375,7 +375,7 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 }
 
 // parseBinaryArg parses binary argument in format "name" or "name@version".
-// Delegates to provider.ParseRef which already handles the docker://oci://
+// Delegates to provider.ParseRef which already handles the docker:// or oci://
 // quirk of preserving a ":/<path>" suffix on name.
 func parseBinaryArg(arg string) (name, version string) {
 	return provider.ParseRef(arg)

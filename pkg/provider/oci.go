@@ -180,7 +180,13 @@ func extractBinaryFromLayer(l v1.Layer, searchPaths []string, dest string, white
 		// layers are prevented from resurrecting deleted paths.
 		if base == ".wh..wh..opq" {
 			// Opaque dir: everything in its parent is hidden from older layers.
-			whiteouts[path.Dir(name)+"/"] = true
+			// Use "/" as the sentinel for the root so isWhiteoutBlocked finds it.
+			dir := path.Dir(name)
+			if dir == "/" {
+				whiteouts["/"] = true
+			} else {
+				whiteouts[dir+"/"] = true
+			}
 			continue
 		}
 		if strings.HasPrefix(base, ".wh.") {

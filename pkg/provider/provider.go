@@ -55,15 +55,27 @@ func Detect(ref string) (Provider, error) {
 // (github.com/org/repo, v1.0). Version may be empty.
 //
 // For docker:// or oci:// refs, the optional ":/<in-container-path>" suffix
-// is preserved on base (stripped only for the @ scan), and the tag ends
-// up in version. E.g. "docker://docker@cli:/usr/local/bin/docker" →
-// ("docker://docker:/usr/local/bin/docker", "cli"). The path is recognised
-// by its leading "/" which disambiguates it from docker's "image:tag".
+// is preserved on base (stripped only for the tag scan), and the tag ends
+// up in version. Docker-style "image:tag" is also accepted as a copy-paste
+// convenience — a ':' is treated as a tag separator when it occurs after
+// the last '/' (so registry ports like "localhost:5000/org/img" still parse
+// correctly). Examples:
+//
+//	"docker://docker@cli:/usr/local/bin/docker"  →
+//	   ("docker://docker:/usr/local/bin/docker", "cli")
+//	"oci://ghcr.io/org/img:v1:/bin/tool"         →
+//	   ("oci://ghcr.io/org/img:/bin/tool", "v1")
 func ParseRef(ref string) (base, version string) {
-	// For image refs, scan for @ on the image-only slice so paths are ignored.
 	if strings.HasPrefix(ref, "docker://") || strings.HasPrefix(ref, "oci://") {
 		imgPart, pathPart := SplitImagePath(ref)
+		// Prefer explicit "@tag".
 		if i := strings.LastIndex(imgPart, "@"); i > 0 {
+			return imgPart[:i] + pathPart, imgPart[i+1:]
+		}
+		// Tolerate docker-style "image:tag" — but only when the ':' is after
+		// the last '/' so registry ports are preserved.
+		lastSlash := strings.LastIndex(imgPart, "/")
+		if i := strings.LastIndex(imgPart, ":"); i > lastSlash && i > 0 {
 			return imgPart[:i] + pathPart, imgPart[i+1:]
 		}
 		return ref, ""

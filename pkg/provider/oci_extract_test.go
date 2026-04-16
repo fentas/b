@@ -215,6 +215,23 @@ func TestExtractBinaryFromLayer_AcceptsLegacyRegular(t *testing.T) {
 	}
 }
 
+func TestExtractBinaryFromLayer_RootOpaqueBlocksEverything(t *testing.T) {
+	// An opaque whiteout at the image root ("/.wh..wh..opq") must be stored
+	// under the "/" sentinel so isWhiteoutBlocked hides older layers.
+	entries := []tar.Header{
+		{Name: ".wh..wh..opq", Typeflag: tar.TypeReg, Mode: 0644},
+	}
+	layer := fakeLayer(t, entries, nil)
+	whiteouts := map[string]bool{}
+	_, err := extractBinaryFromLayer(layer, []string{"/nope"}, filepath.Join(t.TempDir(), "out"), whiteouts)
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if !whiteouts["/"] {
+		t.Errorf("expected root opaque to set whiteouts[\"/\"], got %v", whiteouts)
+	}
+}
+
 func TestExtractBinaryFromLayer_OpaqueDirBlocksDescendant(t *testing.T) {
 	// An opaque-dir whiteout on "/usr/local/bin/" should block extraction of
 	// /usr/local/bin/tool from an older layer.

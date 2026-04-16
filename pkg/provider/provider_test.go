@@ -19,6 +19,12 @@ func TestParseRef(t *testing.T) {
 		{"oci://alpine:/bin/busybox", "oci://alpine:/bin/busybox", ""},
 		// Registry port must not be mistaken for the path separator.
 		{"oci://localhost:5000/org/img@v1:/bin/tool", "oci://localhost:5000/org/img:/bin/tool", "v1"},
+		// Docker-style "image:tag" is tolerated and normalised same as @tag.
+		{"oci://alpine:3.19", "oci://alpine", "3.19"},
+		{"oci://ghcr.io/org/img:v1", "oci://ghcr.io/org/img", "v1"},
+		{"oci://ghcr.io/org/img:v1:/bin/tool", "oci://ghcr.io/org/img:/bin/tool", "v1"},
+		// Registry port without tag stays as-is.
+		{"oci://localhost:5000/org/img", "oci://localhost:5000/org/img", ""},
 	}
 
 	for _, tt := range tests {
