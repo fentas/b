@@ -20,6 +20,21 @@ type Provider interface {
 	FetchRelease(ref, version string) (*Release, error)
 }
 
+// DigestResolver is an optional interface providers can implement to
+// report a stable content identity ("digest") for a given ref+version —
+// notably docker:// / oci:// image manifest digests. b.lock stores this
+// alongside the source ref and `b update` uses it to detect whether a
+// mutable tag (e.g. "cli", "latest") has been repushed upstream: same
+// digest → skip re-download, different digest → re-pull.
+//
+// Return ("", nil) if the digest can't be determined for this ref (e.g.
+// network error or private-registry-without-auth). Callers treat an
+// empty digest as "don't know" — they must NOT fall back to assuming
+// "unchanged".
+type DigestResolver interface {
+	ResolveDigest(ref, version string) (string, error)
+}
+
 // Release holds metadata about a release from any provider.
 type Release struct {
 	Version string

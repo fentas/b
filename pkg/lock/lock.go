@@ -35,6 +35,13 @@ type BinEntry struct {
 	Preset   bool   `json:"preset,omitempty"`
 	Asset    string `json:"asset,omitempty"`
 	Provider string `json:"provider,omitempty"`
+	// Digest is the upstream content identity at the time of the last
+	// successful install — for docker:// / oci:// binaries this is the
+	// image manifest digest (sha256:...) the tag resolved to. Empty for
+	// providers that don't expose a stable digest. When non-empty, `b
+	// update` compares it against a freshly-resolved digest and skips
+	// the re-download if they match.
+	Digest string `json:"digest,omitempty"`
 }
 
 // EnvEntry is a single env in the lockfile (Phase 2).

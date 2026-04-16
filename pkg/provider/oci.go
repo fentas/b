@@ -52,6 +52,40 @@ func (o *OCI) FetchRelease(ref, version string) (*Release, error) {
 	return nil, fmt.Errorf("oci provider does not use FetchRelease; use Install()")
 }
 
+// ResolveDigest returns the current manifest digest for the tag. It is
+// resolved via a registry HEAD (no layers pulled), honouring the user's
+// docker-config auth and selecting the current platform's manifest when
+// the tag points at an index. Returns ("", nil) if the registry can't
+// be reached — callers treat empty as "unknown" and proceed to install.
+func (o *OCI) ResolveDigest(ref, version string) (string, error) {
+	rest := strings.TrimPrefix(ref, "oci://")
+	image, refTag, _ := ParseImageRef(rest)
+	tag := version
+	if tag == "" {
+		tag = refTag
+	}
+	if tag == "" {
+		tag = "latest"
+	}
+	nameRef, err := name.ParseReference(image + ":" + tag)
+	if err != nil {
+		return "", fmt.Errorf("parsing image ref %s:%s: %w", image, tag, err)
+	}
+	desc, err := remote.Head(nameRef,
+		remote.WithAuthFromKeychain(authn.DefaultKeychain),
+		remote.WithPlatform(v1.Platform{
+			OS:           runtime.GOOS,
+			Architecture: runtime.GOARCH,
+		}),
+	)
+	if err != nil {
+		// Network / auth / 404 — treat as "unknown" rather than erroring,
+		// so a transient registry outage doesn't break `b update`.
+		return "", nil
+	}
+	return desc.Digest.String(), nil
+}
+
 // Install pulls a platform-matching image manifest and extracts a single
 // binary file without invoking any container runtime.
 func (o *OCI) Install(ref, version, destDir string) (string, error) {

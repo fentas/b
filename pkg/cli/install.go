@@ -362,6 +362,16 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		if b.AutoDetect {
 			entry.Source = b.ProviderRef
 			entry.Provider = b.ProviderType
+			// For providers that expose a stable content digest (docker://,
+			// oci://) record it so `b update` can skip re-pulls when the
+			// tag's manifest hasn't moved upstream.
+			if p, err := provider.Detect(b.ProviderRef); err == nil {
+				if dr, ok := p.(provider.DigestResolver); ok {
+					if digest, _ := dr.ResolveDigest(b.ProviderRef, b.Version); digest != "" {
+						entry.Digest = digest
+					}
+				}
+			}
 		} else {
 			entry.Preset = true
 			if b.GitHubRepo != "" {
