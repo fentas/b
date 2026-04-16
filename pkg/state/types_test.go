@@ -421,7 +421,10 @@ func TestBinaryListMarshalYAML_VersionRoundTrip(t *testing.T) {
 			if !ok {
 				t.Fatalf("entry %q missing from MarshalYAML output: %v", tc.in.Name, root)
 			}
-			cfg, _ := raw.(map[string]string)
+			cfg, ok := raw.(map[string]string)
+			if !ok {
+				t.Fatalf("entry %q has type %T, want map[string]string (value=%v)", tc.in.Name, raw, raw)
+			}
 			gotVersion, gotEnforced := cfg["version"], cfg["enforced"]
 			if gotVersion != tc.wantVersion {
 				t.Errorf("'version:' = %q, want %q (cfg=%v)", gotVersion, tc.wantVersion, cfg)
