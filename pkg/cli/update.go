@@ -855,13 +855,10 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 		}
 	}
 
-	// Track download outcomes per binary so the post-update lock refresh
-	// can distinguish "skipped on purpose" (digest already matched, safe
-	// to keep the locked digest in sync) from "attempted + failed" (don't
-	// advance the lock, otherwise future skips would be based on a
-	// digest whose on-disk file we never actually installed).
+	// Track which downloads were attempted and failed so the post-update
+	// lock refresh can avoid advancing Digest/SHA256 for binaries whose
+	// on-disk bytes didn't actually update.
 	var outcomeMu sync.Mutex
-	downloadAttempted := make(map[string]bool, len(binaries))
 	downloadFailed := make(map[string]bool, len(binaries))
 
 	wg := sync.WaitGroup{}
@@ -891,9 +888,13 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 			case o.Force:
 				attempted = true
 				err = b.DownloadBinary()
-			case digestMatchesLock(b, lk, freshDigests[b.Name]):
-				// Manifest digest matches the locked one: upstream hasn't
-				// moved since the last install. Nothing to do.
+			case digestMatchesLock(b, lk, freshDigests[b.Name]) && b.BinaryExists():
+				// Manifest digest matches the locked one AND the binary
+				// is actually on disk: upstream hasn't moved since the
+				// last install. Nothing to do. The BinaryExists() check
+				// catches the case where the user deleted the file —
+				// the digest match alone is not enough to declare the
+				// binary up to date.
 				err = nil
 			case b.AutoDetect && isDigestProvider(b.ProviderRef):
 				// Digest-resolver provider but either no lock digest, or the
@@ -912,7 +913,6 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 				}
 			}
 			outcomeMu.Lock()
-			downloadAttempted[b.Name] = attempted
 			downloadFailed[b.Name] = attempted && err != nil
 			outcomeMu.Unlock()
 
