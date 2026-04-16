@@ -165,11 +165,13 @@ func TestMatchAssets_ArgshScriptIsVisible(t *testing.T) {
 		t.Skip("test requires linux/amd64")
 	}
 	assets := []Asset{
-		{Name: "argsh"},                  // portable bash script (THE binary)
-		{Name: "argsh-linux-amd64.so"},   // shared library
-		{Name: "argsh-linux-arm64.so"},   // shared library
-		{Name: "argsh-linux-x64.vsix"},   // VS Code extension
-		{Name: "argsh-so-linux-amd64"},   // shared library (no .so ext)
+		{Name: "argsh"},                            // portable bash script (THE binary)
+		{Name: "argsh-linux-amd64.so"},             // shared library
+		{Name: "argsh-linux-arm64.so"},             // shared library
+		{Name: "libargsh-linux-amd64.so.1"},        // versioned shared library
+		{Name: "libargsh.dylib.2.0.0-linux-amd64"}, // versioned dylib with OS/arch
+		{Name: "argsh-linux-x64.vsix"},             // VS Code extension
+		{Name: "argsh-so-linux-amd64"},             // shared library (no .so ext)
 		{Name: "argsh-darwin-arm64.vsix"},
 		{Name: "argsh-darwin-x64.vsix"},
 	}
@@ -195,12 +197,40 @@ func TestMatchAssets_ArgshScriptIsVisible(t *testing.T) {
 		t.Errorf("bare 'argsh' script missing or not top-scored; candidates: %v", names)
 	}
 
-	// Libraries (.so, .vsix) must be filtered out by default.
+	// Libraries (.so, .so.N, .dylib.N, .vsix) must be filtered out by default.
 	for _, c := range candidates {
 		switch c.Asset.Name {
 		case "argsh-linux-amd64.so", "argsh-linux-arm64.so",
+			"libargsh-linux-amd64.so.1", "libargsh.dylib.2.0.0-linux-amd64",
 			"argsh-linux-x64.vsix", "argsh-darwin-arm64.vsix", "argsh-darwin-x64.vsix":
 			t.Errorf("library asset %q should have been filtered", c.Asset.Name)
+		}
+	}
+}
+
+// TestShouldIgnore_Libraries verifies both suffix-based (libfoo.so) and
+// versioned infix-based (libfoo.so.1, libbar.dylib.2, baz.dll.5) shared
+// library filenames are filtered out by default.
+func TestShouldIgnore_Libraries(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"libfoo.so", true},
+		{"libfoo.so.1", true},
+		{"libfoo.so.1.2.3", true},
+		{"libbar.dylib", true},
+		{"libbar.dylib.2.0.0", true},
+		{"libbaz.dll", true},
+		{"libbaz.dll.5.0", true},
+		{"plugin.vsix", true},
+		{"something.jar", true},
+		{"tool-linux-amd64", false},
+		{"tool.tar.gz", false},
+	}
+	for _, tt := range tests {
+		if got := shouldIgnore(tt.name); got != tt.want {
+			t.Errorf("shouldIgnore(%q) = %v, want %v", tt.name, got, tt.want)
 		}
 	}
 }

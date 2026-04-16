@@ -42,6 +42,16 @@ var (
 	}
 )
 
+// Asset scoring weights. Exposed as named constants so the portable-name
+// fallback stays aligned with the "typical OS/arch match" score even if the
+// scoring formula changes.
+const (
+	scoreOSArchMatch  = 10 // base: OS + arch both matched
+	scoreArchiveBonus = 5  // prefer archives (more likely to contain the binary)
+	scoreRepoNameHit  = 3  // asset filename contains the repo name
+	scoreTarGzBonus   = 1  // prefer tar.gz over other archives
+)
+
 // Scored is a scored asset candidate, exported for interactive selection.
 type Scored struct {
 	Asset *Asset
@@ -114,10 +124,11 @@ func MatchAssets(assets []Asset, repoName, assetFilter string) []Scored {
 		// Portable fallback: an asset whose filename equals the repo name
 		// (optionally with a script extension like .sh/.py/.pl) is likely a
 		// platform-independent script or universal binary. Score it the
-		// same as a typical OS/arch-matched asset so it's surfaced as a
-		// candidate (and triggers the interactive picker when tied).
+		// same as a typical OS/arch-matched asset that also has the repo
+		// name in its filename, so it surfaces in the interactive picker
+		// alongside those candidates.
 		if repoLower != "" && isPortableName(lower, repoLower) {
-			candidates = append(candidates, Scored{Asset: a, Score: 13})
+			candidates = append(candidates, Scored{Asset: a, Score: scoreOSArchMatch + scoreRepoNameHit})
 			continue
 		}
 
@@ -146,21 +157,21 @@ func MatchAssets(assets []Asset, repoName, assetFilter string) []Scored {
 		}
 
 		// Score: higher is better
-		score := 10 // base: matched OS + arch
+		score := scoreOSArchMatch
 
 		// Prefer archives (more likely to contain the right binary)
 		if isArchive(lower) {
-			score += 5
+			score += scoreArchiveBonus
 		}
 
 		// Prefer asset name containing repo name
 		if repoName != "" && containsWord(lower, strings.ToLower(repoName)) {
-			score += 3
+			score += scoreRepoNameHit
 		}
 
 		// Prefer tar.gz over zip (more common in Go/Rust ecosystem)
 		if strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") {
-			score += 1
+			score += scoreTarGzBonus
 		}
 
 		candidates = append(candidates, Scored{Asset: a, Score: score})
@@ -211,8 +222,18 @@ func isPortableName(assetLower, repoLower string) bool {
 	return false
 }
 
+// libraryInfixes catches versioned shared-library filenames whose extension
+// doesn't end in exactly ".so"/".dylib"/".dll" — e.g. "libfoo.so.1.2",
+// "libbar.dylib.4", "baz.dll.5.0".
+var libraryInfixes = []string{".so.", ".dylib.", ".dll."}
+
 // shouldIgnore returns true if the filename should be skipped.
 func shouldIgnore(lower string) bool {
+	for _, inf := range libraryInfixes {
+		if strings.Contains(lower, inf) {
+			return true
+		}
+	}
 	for _, ext := range ignoreExtensions {
 		if strings.HasSuffix(lower, ext) {
 			return true
