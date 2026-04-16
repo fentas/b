@@ -971,41 +971,34 @@ func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDiges
 		if entry == nil {
 			continue
 		}
-		// Use the captured digest from the update pre-resolve; if we
-		// didn't have one (transient registry failure or auth issue),
-		// don't touch the lock — keeping the previous digest lets a
-		// future `b update` still consult it instead of being forced
-		// to re-download blindly.
-		digest := freshDigests[b.Name]
-		if digest == "" {
-			continue
-		}
 		hash, err := lock.SHA256File(b.File)
 		if err != nil {
 			continue
 		}
-		// Unchanged on-disk hash means the download branch was NOT taken
-		// for this binary (we already skipped failed downloads above).
-		// The binary on disk is still the one the lock pointed at, so
-		// both Digest and SHA256 remain valid — only refresh Digest to
-		// whatever the registry reports now, so future runs can detect
-		// the next upstream change (SHA256 would just duplicate the
-		// on-disk state).
-		if pre, ok := preSHA[b.Name]; ok && pre == hash {
-			if entry.Digest != digest {
-				entry.Digest = digest
-				changed = true
-			}
-			continue
-		}
-		// Download branch ran AND the on-disk bytes moved: both Digest
-		// and SHA256 may advance.
-		if entry.Digest != digest {
-			entry.Digest = digest
+
+		// Digest and SHA256 are independent: a transient HEAD failure
+		// (freshDigests empty) doesn't stop us from refreshing SHA256
+		// when the download still succeeded via cache/retry. Conversely,
+		// a pure skip (digest matched, hash unchanged) refreshes only
+		// Digest. Decide each one on its own.
+		digest := freshDigests[b.Name]
+		pre := preSHA[b.Name]
+		hashChanged := pre != hash
+
+		// SHA256: refresh whenever the on-disk bytes actually moved.
+		// downloadFailed is already filtered out above, so a changed
+		// hash here proves a successful download.
+		if hashChanged && entry.SHA256 != hash {
+			entry.SHA256 = hash
 			changed = true
 		}
-		if entry.SHA256 != hash {
-			entry.SHA256 = hash
+		// Digest: refresh whenever we have a fresh value to store.
+		// Empty means ResolveDigest didn't know — keep the previous
+		// digest in that case. Non-empty means the registry told us
+		// the current manifest identity for this tag; record it so
+		// the next `b update` can short-circuit when it matches.
+		if digest != "" && entry.Digest != digest {
+			entry.Digest = digest
 			changed = true
 		}
 	}
