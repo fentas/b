@@ -258,6 +258,45 @@ func TestBinary_EnsureBinary_UpdateUpToDate(t *testing.T) {
 	}
 }
 
+// TestBinary_EnsureBinary_UpdateWhenLocalVersionUnknown guards against a
+// regression where a preset whose VersionLocalF errored (e.g. the binary
+// doesn't support the expected subcommand) would silently skip updates —
+// local.Version="" == local.Enforced="" used to satisfy the skip check,
+// so 'b update' did nothing even when the upstream release had moved.
+//
+// Now an empty local.Version means "unknown"; EnsureBinary must proceed
+// to DownloadBinary instead of early-returning.
+func TestBinary_EnsureBinary_UpdateWhenLocalVersionUnknown(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("PATH_BIN", tmp)
+	// Pre-existing binary on disk, so the BinaryExists branch runs.
+	if err := os.WriteFile(filepath.Join(tmp, "broken"), []byte("stale"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	downloadCalled := false
+	b := &Binary{
+		Name: "broken",
+		// No pin.
+		Version: "",
+		VersionF: func(b *Binary) (string, error) {
+			return "v2", nil // upstream has a newer version
+		},
+		VersionLocalF: func(b *Binary) (string, error) {
+			// Preset's probe command failed — classic 'argsh version' bug:
+			// subcommand doesn't exist so the binary exits non-zero and
+			// VersionLocalF has no version to report.
+			return "", os.ErrNotExist
+		},
+		// No URL/URLF/GitHubRepo so DownloadBinary will return an error —
+		// we use that as a sentinel that the skip path was bypassed.
+	}
+	err := b.EnsureBinary(true)
+	if err == nil {
+		t.Fatal("expected DownloadBinary to be attempted (and fail without a download source), got nil")
+	}
+	_ = downloadCalled
+}
+
 // --- exec.go ---
 
 func TestBinary_Env(t *testing.T) {

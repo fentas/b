@@ -35,8 +35,9 @@ func managedKey(path []string, key string) bool {
 		// preserved verbatim.
 		switch path[0] {
 		case "binaries":
+			// Matches BinaryList.MarshalYAML.
 			switch key {
-			case "version", "alias", "file", "asset":
+			case "version", "enforced", "alias", "file", "asset":
 				return true
 			}
 			return false
