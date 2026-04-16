@@ -221,6 +221,154 @@ groups:
 	}
 }
 
+// TestSaveConfig_PreservesUnknownEnvFields is the envs:/profiles: counterpart
+// to TestSaveConfig_PreservesUnknownBinaryFields — a user may annotate an env
+// or profile entry with custom fields (e.g. 'owner:', 'labels:') that b
+// doesn't know about, and SaveConfig must not drop them.
+func TestSaveConfig_PreservesUnknownEnvFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "b.yaml")
+
+	initial := `binaries:
+  jq: {}
+envs:
+  github.com/org/infra:
+    version: v2.0
+    owner: platform-team
+    labels: [prod]
+    files:
+      "manifests/**":
+        dest: manifests/
+profiles:
+  base:
+    description: baseline
+    owner: sre
+    files:
+      "base/**":
+`
+	if err := os.WriteFile(configPath, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := LoadConfigFromPath(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+
+	// Simulate adding a new binary (touches the same SaveConfig path).
+	config.Binaries = append(config.Binaries, &binary.LocalBinary{Name: "yq"})
+
+	if err := SaveConfig(config, configPath); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	result, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(result)
+
+	var saved struct {
+		Envs     map[string]map[string]interface{} `yaml:"envs"`
+		Profiles map[string]map[string]interface{} `yaml:"profiles"`
+	}
+	if err := yaml.Unmarshal(result, &saved); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, got)
+	}
+
+	env, ok := saved.Envs["github.com/org/infra"]
+	if !ok {
+		t.Fatalf("env 'github.com/org/infra' missing, got:\n%s", got)
+	}
+	if owner, _ := env["owner"].(string); owner != "platform-team" {
+		t.Errorf("env.owner wiped, got %q\nfull:\n%s", owner, got)
+	}
+	if _, ok := env["labels"]; !ok {
+		t.Errorf("env.labels wiped, got:\n%s", got)
+	}
+
+	profile, ok := saved.Profiles["base"]
+	if !ok {
+		t.Fatalf("profile 'base' missing, got:\n%s", got)
+	}
+	if owner, _ := profile["owner"].(string); owner != "sre" {
+		t.Errorf("profile.owner wiped, got %q\nfull:\n%s", owner, got)
+	}
+}
+
+// TestManagedKey_MatchesMarshalOutput enforces that the managedKey predicate
+// stays in sync with what BinaryList / EnvList MarshalYAML actually emit.
+// If a new field is added to the marshaler it must also appear in managedKey,
+// otherwise the merge won't remove it when it disappears from state. Unknown
+// custom fields must NOT be reported as managed (or they'd be wiped on save).
+func TestManagedKey_MatchesMarshalOutput(t *testing.T) {
+	// Drive the marshalers with representative values and harvest the
+	// emitted key sets.
+	binSample := &BinaryList{
+		&binary.LocalBinary{
+			Name:     "tool",
+			File:     "/tmp/tool",
+			Enforced: "v1.0",
+			Alias:    "alias",
+			Asset:    "tool-*.tar.gz",
+		},
+	}
+	binMarshal, err := binSample.MarshalYAML()
+	if err != nil {
+		t.Fatalf("BinaryList.MarshalYAML: %v", err)
+	}
+	// binMarshal is map[string]interface{}: {"tool": {"version":..., "alias":..., ...}}
+	// Emitted keys must be managed at path [binaries, <name>].
+	binEntry, _ := binMarshal.(map[string]interface{})["tool"].(map[string]string)
+	for key := range binEntry {
+		if !managedKey([]string{"binaries", "tool"}, key) {
+			t.Errorf("managedKey([binaries tool], %q) = false — marshaler emits this key but predicate doesn't manage it", key)
+		}
+	}
+
+	envSample := &EnvList{
+		&EnvEntry{
+			Key:         "github.com/org/infra",
+			Description: "desc",
+			Includes:    []string{"base"},
+			Version:     "v1",
+			Ignore:      []string{"*.md"},
+			Strategy:    "merge",
+			Safety:      "strict",
+			Group:       "core",
+			OnPreSync:   "echo pre",
+			OnPostSync:  "echo post",
+		},
+	}
+	envMarshal, err := envSample.MarshalYAML()
+	if err != nil {
+		t.Fatalf("EnvList.MarshalYAML: %v", err)
+	}
+	envEntry, _ := envMarshal.(map[string]interface{})["github.com/org/infra"].(map[string]interface{})
+	for key := range envEntry {
+		if !managedKey([]string{"envs", "github.com/org/infra"}, key) {
+			t.Errorf("managedKey([envs <name>], %q) = false — marshaler emits this key", key)
+		}
+		if !managedKey([]string{"profiles", "base"}, key) {
+			t.Errorf("managedKey([profiles <name>], %q) = false — marshaler emits this key", key)
+		}
+	}
+
+	// Sanity check: well-known user-custom fields on an entry must NOT be
+	// managed (otherwise they'd be wiped on save).
+	for _, custom := range []string{"owner", "groups", "labels", "team", "notes"} {
+		if managedKey([]string{"binaries", "jq"}, custom) {
+			t.Errorf("managedKey([binaries jq], %q) = true — user custom field must be preserved", custom)
+		}
+		if managedKey([]string{"envs", "github.com/org/infra"}, custom) {
+			t.Errorf("managedKey([envs <name>], %q) = true — user custom field must be preserved", custom)
+		}
+	}
+	if managedKey(nil, "groups") {
+		t.Error("managedKey([], \"groups\") = true — top-level user section must be preserved")
+	}
+}
+
 // TestSaveConfig_PreservesUnknownBinaryFields is a regression test for the
 // same bug at the binary-entry level: a user may annotate binaries with
 // custom fields ('groups', 'team', 'owner', ...) that b doesn't know
