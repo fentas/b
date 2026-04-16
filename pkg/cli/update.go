@@ -817,13 +817,25 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	// Resolve digests once per digest-capable binary up-front. We reuse these
 	// values both for the skip decision and the post-update lock refresh, so
 	// each registry HEAD only happens once per run.
+	//
+	// ResolveDigest distinguishes two error shapes:
+	//   - transient/registry/auth/404 → ("", nil): treat as "don't know" and
+	//     fall through to a normal download.
+	//   - malformed ref (hard error)  → ("", err): surface as a warning so
+	//     the user sees the actionable problem instead of seeing b silently
+	//     fall back to re-downloading a broken ref.
 	freshDigests := make(map[string]string, len(binaries))
 	for _, b := range binaries {
 		if !b.AutoDetect || b.ProviderRef == "" {
 			continue
 		}
 		if dr, ok := providerDigestResolver(b.ProviderRef); ok {
-			if d, _ := dr.ResolveDigest(b.ProviderRef, b.Version); d != "" {
+			d, err := dr.ResolveDigest(b.ProviderRef, b.Version)
+			if err != nil {
+				fmt.Fprintf(o.IO.ErrOut, "Warning: resolving digest for %s (%s): %v\n", b.Name, b.ProviderRef, err)
+				continue
+			}
+			if d != "" {
 				freshDigests[b.Name] = d
 			}
 		}
@@ -995,8 +1007,10 @@ func isDigestProvider(ref string) bool {
 
 // digestMatchesLock reports whether the freshly-resolved digest for b
 // (supplied by the caller so we don't HEAD the registry twice) matches
-// the one recorded in the lockfile. Returns false for every "can't
-// prove it" case — missing lock, missing stored digest, no fresh
+// the one recorded in the lockfile for the same source. Returns false
+// for every "can't prove it" case — missing lock, missing stored
+// digest, mismatched Source (user changed the docker/oci ref or
+// in-container path but kept the derived binary name), no fresh
 // digest, non-digest provider, absent ProviderRef — so the caller
 // still attempts an update.
 func digestMatchesLock(b *binary.Binary, lk *lock.Lock, fresh string) bool {
@@ -1005,6 +1019,9 @@ func digestMatchesLock(b *binary.Binary, lk *lock.Lock, fresh string) bool {
 	}
 	entry := lk.FindBinary(b.Name)
 	if entry == nil || entry.Digest == "" {
+		return false
+	}
+	if entry.Source != b.ProviderRef {
 		return false
 	}
 	return entry.Digest == fresh

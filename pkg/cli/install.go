@@ -364,17 +364,28 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			entry.Provider = b.ProviderType
 			// For providers that expose a stable content digest (docker://,
 			// oci://) record it so `b update` can skip re-pulls when the
-			// tag's manifest hasn't moved upstream. If ResolveDigest fails
-			// or returns empty (transient registry/auth issue), preserve
-			// whatever digest the lock already had — clobbering it with ""
-			// would lose the ability to skip future re-pulls until the
-			// next successful resolve.
+			// tag's manifest hasn't moved upstream. ResolveDigest has a
+			// two-shape contract:
+			//   - transient/registry/auth → ("", nil): preserve the
+			//     previous digest so the skip state isn't lost across
+			//     outages.
+			//   - malformed ref → ("", err): surface as a warning so the
+			//     user sees the actionable problem.
 			if p, err := provider.Detect(b.ProviderRef); err == nil {
 				if dr, ok := p.(provider.DigestResolver); ok {
-					if digest, _ := dr.ResolveDigest(b.ProviderRef, b.Version); digest != "" {
+					digest, dErr := dr.ResolveDigest(b.ProviderRef, b.Version)
+					switch {
+					case dErr != nil:
+						fmt.Fprintf(o.IO.ErrOut, "Warning: resolving digest for %s (%s): %v\n", b.Name, b.ProviderRef, dErr)
+						if prev := lk.FindBinary(b.Name); prev != nil {
+							entry.Digest = prev.Digest
+						}
+					case digest != "":
 						entry.Digest = digest
-					} else if prev := lk.FindBinary(b.Name); prev != nil {
-						entry.Digest = prev.Digest
+					default:
+						if prev := lk.FindBinary(b.Name); prev != nil {
+							entry.Digest = prev.Digest
+						}
 					}
 				}
 			}

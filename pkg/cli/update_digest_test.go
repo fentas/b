@@ -118,6 +118,23 @@ func TestDigestMatchesLock_MissingProviderRef(t *testing.T) {
 	}
 }
 
+// TestDigestMatchesLock_SourceChanged covers the case where the derived
+// binary name stays the same but the user edited the provider ref in
+// b.yaml (e.g. docker://docker@cli → oci://docker@cli, or changed the
+// in-container path). The lock's digest refers to the OLD source so we
+// must NOT treat a matching digest string as "up to date".
+func TestDigestMatchesLock_SourceChanged(t *testing.T) {
+	lk := &lock.Lock{
+		Binaries: []lock.BinEntry{
+			{Name: "tool", Source: "fakedigest://old", Digest: "sha256:aaa"},
+		},
+	}
+	b := &binary.Binary{Name: "tool", AutoDetect: true, ProviderRef: "fakedigest://new"}
+	if digestMatchesLock(b, lk, "sha256:aaa") {
+		t.Error("expected false when lock Source != ProviderRef, even with matching digest")
+	}
+}
+
 // TestIsDigestProvider covers the interface detection.
 func TestIsDigestProvider(t *testing.T) {
 	if !isDigestProvider("fakedigest://whatever") {
