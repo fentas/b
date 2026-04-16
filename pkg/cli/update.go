@@ -827,27 +827,38 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	//   - malformed ref (hard error)  → ("", err): surface as a warning so
 	//     the user sees the actionable problem instead of seeing b silently
 	//     fall back to re-downloading a broken ref.
+	// digestCapable tracks which binaries have a digest-aware provider.
+	// Only these get digest resolution AND pre-SHA hashing — skipping
+	// SHA256File for everything else keeps `b update` cheap on projects
+	// that don't use docker:// / oci://.
+	digestCapable := make(map[string]bool, len(binaries))
 	freshDigests := make(map[string]string, len(binaries))
 	for _, b := range binaries {
 		if !b.AutoDetect || b.ProviderRef == "" {
 			continue
 		}
-		if dr, ok := providerDigestResolver(b.ProviderRef); ok {
-			d, err := dr.ResolveDigest(b.ProviderRef, b.Version)
-			if err != nil {
-				fmt.Fprintf(o.IO.ErrOut, "Warning: resolving digest for %s (%s): %v\n", b.Name, b.ProviderRef, err)
-				continue
-			}
-			if d != "" {
-				freshDigests[b.Name] = d
-			}
+		dr, ok := providerDigestResolver(b.ProviderRef)
+		if !ok {
+			continue
+		}
+		digestCapable[b.Name] = true
+		d, err := dr.ResolveDigest(b.ProviderRef, b.Version)
+		if err != nil {
+			fmt.Fprintf(o.IO.ErrOut, "Warning: resolving digest for %s (%s): %v\n", b.Name, b.ProviderRef, err)
+			continue
+		}
+		if d != "" {
+			freshDigests[b.Name] = d
 		}
 	}
 	// preSHA lets refreshLockDigests tell which binaries actually re-downloaded:
 	// if the file's SHA256 changed from this value, the download succeeded.
-	preSHA := make(map[string]string, len(binaries))
+	// Only compute for digest-capable binaries — hashing on-disk bytes is
+	// otherwise wasted work for github/gitlab/go provider binaries we'll
+	// never consult preSHA for.
+	preSHA := make(map[string]string, len(digestCapable))
 	for _, b := range binaries {
-		if b.File == "" {
+		if b.File == "" || !digestCapable[b.Name] {
 			continue
 		}
 		if h, err := lock.SHA256File(b.File); err == nil {
