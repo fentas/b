@@ -262,8 +262,5 @@ func isWhiteoutBlocked(target string, whiteouts map[string]bool) bool {
 			return true
 		}
 	}
-	if whiteouts["/"] {
-		return true
-	}
-	return false
+	return whiteouts["/"]
 }
