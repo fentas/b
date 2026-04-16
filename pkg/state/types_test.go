@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fentas/b/pkg/binary"
 	"gopkg.in/yaml.v3"
 )
 
@@ -317,6 +318,8 @@ func TestCreateDefaultConfig(t *testing.T) {
 
 func TestBinaryListMarshalYAML(t *testing.T) {
 	list := BinaryList{
+		// Enforced-only entries now serialize as 'enforced:' (not 'version:')
+		// so --fix pins round-trip correctly instead of being lost.
 		{Name: "jq", Enforced: "jq-1.7"},
 		{Name: "envsubst", Alias: "renvsubst"},
 		{Name: "kubectl", File: "/usr/local/bin/kubectl"},
@@ -333,13 +336,16 @@ func TestBinaryListMarshalYAML(t *testing.T) {
 		t.Fatal("expected map result")
 	}
 
-	// jq should have version
+	// jq should have enforced (not version — those are distinct now)
 	jqCfg, ok := m["jq"].(map[string]string)
 	if !ok {
 		t.Fatal("jq config should be map[string]string")
 	}
-	if jqCfg["version"] != "jq-1.7" {
-		t.Errorf("jq version = %q, want %q", jqCfg["version"], "jq-1.7")
+	if jqCfg["enforced"] != "jq-1.7" {
+		t.Errorf("jq enforced = %q, want %q", jqCfg["enforced"], "jq-1.7")
+	}
+	if jqCfg["version"] != "" {
+		t.Errorf("jq version = %q, want empty (Enforced shouldn't leak into version)", jqCfg["version"])
 	}
 
 	// envsubst should have alias
@@ -358,6 +364,122 @@ func TestBinaryListMarshalYAML(t *testing.T) {
 	}
 	if kCfg["file"] != "/usr/local/bin/kubectl" {
 		t.Errorf("kubectl file = %q", kCfg["file"])
+	}
+}
+
+// TestBinaryListMarshalYAML_VersionRoundTrip is a regression test for
+// a bug where 'version: <x>' in b.yaml was silently dropped on save.
+// Unmarshal loads 'version:' into LocalBinary.Version, but the old
+// MarshalYAML only emitted Enforced, so a b.yaml round-trip lost the
+// version. The fix must emit Version as 'version:' and Enforced as
+// 'enforced:' (both are distinct YAML keys, not aliases).
+func TestBinaryListMarshalYAML_VersionRoundTrip(t *testing.T) {
+	cases := []struct {
+		name         string
+		in           *binary.LocalBinary
+		wantVersion  string
+		wantEnforced string
+	}{
+		{
+			name:         "version-only",
+			in:           &binary.LocalBinary{Name: "jq", Version: "jq-1.7"},
+			wantVersion:  "jq-1.7",
+			wantEnforced: "",
+		},
+		{
+			name:         "enforced-only",
+			in:           &binary.LocalBinary{Name: "kubectl", Enforced: "v1.28.0"},
+			wantVersion:  "",
+			wantEnforced: "v1.28.0",
+		},
+		{
+			name:         "both-set",
+			in:           &binary.LocalBinary{Name: "k9s", Version: "v0.32.0", Enforced: "v0.32.0"},
+			wantVersion:  "v0.32.0",
+			wantEnforced: "v0.32.0",
+		},
+		{
+			name:         "oci-tag-as-version",
+			in:           &binary.LocalBinary{Name: "oci://docker", Version: "cli"},
+			wantVersion:  "cli",
+			wantEnforced: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			list := BinaryList{tc.in}
+			result, err := list.MarshalYAML()
+			if err != nil {
+				t.Fatalf("MarshalYAML: %v", err)
+			}
+			root, ok := result.(map[string]interface{})
+			if !ok {
+				t.Fatalf("MarshalYAML returned %T, want map[string]interface{}", result)
+			}
+			raw, ok := root[tc.in.Name]
+			if !ok {
+				t.Fatalf("entry %q missing from MarshalYAML output: %v", tc.in.Name, root)
+			}
+			cfg, ok := raw.(map[string]string)
+			if !ok {
+				t.Fatalf("entry %q has type %T, want map[string]string (value=%v)", tc.in.Name, raw, raw)
+			}
+			gotVersion, gotEnforced := cfg["version"], cfg["enforced"]
+			if gotVersion != tc.wantVersion {
+				t.Errorf("'version:' = %q, want %q (cfg=%v)", gotVersion, tc.wantVersion, cfg)
+			}
+			if gotEnforced != tc.wantEnforced {
+				t.Errorf("'enforced:' = %q, want %q (cfg=%v)", gotEnforced, tc.wantEnforced, cfg)
+			}
+		})
+	}
+}
+
+// TestBinaryListMarshalYAML_VersionSurvivesFileRoundTrip verifies that a
+// b.yaml written by user hand with 'version:' survives LoadConfig →
+// SaveConfig. This is the end-to-end regression for 'b install --add
+// oci://docker@cli' ending up as 'oci://docker: {}' because the tag was
+// dropped on save.
+func TestBinaryListMarshalYAML_VersionSurvivesFileRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := tmpDir + "/b.yaml"
+
+	initial := `binaries:
+  oci://docker:
+    version: cli
+  kubectl:
+    version: v1.28.0
+`
+	if err := os.WriteFile(configPath, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := LoadConfigFromPath(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if err := SaveConfig(config, configPath); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	out, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(out)
+
+	var saved struct {
+		Binaries map[string]map[string]string `yaml:"binaries"`
+	}
+	if err := yaml.Unmarshal(out, &saved); err != nil {
+		t.Fatalf("unmarshal saved yaml: %v\n%s", err, got)
+	}
+	if v := saved.Binaries["oci://docker"]["version"]; v != "cli" {
+		t.Errorf("oci://docker.version = %q, want %q\nfull:\n%s", v, "cli", got)
+	}
+	if v := saved.Binaries["kubectl"]["version"]; v != "v1.28.0" {
+		t.Errorf("kubectl.version = %q, want %q\nfull:\n%s", v, "v1.28.0", got)
 	}
 }
 
@@ -435,8 +557,9 @@ func TestBinaryListMarshalYAML_WithAsset(t *testing.T) {
 	if !strings.Contains(s, "asset: argsh-so-*") {
 		t.Errorf("marshal output missing asset field:\n%s", s)
 	}
-	if !strings.Contains(s, "version: v1.0.0") {
-		t.Errorf("marshal output missing version field:\n%s", s)
+	// Enforced now serializes as 'enforced:' not 'version:'.
+	if !strings.Contains(s, "enforced: v1.0.0") {
+		t.Errorf("marshal output missing enforced field:\n%s", s)
 	}
 }
 

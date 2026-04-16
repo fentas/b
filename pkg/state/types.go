@@ -345,9 +345,16 @@ func (list *BinaryList) MarshalYAML() (interface{}, error) {
 			// Build the binary configuration
 			config := make(map[string]string)
 
-			// Add version if enforced
+			// Emit 'version:' — the requested version (loaded from YAML
+			// 'version:' or set by 'b install --add <ref>@<tag>').
+			if b.Version != "" {
+				config["version"] = b.Version
+			}
+
+			// Emit 'enforced:' — the '--fix' pin. Distinct YAML key from
+			// 'version:' so both can round-trip independently.
 			if b.Enforced != "" {
-				config["version"] = b.Enforced
+				config["enforced"] = b.Enforced
 			}
 
 			// Add alias if specified
