@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -259,6 +261,207 @@ func TestResolveAmbiguousAssets_TiedScore_QuietPicksFirst(t *testing.T) {
 	wantPrefix := fmt.Sprintf("tool-%s-%s", runtime.GOOS, runtime.GOARCH)
 	if !strings.HasPrefix(b.ResolvedAsset.Name, wantPrefix) {
 		t.Errorf("ResolvedAsset.Name = %q, want prefix %q", b.ResolvedAsset.Name, wantPrefix)
+	}
+	// Quiet/non-TTY auto-picks must NOT persist — user never saw the choice.
+	if b.AssetFilter != "" {
+		t.Errorf("quiet auto-pick should not set AssetFilter, got %q", b.AssetFilter)
+	}
+}
+
+// fakeTrueTieProvider returns two assets that actually tie on score: both
+// have the same OS/arch, neither is an archive, neither contains the repo
+// name — both score 10.
+type fakeTrueTieProvider struct{}
+
+func (f *fakeTrueTieProvider) Name() string { return "faketruetie" }
+func (f *fakeTrueTieProvider) Match(ref string) bool {
+	return strings.HasPrefix(ref, "faketruetie://")
+}
+func (f *fakeTrueTieProvider) LatestVersion(ref string) (string, error) { return "v1.0.0", nil }
+func (f *fakeTrueTieProvider) FetchRelease(ref, version string) (*provider.Release, error) {
+	name1 := fmt.Sprintf("pick-me-%s-%s", runtime.GOOS, runtime.GOARCH)
+	name2 := fmt.Sprintf("or-me-%s-%s", runtime.GOOS, runtime.GOARCH)
+	return &provider.Release{
+		Version: version,
+		Assets: []provider.Asset{
+			{Name: name1, URL: "https://example.com/" + name1, Size: 1024},
+			{Name: name2, URL: "https://example.com/" + name2, Size: 2048},
+		},
+	}, nil
+}
+
+func init() {
+	provider.Register(&fakeTrueTieProvider{})
+}
+
+// TestResolveAmbiguousAssets_QuietAutoPick_DoesNotPersist ensures that a
+// quiet/non-TTY auto-pick of a genuinely tied ambiguity does NOT set
+// AssetFilter — the user never saw the choice so we won't pin it.
+func TestResolveAmbiguousAssets_QuietAutoPick_DoesNotPersist(t *testing.T) {
+	b := &binary.Binary{
+		Name:        "tool",
+		AutoDetect:  true,
+		ProviderRef: "faketruetie://org/unique",
+		Version:     "v1.0.0",
+	}
+	out := &streams.IO{Out: &discardWriter{}, ErrOut: &discardWriter{}}
+	resolveAmbiguousAssets([]*binary.Binary{b}, true, out) // quiet=true
+
+	if b.ResolvedAsset == nil {
+		t.Fatal("expected ResolvedAsset to be set (auto-pick)")
+	}
+	if b.AssetFilter != "" {
+		t.Errorf("quiet auto-pick of tied candidates must not persist, got %q", b.AssetFilter)
+	}
+}
+
+// TestResolveAmbiguousAssets_Interactive_PersistsChoice verifies that when
+// the interactive picker is actually used (TTY + not quiet + user picks),
+// the chosen asset name is stored on AssetFilter so 'b install --add' can
+// persist it to b.yaml and 'b update' keeps using the same asset.
+func TestResolveAmbiguousAssets_Interactive_PersistsChoice(t *testing.T) {
+	// Force the TTY check to true and stdin to a known choice.
+	origTTY := isTTYFunc
+	isTTYFunc = func() bool { return true }
+	defer func() { isTTYFunc = origTTY }()
+
+	origStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin; r.Close() }()
+	// Pick choice "1" (first listed).
+	go func() {
+		fmt.Fprintln(w, "1")
+		w.Close()
+	}()
+
+	b := &binary.Binary{
+		// Name must not appear in assets so scoring doesn't award repo-name bonus
+		// asymmetrically.
+		Name:        "tool",
+		AutoDetect:  true,
+		ProviderRef: "faketruetie://org/unique",
+		Version:     "v1.0.0",
+	}
+	out := &streams.IO{Out: &discardWriter{}, ErrOut: &discardWriter{}}
+	// quiet=false → interactive prompt is used
+	resolveAmbiguousAssets([]*binary.Binary{b}, false, out)
+
+	if b.ResolvedAsset == nil {
+		t.Fatal("expected ResolvedAsset to be set after interactive pick")
+	}
+	if b.AssetFilter == "" {
+		t.Error("interactive pick should persist to AssetFilter for 'b install --add'")
+	}
+	// AssetFilter may have glob metachars escaped; the correct invariant is
+	// that it matches the chosen asset's filename literally.
+	if m, err := filepath.Match(b.AssetFilter, b.ResolvedAsset.Name); err != nil || !m {
+		t.Errorf("AssetFilter=%q must match ResolvedAsset.Name=%q (matched=%v err=%v)",
+			b.AssetFilter, b.ResolvedAsset.Name, m, err)
+	}
+}
+
+// TestResolveAmbiguousAssets_Interactive_EOFDoesNotPersist verifies that
+// when the user closes stdin without picking (EOF), the default pick is
+// used for this run but NOT persisted to AssetFilter.
+func TestResolveAmbiguousAssets_Interactive_EOFDoesNotPersist(t *testing.T) {
+	origTTY := isTTYFunc
+	isTTYFunc = func() bool { return true }
+	defer func() { isTTYFunc = origTTY }()
+
+	origStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin; r.Close() }()
+	w.Close() // EOF immediately — no input
+
+	b := &binary.Binary{
+		Name:        "tool",
+		AutoDetect:  true,
+		ProviderRef: "faketruetie://org/unique",
+		Version:     "v1.0.0",
+	}
+	out := &streams.IO{Out: &discardWriter{}, ErrOut: &discardWriter{}}
+	resolveAmbiguousAssets([]*binary.Binary{b}, false, out)
+
+	if b.ResolvedAsset == nil {
+		t.Fatal("expected ResolvedAsset to be set to default on EOF")
+	}
+	if b.AssetFilter != "" {
+		t.Errorf("EOF must not persist: AssetFilter = %q", b.AssetFilter)
+	}
+}
+
+// TestResolveAmbiguousAssets_Interactive_InvalidChoiceDoesNotPersist covers
+// the case where the user types a non-numeric or out-of-range value — the
+// default is used but not persisted.
+func TestResolveAmbiguousAssets_Interactive_InvalidChoiceDoesNotPersist(t *testing.T) {
+	origTTY := isTTYFunc
+	isTTYFunc = func() bool { return true }
+	defer func() { isTTYFunc = origTTY }()
+
+	origStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin; r.Close() }()
+	go func() {
+		fmt.Fprintln(w, "nope")
+		w.Close()
+	}()
+
+	b := &binary.Binary{
+		Name:        "tool",
+		AutoDetect:  true,
+		ProviderRef: "faketruetie://org/unique",
+		Version:     "v1.0.0",
+	}
+	out := &streams.IO{Out: &discardWriter{}, ErrOut: &discardWriter{}}
+	resolveAmbiguousAssets([]*binary.Binary{b}, false, out)
+
+	if b.ResolvedAsset == nil {
+		t.Fatal("expected ResolvedAsset to be set to default on invalid input")
+	}
+	if b.AssetFilter != "" {
+		t.Errorf("invalid input must not persist: AssetFilter = %q", b.AssetFilter)
+	}
+}
+
+// TestEscapeAssetGlob verifies that glob metacharacters in asset filenames
+// are escaped so filepath.Match treats the persisted AssetFilter as a
+// literal name on subsequent runs.
+func TestEscapeAssetGlob(t *testing.T) {
+	tests := []string{
+		"argsh",          // no metachars
+		"argsh-so-linux", // dashes fine
+		"foo*bar.tar.gz", // star
+		"what?.zip",      // question mark
+		"a[tag]b",        // brackets
+		"mix*of?[all]",   // mix
+	}
+	for _, in := range tests {
+		pattern := escapeAssetGlob(in)
+		matched, err := filepath.Match(pattern, in)
+		if err != nil {
+			t.Errorf("filepath.Match(%q, %q) error: %v", pattern, in, err)
+		}
+		if !matched {
+			t.Errorf("escaped pattern %q must match its original %q", pattern, in)
+		}
+		// And it must not match an altered name (sanity check).
+		if in != "x" {
+			if m, _ := filepath.Match(pattern, "x"+in); m {
+				t.Errorf("pattern %q unexpectedly matched %q", pattern, "x"+in)
+			}
+		}
 	}
 }
 

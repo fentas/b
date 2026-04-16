@@ -379,7 +379,21 @@ func resolveAmbiguousAssets(binaries []*binary.Binary, quiet bool, io *streams.I
 			continue
 		}
 
-		// Ambiguous — prompt user (or auto-pick in quiet/non-TTY mode)
+		// Ambiguous — prompt user (or auto-pick in quiet/non-TTY mode).
+		// We persist the chosen asset name as AssetFilter only when the
+		// user explicitly picked it in the interactive prompt (so 'b update'
+		// keeps the same asset). Quiet/non-TTY auto-picks, EOF, and invalid
+		// input all fall through to a default without user consent and must
+		// NOT be persisted.
+		if !quiet && isTTYFunc() {
+			asset, confirmed := promptAssetPick(b, candidates, io)
+			b.ResolvedAsset = asset
+			if confirmed && b.AssetFilter == "" {
+				b.AssetFilter = escapeAssetGlob(asset.Name)
+			}
+			continue
+		}
+		// Non-interactive fallback — warn and pick the first tied candidate.
 		sel := defaultAssetSelector(b, quiet, io)
 		asset, err := sel(candidates)
 		if err != nil {
@@ -387,6 +401,53 @@ func resolveAmbiguousAssets(binaries []*binary.Binary, quiet bool, io *streams.I
 		}
 		b.ResolvedAsset = asset
 	}
+}
+
+// promptAssetPick displays the interactive picker and returns the chosen
+// asset along with a flag indicating whether the user made an explicit,
+// valid choice. EOF or invalid input returns the default (first) candidate
+// with confirmed=false so callers don't persist an unconfirmed pick.
+func promptAssetPick(bin *binary.Binary, candidates []provider.Scored, io *streams.IO) (*provider.Asset, bool) {
+	fmt.Fprintf(io.ErrOut, "\nMultiple assets match for %s. Select one:\n", color.New(color.Bold).Sprint(bin.Name))
+	topScore := candidates[0].Score
+	var choices []provider.Scored
+	for _, c := range candidates {
+		if c.Score == topScore {
+			choices = append(choices, c)
+		}
+	}
+	for i, c := range choices {
+		fmt.Fprintf(io.ErrOut, "  [%d] %s  (%s)\n", i+1, c.Asset.Name, formatSize(c.Asset.Size))
+	}
+	fmt.Fprintf(io.ErrOut, "Choice [1-%d]: ", len(choices))
+
+	var input string
+	if _, err := fmt.Fscanln(os.Stdin, &input); err != nil {
+		return choices[0].Asset, false // EOF / read error — not confirmed
+	}
+	input = strings.TrimSpace(input)
+	var idx int
+	if _, err := fmt.Sscanf(input, "%d", &idx); err != nil || idx < 1 || idx > len(choices) {
+		fmt.Fprintf(io.ErrOut, "Invalid choice, using %s\n", choices[0].Asset.Name)
+		return choices[0].Asset, false // invalid — not confirmed
+	}
+	return choices[idx-1].Asset, true
+}
+
+// escapeAssetGlob escapes glob metacharacters in an asset filename so that
+// later MatchAssets calls (which use filepath.Match) treat it as a literal
+// name. Without this, an asset whose filename contains '*', '?' or '['
+// could either fail to match or match unintended files on re-install.
+func escapeAssetGlob(name string) string {
+	// filepath.Match recognises '*', '?' and '[...]'. A bare '[' with no
+	// matching ']' makes the pattern invalid. Wrapping each metacharacter
+	// in its own class turns it into a literal.
+	r := strings.NewReplacer(
+		"*", "[*]",
+		"?", "[?]",
+		"[", "[[]",
+	)
+	return r.Replace(name)
 }
 
 // firstLine returns the first line of a string, trimming trailing CR/LF.

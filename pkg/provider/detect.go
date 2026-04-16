@@ -21,13 +21,17 @@ var (
 		"386":   {"386", "i386", "i686", "x86", "32bit", "32-bit"},
 		"arm":   {"armv7", "armv6", "arm"},
 	}
-	// File extensions to filter out (not actual binaries).
+	// File extensions to filter out (not actual CLI binaries).
 	ignoreExtensions = []string{
 		".sha256", ".sha256sum", ".sha512", ".sha512sum",
 		".sig", ".asc", ".pem",
 		".txt", ".md", ".json",
 		".sbom", ".spdx",
 		".deb", ".rpm", ".msi", ".pkg", ".apk",
+		// Libraries / plugins / bundles — not executables.
+		".so", ".dylib", ".dll", ".a", ".lib",
+		".jar", ".aar",
+		".vsix", // VS Code extension bundle
 	}
 	// Archive extensions we can handle.
 	archiveExtensions = []string{
@@ -36,6 +40,16 @@ var (
 		".tar.bz2",
 		".zip",
 	}
+)
+
+// Asset scoring weights. Exposed as named constants so the portable-name
+// fallback stays aligned with the "typical OS/arch match" score even if the
+// scoring formula changes.
+const (
+	scoreOSArchMatch  = 10 // base: OS + arch both matched
+	scoreArchiveBonus = 5  // prefer archives (more likely to contain the binary)
+	scoreRepoNameHit  = 3  // asset filename contains the repo name
+	scoreTarGzBonus   = 1  // prefer tar.gz over other archives
 )
 
 // Scored is a scored asset candidate, exported for interactive selection.
@@ -88,23 +102,34 @@ func MatchAssets(assets []Asset, repoName, assetFilter string) []Scored {
 	}
 
 	var candidates []Scored
+	repoLower := strings.ToLower(repoName)
 
 	for i := range assets {
 		a := &assets[i]
 		name := a.Name
 		lower := strings.ToLower(name)
 
-		// Skip known non-binary extensions
-		if shouldIgnore(lower) {
-			continue
-		}
-
-		// Apply asset filter glob if provided
+		// Apply asset filter glob if provided — explicit filter takes priority
+		// over the non-binary extension blocklist (user knows what they want).
 		if assetFilter != "" {
 			matched, _ := filepath.Match(filterLower, lower)
 			if !matched {
 				continue
 			}
+		} else if shouldIgnore(lower) {
+			// No filter — skip known non-binary extensions.
+			continue
+		}
+
+		// Portable fallback: an asset whose filename equals the repo name
+		// (optionally with a script extension like .sh/.py/.pl) is likely a
+		// platform-independent script or universal binary. Score it the
+		// same as a typical OS/arch-matched asset that also has the repo
+		// name in its filename, so it surfaces in the interactive picker
+		// alongside those candidates.
+		if repoLower != "" && isPortableName(lower, repoLower) {
+			candidates = append(candidates, Scored{Asset: a, Score: scoreOSArchMatch + scoreRepoNameHit})
+			continue
 		}
 
 		// Must match OS
@@ -132,21 +157,21 @@ func MatchAssets(assets []Asset, repoName, assetFilter string) []Scored {
 		}
 
 		// Score: higher is better
-		score := 10 // base: matched OS + arch
+		score := scoreOSArchMatch
 
 		// Prefer archives (more likely to contain the right binary)
 		if isArchive(lower) {
-			score += 5
+			score += scoreArchiveBonus
 		}
 
 		// Prefer asset name containing repo name
 		if repoName != "" && containsWord(lower, strings.ToLower(repoName)) {
-			score += 3
+			score += scoreRepoNameHit
 		}
 
 		// Prefer tar.gz over zip (more common in Go/Rust ecosystem)
 		if strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") {
-			score += 1
+			score += scoreTarGzBonus
 		}
 
 		candidates = append(candidates, Scored{Asset: a, Score: score})
@@ -177,8 +202,38 @@ func DetectArchiveType(name string) string {
 	return ""
 }
 
+// portableScriptExts are extensions commonly used by portable (interpreted)
+// scripts that don't target a specific OS/arch.
+var portableScriptExts = []string{".sh", ".py", ".pl", ".rb", ".js"}
+
+// isPortableName reports whether assetLower is the repo name on its own
+// (e.g. "argsh") or the repo name with a common script extension
+// (e.g. "tool.sh"). Used to keep platform-independent assets as candidates
+// even though they contain no OS/arch marker.
+func isPortableName(assetLower, repoLower string) bool {
+	if assetLower == repoLower {
+		return true
+	}
+	for _, ext := range portableScriptExts {
+		if assetLower == repoLower+ext {
+			return true
+		}
+	}
+	return false
+}
+
+// libraryInfixes catches versioned shared-library filenames whose extension
+// doesn't end in exactly ".so"/".dylib"/".dll" — e.g. "libfoo.so.1.2",
+// "libbar.dylib.4", "baz.dll.5.0".
+var libraryInfixes = []string{".so.", ".dylib.", ".dll."}
+
 // shouldIgnore returns true if the filename should be skipped.
 func shouldIgnore(lower string) bool {
+	for _, inf := range libraryInfixes {
+		if strings.Contains(lower, inf) {
+			return true
+		}
+	}
 	for _, ext := range ignoreExtensions {
 		if strings.HasSuffix(lower, ext) {
 			return true
