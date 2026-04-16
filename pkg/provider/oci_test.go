@@ -10,7 +10,7 @@ func TestOCIMatch(t *testing.T) {
 	}{
 		{"oci://alpine", true},
 		{"oci://ghcr.io/org/img", true},
-		{"oci://ghcr.io/org/img@v1::/bin/tool", true},
+		{"oci://ghcr.io/org/img@v1:/bin/tool", true},
 		{"docker://alpine", false},
 		{"github.com/org/repo", false},
 	}
@@ -55,9 +55,12 @@ func TestParseImageRef(t *testing.T) {
 	}{
 		{"alpine", "alpine", "", ""},
 		{"alpine@3.19", "alpine", "3.19", ""},
-		{"docker@cli::/usr/local/bin/docker", "docker", "cli", "/usr/local/bin/docker"},
-		{"ghcr.io/org/img@v1::/bin/tool", "ghcr.io/org/img", "v1", "/bin/tool"},
-		{"alpine::/bin/busybox", "alpine", "", "/bin/busybox"},
+		{"docker@cli:/usr/local/bin/docker", "docker", "cli", "/usr/local/bin/docker"},
+		{"ghcr.io/org/img@v1:/bin/tool", "ghcr.io/org/img", "v1", "/bin/tool"},
+		{"alpine:/bin/busybox", "alpine", "", "/bin/busybox"},
+		// Registry port is preserved, not mistaken for path.
+		{"localhost:5000/org/img@v1:/bin/tool", "localhost:5000/org/img", "v1", "/bin/tool"},
+		{"localhost:5000/org/img", "localhost:5000/org/img", "", ""},
 	}
 	for _, tt := range tests {
 		img, tag, p := ParseImageRef(tt.in)

@@ -103,8 +103,11 @@ func (d *Docker) Install(ref, version, destDir string, searchPaths []string) (st
 func dockerImage(ref string) string {
 	r := strings.TrimPrefix(ref, "docker://")
 	image, _, _ := ParseImageRef(r)
-	// Also strip docker-style "image:tag" when no explicit @ was given.
-	if i := strings.LastIndex(image, ":"); i > 0 {
+	// Also strip docker-style "image:tag" when no explicit @ was given, but
+	// only when the ':' is after the last '/' so registry ports like
+	// "localhost:5000/org/image" are preserved.
+	lastSlash := strings.LastIndex(image, "/")
+	if i := strings.LastIndex(image, ":"); i > lastSlash && i > 0 {
 		image = image[:i]
 	}
 	return image

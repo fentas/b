@@ -14,7 +14,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/google/go-containerregistry/pkg/v1/types"
 )
 
 func init() {
@@ -26,13 +25,16 @@ func init() {
 //
 // Syntax:
 //
-//	oci://<image>[@<tag>][::<path-in-image>]
+//	oci://<image>[@<tag>][:<path-in-image>]
 //
 // Examples:
 //
 //	oci://alpine
 //	oci://ghcr.io/helm/helm@v3.18.6
-//	oci://docker@cli::/usr/local/bin/docker
+//	oci://docker@cli:/usr/local/bin/docker
+//
+// The in-container path must begin with "/" so it is unambiguous with
+// docker's own "image:tag" syntax (which we never use — tags go after "@").
 type OCI struct{}
 
 func (o *OCI) Name() string { return "oci" }
@@ -50,8 +52,8 @@ func (o *OCI) FetchRelease(ref, version string) (*Release, error) {
 	return nil, fmt.Errorf("oci provider does not use FetchRelease; use Install()")
 }
 
-// Install pulls the image manifest, selects a platform-matching layer,
-// and extracts a single file without invoking any container runtime.
+// Install pulls a platform-matching image manifest and extracts a single
+// binary file without invoking any container runtime.
 func (o *OCI) Install(ref, version, destDir string) (string, error) {
 	rest := strings.TrimPrefix(ref, "oci://")
 	image, refTag, inContainerPath := ParseImageRef(rest)
@@ -70,27 +72,25 @@ func (o *OCI) Install(ref, version, destDir string) (string, error) {
 		return "", fmt.Errorf("parsing image ref %s:%s: %w", image, tag, err)
 	}
 
-	opts := []remote.Option{
+	// remote.Image handles manifest-list/index resolution internally using the
+	// provided platform (OS + arch + variant) so we don't need to reimplement
+	// platform matching here.
+	img, err := remote.Image(nameRef,
 		remote.WithAuthFromKeychain(authn.DefaultKeychain),
 		remote.WithPlatform(v1.Platform{
 			OS:           runtime.GOOS,
 			Architecture: runtime.GOARCH,
 		}),
-	}
-
-	desc, err := remote.Get(nameRef, opts...)
+	)
 	if err != nil {
-		return "", fmt.Errorf("fetching manifest for %s: %w", nameRef, err)
-	}
-
-	img, err := resolveImage(desc, opts)
-	if err != nil {
-		return "", fmt.Errorf("resolving image %s: %w", nameRef, err)
+		return "", fmt.Errorf("fetching image %s: %w", nameRef, err)
 	}
 
 	// Determine which paths to try inside the image.
-	searchPaths := []string{inContainerPath}
-	if inContainerPath == "" {
+	var searchPaths []string
+	if inContainerPath != "" {
+		searchPaths = []string{inContainerPath}
+	} else {
 		searchPaths = []string{
 			"/usr/local/bin/" + binName,
 			"/usr/bin/" + binName,
@@ -110,81 +110,103 @@ func (o *OCI) Install(ref, version, destDir string) (string, error) {
 	}
 	// Walk layers newest-first so later overrides win.
 	for i := len(layers) - 1; i >= 0; i-- {
-		for _, sp := range searchPaths {
-			found, err := extractFromLayer(layers[i], sp, dest)
-			if err != nil {
+		found, err := extractBinaryFromLayer(layers[i], searchPaths, dest)
+		if err != nil {
+			return "", err
+		}
+		if found {
+			if err := os.Chmod(dest, 0755); err != nil {
 				return "", err
 			}
-			if found {
-				if err := os.Chmod(dest, 0755); err != nil {
-					return "", err
-				}
-				return dest, nil
-			}
+			return dest, nil
 		}
 	}
 
 	return "", fmt.Errorf("binary %q not found in image %s at paths: %v", binName, nameRef, searchPaths)
 }
 
-// resolveImage returns an Image for a descriptor, selecting a platform-matching
-// manifest when the descriptor is a manifest list/index.
-func resolveImage(desc *remote.Descriptor, opts []remote.Option) (v1.Image, error) {
-	switch desc.MediaType {
-	case types.DockerManifestList, types.OCIImageIndex:
-		idx, err := desc.ImageIndex()
-		if err != nil {
-			return nil, err
-		}
-		manifest, err := idx.IndexManifest()
-		if err != nil {
-			return nil, err
-		}
-		want := v1.Platform{OS: runtime.GOOS, Architecture: runtime.GOARCH}
-		for _, m := range manifest.Manifests {
-			if m.Platform != nil && m.Platform.OS == want.OS && m.Platform.Architecture == want.Architecture {
-				return idx.Image(m.Digest)
-			}
-		}
-		return nil, fmt.Errorf("no manifest matches platform %s/%s", want.OS, want.Architecture)
-	default:
-		return desc.Image()
+// extractBinaryFromLayer scans a layer's tar stream once, looking for any of
+// searchPaths. Returns true (and writes to dest) when a match is found.
+// Earlier entries in searchPaths take priority; once a higher-priority match
+// is found, the scan stops.
+func extractBinaryFromLayer(l v1.Layer, searchPaths []string, dest string) (bool, error) {
+	if len(searchPaths) == 0 {
+		return false, nil
 	}
-}
 
-// extractFromLayer scans a single layer's tar stream for filePath and writes it to dest.
-// Returns true if the file was found and extracted.
-func extractFromLayer(l v1.Layer, filePath, dest string) (bool, error) {
+	// Normalise candidates to absolute, cleaned form and assign priorities
+	// (index in searchPaths; lower is better).
+	targets := make(map[string]int, len(searchPaths))
+	for i, sp := range searchPaths {
+		targets[path.Clean("/"+strings.TrimPrefix(sp, "/"))] = i
+	}
+
 	rc, err := l.Uncompressed()
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("reading layer contents: %w", err)
 	}
 	defer rc.Close()
 
-	target := strings.TrimPrefix(path.Clean(filePath), "/")
 	tr := tar.NewReader(rc)
+	bestPriority := len(searchPaths) // sentinel: nothing found yet
+	var tmpPath string
+	cleanup := func() {
+		if tmpPath != "" {
+			_ = os.Remove(tmpPath)
+			tmpPath = ""
+		}
+	}
+
 	for {
-		h, err := tr.Next()
+		hdr, err := tr.Next()
 		if err == io.EOF {
-			return false, nil
+			break
 		}
 		if err != nil {
-			return false, err
+			cleanup()
+			return false, fmt.Errorf("reading tar: %w", err)
 		}
-		if strings.TrimPrefix(path.Clean(h.Name), "/") != target {
+		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-		if h.Typeflag != tar.TypeReg {
-			return false, fmt.Errorf("%s is not a regular file (typeflag=%c)", filePath, h.Typeflag)
+		normalized := path.Clean("/" + strings.TrimPrefix(hdr.Name, "/"))
+		priority, ok := targets[normalized]
+		if !ok || priority >= bestPriority {
+			continue
 		}
-		out, err := os.Create(dest)
+		// Write to a temp file first; rename once we're confident this is
+		// the best match (since an even-higher-priority path may appear
+		// later in the same tar stream).
+		tmp, err := os.CreateTemp(filepath.Dir(dest), ".oci-extract-*")
 		if err != nil {
-			return false, err
+			cleanup()
+			return false, fmt.Errorf("creating temp file: %w", err)
 		}
-		if _, err := io.Copy(out, tr); err != nil {
-			out.Close()
-			return false, err
+		if _, err := io.Copy(tmp, tr); err != nil {
+			tmp.Close()
+			_ = os.Remove(tmp.Name())
+			cleanup()
+			return false, fmt.Errorf("writing temp file: %w", err)
 		}
-		return true, out.Close()
+		if err := tmp.Close(); err != nil {
+			_ = os.Remove(tmp.Name())
+			cleanup()
+			return false, fmt.Errorf("closing temp file: %w", err)
+		}
+		cleanup() // remove any previous lower-priority candidate
+		tmpPath = tmp.Name()
+		bestPriority = priority
+		if bestPriority == 0 {
+			break // can't do better than the highest-priority path
+		}
 	}
+
+	if tmpPath == "" {
+		return false, nil
+	}
+	if err := os.Rename(tmpPath, dest); err != nil {
+		_ = os.Remove(tmpPath)
+		return false, fmt.Errorf("moving extracted file into place: %w", err)
+	}
+	return true, nil
 }

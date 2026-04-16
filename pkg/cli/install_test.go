@@ -67,12 +67,12 @@ func TestParseSCPArg(t *testing.T) {
 			wantOk: false,
 		},
 		{
-			// docker://oci:// "::<path>" — not SCP (binary-path separator)
-			arg:    "docker://docker@cli::/usr/local/bin/docker",
+			// docker:// / oci:// — never SCP (binary-path separator ":/")
+			arg:    "docker://docker@cli:/usr/local/bin/docker",
 			wantOk: false,
 		},
 		{
-			arg:    "oci://ghcr.io/org/img@v1::/bin/tool",
+			arg:    "oci://ghcr.io/org/img@v1:/bin/tool",
 			wantOk: false,
 		},
 	}

@@ -139,6 +139,30 @@ b install "git:///home/user/myrepo:bin/tool"
 b install "git://../../shared-repo:scripts/deploy.sh"
 ```
 
+### Install from container images
+
+Use `docker://` to pull from a local container runtime, or `oci://` to pull
+**daemonless** from any OCI registry (Docker Hub, ghcr.io, quay.io, private).
+
+```bash
+# docker:// — requires a running docker/podman/nerdctl
+b install docker://alpine/helm
+b install docker://docker@cli                         # tag via @ (docker:cli image)
+b install docker://docker@cli:/usr/local/bin/docker   # explicit in-container path
+
+# oci:// — daemonless; works in CI containers without docker
+b install oci://ghcr.io/org/img@v1
+b install oci://docker@cli:/usr/local/bin/docker
+```
+
+The syntax is: `<docker://|oci://><image>[@<tag>][:/<path-in-image>]`
+
+- **image** — An image reference, including optional registry (e.g., `alpine`, `ghcr.io/org/img`)
+- **tag** (optional, after `@`) — Image tag; defaults to `latest`. Use `@` consistently with every other `b` provider rather than docker's native `image:tag` syntax
+- **path** (optional, after `:/`) — Absolute path to the binary inside the image. When omitted, `b` searches `/usr/local/bin`, `/usr/bin`, `/bin`, and `/app` for a file named after the image's last segment
+
+The leading `/` on the path disambiguates it from an `image:tag` pasted from docker documentation. For private registries, `oci://` reads credentials from `~/.docker/config.json` (same as `docker login`); see the [authentication](../authentication) page.
+
 ## Flags
 
 | Flag         | Description                               |

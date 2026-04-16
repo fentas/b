@@ -50,10 +50,10 @@ b install gitlab.com/org/tool
 b install codeberg.org/user/app@v1.0
 b install go://golang.org/x/tools/cmd/goimports
 b install docker://alpine/helm
-b install docker://docker@cli                          # tag via @, e.g. docker:cli image
-b install docker://docker@cli::/usr/local/bin/docker   # explicit in-container path
-b install oci://ghcr.io/org/img@v1                     # daemonless, any OCI registry
-b install oci://docker@cli::/usr/local/bin/docker      # daemonless docker CLI
+b install docker://docker@cli                         # tag via @ (e.g. docker:cli image)
+b install docker://docker@cli:/usr/local/bin/docker   # explicit in-container path
+b install oci://ghcr.io/org/img@v1                    # daemonless, any OCI registry
+b install oci://docker@cli:/usr/local/bin/docker      # daemonless docker CLI
 b install "git:///home/user/myrepo:.scripts/tool"
 b install "git://github.com/org/repo:bin/app@v1.0"
 
@@ -134,7 +134,7 @@ binaries:
   # Install from an OCI registry (daemonless — works without docker)
   oci://ghcr.io/org/img:
     version: v1.0
-  oci://docker::/usr/local/bin/docker:
+  oci://docker:/usr/local/bin/docker:
     version: cli
 
 envs:

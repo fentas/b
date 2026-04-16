@@ -575,10 +575,10 @@ func TestParseBinaryArg(t *testing.T) {
 		{"jq@jq-1.7", "jq", "jq-1.7"},
 		{"kubectl@v1.28.0", "kubectl", "v1.28.0"},
 		{"terraform", "terraform", ""},
-		// docker://oci:// "::<path>" must not swallow @tag into version.
-		{"docker://docker@cli::/usr/local/bin/docker", "docker://docker::/usr/local/bin/docker", "cli"},
-		{"oci://ghcr.io/org/img@v1::/bin/tool", "oci://ghcr.io/org/img::/bin/tool", "v1"},
-		{"oci://alpine::/bin/busybox", "oci://alpine::/bin/busybox", ""},
+		// docker:// / oci:// ":/<path>" must not swallow @tag into version.
+		{"docker://docker@cli:/usr/local/bin/docker", "docker://docker:/usr/local/bin/docker", "cli"},
+		{"oci://ghcr.io/org/img@v1:/bin/tool", "oci://ghcr.io/org/img:/bin/tool", "v1"},
+		{"oci://alpine:/bin/busybox", "oci://alpine:/bin/busybox", ""},
 	}
 
 	for _, tt := range tests {
