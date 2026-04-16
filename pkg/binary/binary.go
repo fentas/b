@@ -61,8 +61,14 @@ func (b *Binary) EnsureBinary(update bool) error {
 		}
 		local := b.LocalBinary(true)
 
-		if local.Version == local.Enforced || local.Enforced == "" && local.Latest == local.Version {
-			return nil
+		// Don't short-circuit when we can't tell what's installed. An empty
+		// local.Version here means VersionLocalF either didn't run or
+		// errored (e.g. preset uses the wrong subcommand and the binary
+		// errors out); we must not mistake that for "matches the pin".
+		if local.Version != "" {
+			if local.Version == local.Enforced || local.Enforced == "" && local.Latest == local.Version {
+				return nil
+			}
 		}
 	}
 
