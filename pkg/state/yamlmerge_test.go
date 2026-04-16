@@ -296,6 +296,63 @@ profiles:
 	}
 }
 
+// TestSaveConfig_PreservesUnknownFilesGlobFields ensures custom user fields
+// inside an 'envs.<name>.files.<glob>:' mapping (e.g. 'owner:') survive a
+// SaveConfig, even when the marshaler would otherwise emit the glob value as
+// a scalar shorthand and thereby collapse the mapping.
+func TestSaveConfig_PreservesUnknownFilesGlobFields(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "b.yaml")
+
+	initial := `binaries:
+  jq: {}
+envs:
+  github.com/org/infra:
+    files:
+      "manifests/**":
+        dest: out/
+        owner: platform-team
+`
+	if err := os.WriteFile(configPath, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := LoadConfigFromPath(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	// The marshaler would shrink this to the scalar shorthand "out/".
+	config.Binaries = append(config.Binaries, &binary.LocalBinary{Name: "yq"})
+
+	if err := SaveConfig(config, configPath); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	result, _ := os.ReadFile(configPath)
+	got := string(result)
+
+	var saved struct {
+		Envs map[string]struct {
+			Files map[string]map[string]interface{} `yaml:"files"`
+		} `yaml:"envs"`
+	}
+	if err := yaml.Unmarshal(result, &saved); err != nil {
+		// If the scalar shorthand kicked in, files will not fit this shape.
+		// Fall back to inspecting the raw YAML in the error so we can see it.
+		t.Fatalf("unmarshal saved yaml: %v\n%s", err, got)
+	}
+	glob, ok := saved.Envs["github.com/org/infra"].Files["manifests/**"]
+	if !ok {
+		t.Fatalf("expected files['manifests/**'] to remain a mapping, got:\n%s", got)
+	}
+	if dest, _ := glob["dest"].(string); dest != "out/" {
+		t.Errorf("dest changed: %q\n%s", dest, got)
+	}
+	if owner, _ := glob["owner"].(string); owner != "platform-team" {
+		t.Errorf("user-owned 'owner' field was wiped, got %q\nfull:\n%s", owner, got)
+	}
+}
+
 // TestManagedKey_MatchesMarshalOutput enforces that the managedKey predicate
 // stays in sync with what BinaryList / EnvList MarshalYAML actually emit.
 // If a new field is added to the marshaler it must also appear in managedKey,

@@ -51,10 +51,30 @@ func managedKey(path []string, key string) bool {
 			return false
 		}
 		return false
+	case 3:
+		// Three levels in — the only nested schema b owns here is
+		// envs.<name>.files.<glob> (same under profiles). The glob key
+		// itself is managed (envmatch operates on it) so deletions
+		// propagate, but deeper keys fall through to the default below.
+		if (path[0] == "envs" || path[0] == "profiles") && path[2] == "files" {
+			return true
+		}
+		return false
+	case 4:
+		// Four levels in — envs.<name>.files.<glob>.<field>. Only the
+		// fields the marshaler emits (dest/ignore/select) are managed;
+		// any other key under a file entry is preserved.
+		if (path[0] == "envs" || path[0] == "profiles") && path[2] == "files" {
+			switch key {
+			case "dest", "ignore", "select":
+				return true
+			}
+		}
+		return false
 	}
-	// Deeper (e.g. files.<glob>, files.<glob>.dest) — assume managed so
-	// deletions of managed fields still propagate.
-	return true
+	// Anything deeper than the known schema is forward-compat territory —
+	// treat unknown keys as user-owned and preserve them.
+	return false
 }
 
 // SaveConfigPreserving saves the configuration while preserving comments
@@ -146,6 +166,15 @@ func mergeMappingsPath(dst, src *yaml.Node, path []string, managed func([]string
 
 			if dstKey.Value == srcKey.Value {
 				found = true
+				// Handle the envs/profiles files.<glob> shorthand: marshal may
+				// emit the glob value as a scalar (just the dest path) while
+				// the existing tree has it as a map that may contain user-only
+				// keys (e.g. 'owner:'). Upgrade the scalar to a managed-only
+				// map so the merge preserves the user keys.
+				if isFilesGlobPath(append(path, dstKey.Value)) &&
+					dstVal.Kind == yaml.MappingNode && srcVal.Kind == yaml.ScalarNode {
+					srcVal = scalarDestToMap(srcVal)
+				}
 				// If both are mappings, recurse
 				if dstVal.Kind == yaml.MappingNode && srcVal.Kind == yaml.MappingNode {
 					mergeMappingsPath(dstVal, srcVal, append(path, dstKey.Value), managed)
@@ -200,6 +229,28 @@ func mergeMappingsPath(dst, src *yaml.Node, path []string, managed func([]string
 		}
 	}
 	dst.Content = newContent
+}
+
+// isFilesGlobPath reports whether the given key-path (from document root)
+// points at a glob entry under envs.<name>.files.<glob> or
+// profiles.<name>.files.<glob>. At that depth, scalar values are the
+// marshaled shorthand for {dest: <value>}.
+func isFilesGlobPath(path []string) bool {
+	return len(path) == 4 && (path[0] == "envs" || path[0] == "profiles") && path[2] == "files"
+}
+
+// scalarDestToMap expands a scalar file shorthand ("dest-path") into the
+// equivalent mapping {dest: "dest-path"} so mergeMappingsPath can merge it
+// against an existing mapping value and preserve unknown keys.
+func scalarDestToMap(scalar *yaml.Node) *yaml.Node {
+	return &yaml.Node{
+		Kind: yaml.MappingNode,
+		Tag:  "!!map",
+		Content: []*yaml.Node{
+			{Kind: yaml.ScalarNode, Tag: "!!str", Value: "dest"},
+			{Kind: yaml.ScalarNode, Tag: "!!str", Value: scalar.Value},
+		},
+	}
 }
 
 // nodesEqual compares two YAML nodes for semantic equality.
