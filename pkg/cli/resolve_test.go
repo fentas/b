@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -259,6 +260,103 @@ func TestResolveAmbiguousAssets_TiedScore_QuietPicksFirst(t *testing.T) {
 	wantPrefix := fmt.Sprintf("tool-%s-%s", runtime.GOOS, runtime.GOARCH)
 	if !strings.HasPrefix(b.ResolvedAsset.Name, wantPrefix) {
 		t.Errorf("ResolvedAsset.Name = %q, want prefix %q", b.ResolvedAsset.Name, wantPrefix)
+	}
+	// Quiet/non-TTY auto-picks must NOT persist — user never saw the choice.
+	if b.AssetFilter != "" {
+		t.Errorf("quiet auto-pick should not set AssetFilter, got %q", b.AssetFilter)
+	}
+}
+
+// fakeTrueTieProvider returns two assets that actually tie on score: both
+// have the same OS/arch, neither is an archive, neither contains the repo
+// name — both score 10.
+type fakeTrueTieProvider struct{}
+
+func (f *fakeTrueTieProvider) Name() string { return "faketruetie" }
+func (f *fakeTrueTieProvider) Match(ref string) bool {
+	return strings.HasPrefix(ref, "faketruetie://")
+}
+func (f *fakeTrueTieProvider) LatestVersion(ref string) (string, error) { return "v1.0.0", nil }
+func (f *fakeTrueTieProvider) FetchRelease(ref, version string) (*provider.Release, error) {
+	name1 := fmt.Sprintf("pick-me-%s-%s", runtime.GOOS, runtime.GOARCH)
+	name2 := fmt.Sprintf("or-me-%s-%s", runtime.GOOS, runtime.GOARCH)
+	return &provider.Release{
+		Version: version,
+		Assets: []provider.Asset{
+			{Name: name1, URL: "https://example.com/" + name1, Size: 1024},
+			{Name: name2, URL: "https://example.com/" + name2, Size: 2048},
+		},
+	}, nil
+}
+
+func init() {
+	provider.Register(&fakeTrueTieProvider{})
+}
+
+// TestResolveAmbiguousAssets_QuietAutoPick_DoesNotPersist ensures that a
+// quiet/non-TTY auto-pick of a genuinely tied ambiguity does NOT set
+// AssetFilter — the user never saw the choice so we won't pin it.
+func TestResolveAmbiguousAssets_QuietAutoPick_DoesNotPersist(t *testing.T) {
+	b := &binary.Binary{
+		Name:        "tool",
+		AutoDetect:  true,
+		ProviderRef: "faketruetie://org/unique",
+		Version:     "v1.0.0",
+	}
+	out := &streams.IO{Out: &discardWriter{}, ErrOut: &discardWriter{}}
+	resolveAmbiguousAssets([]*binary.Binary{b}, true, out) // quiet=true
+
+	if b.ResolvedAsset == nil {
+		t.Fatal("expected ResolvedAsset to be set (auto-pick)")
+	}
+	if b.AssetFilter != "" {
+		t.Errorf("quiet auto-pick of tied candidates must not persist, got %q", b.AssetFilter)
+	}
+}
+
+// TestResolveAmbiguousAssets_Interactive_PersistsChoice verifies that when
+// the interactive picker is actually used (TTY + not quiet + user picks),
+// the chosen asset name is stored on AssetFilter so 'b install --add' can
+// persist it to b.yaml and 'b update' keeps using the same asset.
+func TestResolveAmbiguousAssets_Interactive_PersistsChoice(t *testing.T) {
+	// Force the TTY check to true and stdin to a known choice.
+	origTTY := isTTYFunc
+	isTTYFunc = func() bool { return true }
+	defer func() { isTTYFunc = origTTY }()
+
+	origStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin; r.Close() }()
+	// Pick choice "1" (first listed).
+	go func() {
+		fmt.Fprintln(w, "1")
+		w.Close()
+	}()
+
+	b := &binary.Binary{
+		// Name must not appear in assets so scoring doesn't award repo-name bonus
+		// asymmetrically.
+		Name:        "tool",
+		AutoDetect:  true,
+		ProviderRef: "faketruetie://org/unique",
+		Version:     "v1.0.0",
+	}
+	out := &streams.IO{Out: &discardWriter{}, ErrOut: &discardWriter{}}
+	// quiet=false → interactive prompt is used
+	resolveAmbiguousAssets([]*binary.Binary{b}, false, out)
+
+	if b.ResolvedAsset == nil {
+		t.Fatal("expected ResolvedAsset to be set after interactive pick")
+	}
+	if b.AssetFilter == "" {
+		t.Error("interactive pick should persist to AssetFilter for 'b install --add'")
+	}
+	if b.AssetFilter != b.ResolvedAsset.Name {
+		t.Errorf("AssetFilter = %q, want %q (same as picked asset)", b.AssetFilter, b.ResolvedAsset.Name)
 	}
 }
 

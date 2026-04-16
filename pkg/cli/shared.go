@@ -379,13 +379,21 @@ func resolveAmbiguousAssets(binaries []*binary.Binary, quiet bool, io *streams.I
 			continue
 		}
 
-		// Ambiguous — prompt user (or auto-pick in quiet/non-TTY mode)
+		// Ambiguous — prompt user (or auto-pick in quiet/non-TTY mode).
+		// When a real TTY prompt is shown we persist the chosen asset name
+		// as AssetFilter so 'b update' keeps the same choice instead of
+		// re-prompting; quiet/non-TTY auto-picks are NOT persisted because
+		// the user never saw or consented to them.
+		interactive := !quiet && isTTYFunc()
 		sel := defaultAssetSelector(b, quiet, io)
 		asset, err := sel(candidates)
 		if err != nil {
 			continue
 		}
 		b.ResolvedAsset = asset
+		if interactive && b.AssetFilter == "" {
+			b.AssetFilter = asset.Name
+		}
 	}
 }
 
