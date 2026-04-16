@@ -1,11 +1,18 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
 func init() {
@@ -28,6 +35,43 @@ func (d *Docker) LatestVersion(ref string) (string, error) {
 // FetchRelease is not used for Docker — use Install instead.
 func (d *Docker) FetchRelease(ref, version string) (*Release, error) {
 	return nil, fmt.Errorf("docker provider does not use FetchRelease; use Install()")
+}
+
+// ResolveDigest queries the registry HEAD (via go-containerregistry, the
+// same client the oci:// provider uses) to get the current manifest
+// digest for the tag. Keeps Install itself on the container runtime so
+// nothing behaviorally changes for the pull, but gives `b update` a way
+// to detect whether a mutable tag has been repushed. Returns ("", nil)
+// on any registry error (including timeout) so transient outages don't
+// break update flows.
+func (d *Docker) ResolveDigest(ref, version string) (string, error) {
+	rest := strings.TrimPrefix(ref, "docker://")
+	image, refTag, _ := ParseImageRef(rest)
+	tag := version
+	if tag == "" {
+		tag = refTag
+	}
+	if tag == "" {
+		tag = "latest"
+	}
+	nameRef, err := name.ParseReference(image + ":" + tag)
+	if err != nil {
+		return "", fmt.Errorf("parsing image ref %s:%s: %w", image, tag, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), digestResolveTimeout)
+	defer cancel()
+	desc, err := remote.Head(nameRef,
+		remote.WithContext(ctx),
+		remote.WithAuthFromKeychain(authn.DefaultKeychain),
+		remote.WithPlatform(v1.Platform{
+			OS:           runtime.GOOS,
+			Architecture: runtime.GOARCH,
+		}),
+	)
+	if err != nil {
+		return "", nil
+	}
+	return desc.Digest.String(), nil
 }
 
 // Install pulls the image, creates a container, copies the binary out, and cleans up.

@@ -20,6 +20,7 @@ import (
 	"github.com/fentas/b/pkg/env"
 	"github.com/fentas/b/pkg/gitcache"
 	"github.com/fentas/b/pkg/lock"
+	"github.com/fentas/b/pkg/provider"
 	"github.com/fentas/b/pkg/state"
 )
 
@@ -804,6 +805,73 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 		}
 	}
 
+	// Load the current lockfile so digest-resolver providers (docker://, oci://)
+	// can short-circuit when the tag's manifest digest hasn't changed upstream.
+	// ReadLock returns an empty Lock (not nil) when b.lock is missing, so a
+	// fresh project is the no-op case — every FindBinary returns nil and the
+	// digest-match check simply falls through. A real read/parse error is
+	// also non-fatal here: we drop to nil and fall through to the normal
+	// update path.
+	var lk *lock.Lock
+	if readLk, err := lock.ReadLock(o.LockDir()); err == nil {
+		lk = readLk
+	}
+
+	// Resolve digests once per digest-capable binary up-front. We reuse these
+	// values both for the skip decision and the post-update lock refresh, so
+	// each registry HEAD only happens once per run.
+	//
+	// ResolveDigest distinguishes two error shapes:
+	//   - transient/registry/auth/404 → ("", nil): treat as "don't know" and
+	//     fall through to a normal download.
+	//   - malformed ref (hard error)  → ("", err): surface as a warning so
+	//     the user sees the actionable problem instead of seeing b silently
+	//     fall back to re-downloading a broken ref.
+	// digestCapable tracks which binaries have a digest-aware provider.
+	// Only these get digest resolution AND pre-SHA hashing — skipping
+	// SHA256File for everything else keeps `b update` cheap on projects
+	// that don't use docker:// / oci://.
+	digestCapable := make(map[string]bool, len(binaries))
+	freshDigests := make(map[string]string, len(binaries))
+	for _, b := range binaries {
+		if !b.AutoDetect || b.ProviderRef == "" {
+			continue
+		}
+		dr, ok := providerDigestResolver(b.ProviderRef)
+		if !ok {
+			continue
+		}
+		digestCapable[b.Name] = true
+		d, err := dr.ResolveDigest(b.ProviderRef, b.Version)
+		if err != nil {
+			fmt.Fprintf(o.IO.ErrOut, "Warning: resolving digest for %s (%s): %v\n", b.Name, b.ProviderRef, err)
+			continue
+		}
+		if d != "" {
+			freshDigests[b.Name] = d
+		}
+	}
+	// preSHA lets refreshLockDigests tell which binaries actually re-downloaded:
+	// if the file's SHA256 changed from this value, the download succeeded.
+	// Only compute for digest-capable binaries — hashing on-disk bytes is
+	// otherwise wasted work for github/gitlab/go provider binaries we'll
+	// never consult preSHA for.
+	preSHA := make(map[string]string, len(digestCapable))
+	for _, b := range binaries {
+		if b.File == "" || !digestCapable[b.Name] {
+			continue
+		}
+		if h, err := lock.SHA256File(b.File); err == nil {
+			preSHA[b.Name] = h
+		}
+	}
+
+	// Track which downloads were attempted and failed so the post-update
+	// lock refresh can avoid advancing Digest/SHA256 for binaries whose
+	// on-disk bytes didn't actually update.
+	var outcomeMu sync.Mutex
+	downloadFailed := make(map[string]bool, len(binaries))
+
 	wg := sync.WaitGroup{}
 	pw := progress.NewWriter(progress.StyleDownload, o.IO.Out)
 	pw.Style().Visibility.Percentage = true
@@ -826,11 +894,38 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 			b.Writer = pw
 
 			var err error
-			if o.Force {
+			attempted := false
+			switch {
+			case o.Force:
+				attempted = true
 				err = b.DownloadBinary()
-			} else {
-				err = b.EnsureBinary(true) // Force update
+			case digestMatchesLock(b, lk, freshDigests[b.Name]) && b.BinaryExists():
+				// Manifest digest matches the locked one AND the binary
+				// is actually on disk: upstream hasn't moved since the
+				// last install. Nothing to do. The BinaryExists() check
+				// catches the case where the user deleted the file —
+				// the digest match alone is not enough to declare the
+				// binary up to date.
+				err = nil
+			case b.AutoDetect && isDigestProvider(b.ProviderRef):
+				// Digest-resolver provider but either no lock digest, or the
+				// digest differs — always re-download. Bypasses
+				// EnsureBinary's Version==Enforced short-circuit that would
+				// otherwise keep the old binary for mutable tags like 'cli'.
+				attempted = true
+				err = b.DownloadBinary()
+			default:
+				// EnsureBinary's internal skip check may or may not
+				// download; treat it as "attempted" only on error so a
+				// failed preset update doesn't poison the lock either.
+				err = b.EnsureBinary(true)
+				if err != nil {
+					attempted = true
+				}
 			}
+			outcomeMu.Lock()
+			downloadFailed[b.Name] = attempted && err != nil
+			outcomeMu.Unlock()
 
 			doneLabel := name + " updated"
 			if b.Alias != "" {
@@ -846,7 +941,138 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 
 	wg.Wait()
 	time.Sleep(200 * time.Millisecond)
+
+	// Record freshly-resolved digests in the lockfile so subsequent `b update`
+	// runs can skip when the tag hasn't moved. Only touches digest-resolver
+	// providers; non-digest entries and the rest of the lock are left alone.
+	if !o.effectiveDryRun() {
+		o.refreshLockDigests(binaries, freshDigests, preSHA, downloadFailed)
+	}
 	return nil
+}
+
+// refreshLockDigests re-reads b.lock and updates the Digest + SHA256 for
+// every digest-resolver binary that actually changed on disk during this
+// update run. Failed downloads are identified via downloadFailed and
+// skipped entirely — otherwise the lock could advance to an upstream
+// digest whose bytes never made it to disk, and a future `b update`
+// would wrongly skip.
+//
+// freshDigests is reused from updateBinaries so each registry is HEAD-ed
+// only once per run. Best-effort: any error is surfaced as a warning
+// without failing the update — the binaries are already on disk.
+func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDigests, preSHA map[string]string, downloadFailed map[string]bool) {
+	lk, err := lock.ReadLock(o.LockDir())
+	if err != nil {
+		fmt.Fprintf(o.IO.ErrOut, "Warning: can't read b.lock to refresh digests: %v\n", err)
+		return
+	}
+	changed := false
+	for _, b := range binaries {
+		if !b.AutoDetect || b.ProviderRef == "" || b.File == "" {
+			continue
+		}
+		if _, ok := providerDigestResolver(b.ProviderRef); !ok {
+			continue
+		}
+		// Download was attempted and failed: don't touch the lock. The
+		// previous digest/SHA still match the previous binary, which is
+		// what's on disk.
+		if downloadFailed[b.Name] {
+			continue
+		}
+		entry := lk.FindBinary(b.Name)
+		if entry == nil {
+			continue
+		}
+		// If the lock entry's Source drifted from the configured
+		// ProviderRef (e.g. the user edited b.yaml in place and changed
+		// the ref but kept the derived binary name), don't rewrite the
+		// entry's Digest/SHA256 here — that would mix a stale Source
+		// with fresh content identity and break future skip checks via
+		// digestMatchesLock. An 'install --add' flow is the correct
+		// way to update Source/Provider; this refresh is conservative
+		// on purpose.
+		if entry.Source != "" && entry.Source != b.ProviderRef {
+			continue
+		}
+		hash, err := lock.SHA256File(b.File)
+		if err != nil {
+			continue
+		}
+
+		// Digest and SHA256 are independent: a transient HEAD failure
+		// (freshDigests empty) doesn't stop us from refreshing SHA256
+		// when the download still succeeded via cache/retry. Conversely,
+		// a pure skip (digest matched, hash unchanged) refreshes only
+		// Digest. Decide each one on its own.
+		digest := freshDigests[b.Name]
+		pre := preSHA[b.Name]
+		hashChanged := pre != hash
+
+		// SHA256: refresh whenever the on-disk bytes actually moved.
+		// downloadFailed is already filtered out above, so a changed
+		// hash here proves a successful download.
+		if hashChanged && entry.SHA256 != hash {
+			entry.SHA256 = hash
+			changed = true
+		}
+		// Digest: refresh whenever we have a fresh value to store.
+		// Empty means ResolveDigest didn't know — keep the previous
+		// digest in that case. Non-empty means the registry told us
+		// the current manifest identity for this tag; record it so
+		// the next `b update` can short-circuit when it matches.
+		if digest != "" && entry.Digest != digest {
+			entry.Digest = digest
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	if err := lock.WriteLock(o.LockDir(), lk, o.bVersion); err != nil {
+		fmt.Fprintf(o.IO.ErrOut, "Warning: can't write b.lock digest updates: %v\n", err)
+	}
+}
+
+// providerDigestResolver returns the provider behind ref as a
+// DigestResolver, or false if the provider isn't digest-capable.
+func providerDigestResolver(ref string) (provider.DigestResolver, bool) {
+	p, err := provider.Detect(ref)
+	if err != nil {
+		return nil, false
+	}
+	dr, ok := p.(provider.DigestResolver)
+	return dr, ok
+}
+
+// isDigestProvider reports whether the provider behind ref implements
+// DigestResolver (currently docker://, oci://).
+func isDigestProvider(ref string) bool {
+	_, ok := providerDigestResolver(ref)
+	return ok
+}
+
+// digestMatchesLock reports whether the freshly-resolved digest for b
+// (supplied by the caller so we don't HEAD the registry twice) matches
+// the one recorded in the lockfile for the same source. Returns false
+// for every "can't prove it" case — missing lock, missing stored
+// digest, mismatched Source (user changed the docker/oci ref or
+// in-container path but kept the derived binary name), no fresh
+// digest, non-digest provider, absent ProviderRef — so the caller
+// still attempts an update.
+func digestMatchesLock(b *binary.Binary, lk *lock.Lock, fresh string) bool {
+	if lk == nil || b.ProviderRef == "" || fresh == "" {
+		return false
+	}
+	entry := lk.FindBinary(b.Name)
+	if entry == nil || entry.Digest == "" {
+		return false
+	}
+	if entry.Source != b.ProviderRef {
+		return false
+	}
+	return entry.Digest == fresh
 }
 
 // checkEnvConflicts detects when two env entries write to overlapping dest paths.

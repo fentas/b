@@ -46,6 +46,40 @@ func TestOCIFetchRelease(t *testing.T) {
 	}
 }
 
+// TestOCI_ImplementsDigestResolver is a compile-time check so the
+// interface wiring for 'b update' can't silently break.
+func TestOCI_ImplementsDigestResolver(t *testing.T) {
+	var _ DigestResolver = (*OCI)(nil)
+	var _ DigestResolver = (*Docker)(nil)
+}
+
+// TestOCI_ResolveDigest_ErrorTolerant asserts ResolveDigest does NOT
+// return a hard error when the registry is unreachable or the image
+// doesn't exist — a transient registry outage must not break 'b update'.
+// We use a bogus localhost ref to guarantee the HEAD fails.
+func TestOCI_ResolveDigest_ErrorTolerant(t *testing.T) {
+	o := &OCI{}
+	// 127.0.0.1:1 is almost guaranteed to be closed.
+	digest, err := o.ResolveDigest("oci://127.0.0.1:1/no/such@nope", "")
+	if err != nil {
+		t.Errorf("ResolveDigest on unreachable registry returned error %v; want empty+nil (caller treats as unknown)", err)
+	}
+	if digest != "" {
+		t.Errorf("digest = %q, want empty on unreachable registry", digest)
+	}
+}
+
+// TestOCI_ResolveDigest_InvalidRefIsHardError: malformed refs should
+// surface — that's a programmer error, not a transient network issue.
+func TestOCI_ResolveDigest_InvalidRefIsHardError(t *testing.T) {
+	o := &OCI{}
+	// Images can't contain '@' in the name portion; an image "BAD@@"
+	// fails parse.
+	if _, err := o.ResolveDigest("oci://BAD@@@garbage", ""); err == nil {
+		t.Error("expected parse error for malformed ref")
+	}
+}
+
 func TestParseImageRef(t *testing.T) {
 	tests := []struct {
 		in              string

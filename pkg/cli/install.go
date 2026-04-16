@@ -362,6 +362,44 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		if b.AutoDetect {
 			entry.Source = b.ProviderRef
 			entry.Provider = b.ProviderType
+			// For providers that expose a stable content digest (docker://,
+			// oci://) record it so `b update` can skip re-pulls when the
+			// tag's manifest hasn't moved upstream. ResolveDigest has a
+			// two-shape contract:
+			//   - transient/registry/auth → ("", nil): preserve the
+			//     previous digest so the skip state isn't lost across
+			//     outages.
+			//   - malformed ref → ("", err): surface as a warning so the
+			//     user sees the actionable problem.
+			//
+			// Carry a previous digest forward only when the previous lock
+			// entry refers to the same Source/Provider — otherwise we'd
+			// associate an old image's digest with a new Source, which
+			// could produce coincidental false "up to date" skips later.
+			preserveDigest := func() {
+				prev := lk.FindBinary(b.Name)
+				if prev == nil || prev.Source != entry.Source {
+					return
+				}
+				if prev.Provider != "" && entry.Provider != "" && prev.Provider != entry.Provider {
+					return
+				}
+				entry.Digest = prev.Digest
+			}
+			if p, err := provider.Detect(b.ProviderRef); err == nil {
+				if dr, ok := p.(provider.DigestResolver); ok {
+					digest, dErr := dr.ResolveDigest(b.ProviderRef, b.Version)
+					switch {
+					case dErr != nil:
+						fmt.Fprintf(o.IO.ErrOut, "Warning: resolving digest for %s (%s): %v\n", b.Name, b.ProviderRef, dErr)
+						preserveDigest()
+					case digest != "":
+						entry.Digest = digest
+					default:
+						preserveDigest()
+					}
+				}
+			}
 		} else {
 			entry.Preset = true
 			if b.GitHubRepo != "" {

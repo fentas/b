@@ -3,6 +3,7 @@ package lock
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -35,6 +36,62 @@ func TestReadWriteLock(t *testing.T) {
 	}
 	if lk2.Binaries[0].SHA256 != "abc123" {
 		t.Errorf("sha256 = %q, want %q", lk2.Binaries[0].SHA256, "abc123")
+	}
+}
+
+// TestLock_DigestRoundTrips covers the 'digest' field added for
+// docker:// / oci:// binaries — it must round-trip through write+read
+// so 'b update' can compare the stored digest against a freshly
+// resolved one, and must be omitted from JSON when empty so older
+// entries stay small.
+func TestLock_DigestRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+
+	lk := &Lock{
+		Binaries: []BinEntry{
+			{
+				Name:     "docker",
+				Version:  "cli",
+				SHA256:   "sha-of-binary",
+				Source:   "oci://docker:/usr/local/bin/docker",
+				Provider: "oci",
+				Digest:   "sha256:deadbeefcafebabe",
+			},
+			// Legacy-shape entry without a digest (e.g. github provider).
+			{Name: "fzf", Version: "v0.61.1", SHA256: "abc", Source: "github.com/junegunn/fzf", Provider: "github"},
+		},
+	}
+	if err := WriteLock(dir, lk, "v5.0.0"); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, lockFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	if !strings.Contains(s, `"digest": "sha256:deadbeefcafebabe"`) {
+		t.Errorf("expected digest to be written, got:\n%s", s)
+	}
+	// Non-digest entries must NOT carry an empty "digest" field.
+	if strings.Contains(s, `"digest": ""`) {
+		t.Errorf("empty digest should be omitted via omitempty, got:\n%s", s)
+	}
+
+	lk2, err := ReadLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	docker := lk2.FindBinary("docker")
+	if docker == nil {
+		t.Fatal("docker binary missing from lock")
+	}
+	if docker.Digest != "sha256:deadbeefcafebabe" {
+		t.Errorf("digest = %q, want %q", docker.Digest, "sha256:deadbeefcafebabe")
+	}
+	fzf := lk2.FindBinary("fzf")
+	if fzf == nil || fzf.Digest != "" {
+		t.Errorf("fzf should round-trip with empty digest, got %+v", fzf)
 	}
 }
 
