@@ -13,6 +13,18 @@ func TestParseRef(t *testing.T) {
 		{"go://github.com/jrhouston/tfk8s@v0.1.8", "go://github.com/jrhouston/tfk8s", "v0.1.8"},
 		{"docker://hashicorp/terraform", "docker://hashicorp/terraform", ""},
 		{"gitlab.com/org/tool@v1.0", "gitlab.com/org/tool", "v1.0"},
+		// docker:// / oci:// with ":/<path>" must preserve path on base.
+		{"docker://docker@cli:/usr/local/bin/docker", "docker://docker:/usr/local/bin/docker", "cli"},
+		{"oci://ghcr.io/org/img@v1:/bin/tool", "oci://ghcr.io/org/img:/bin/tool", "v1"},
+		{"oci://alpine:/bin/busybox", "oci://alpine:/bin/busybox", ""},
+		// Registry port must not be mistaken for the path separator.
+		{"oci://localhost:5000/org/img@v1:/bin/tool", "oci://localhost:5000/org/img:/bin/tool", "v1"},
+		// Docker-style "image:tag" is tolerated and normalised same as @tag.
+		{"oci://alpine:3.19", "oci://alpine", "3.19"},
+		{"oci://ghcr.io/org/img:v1", "oci://ghcr.io/org/img", "v1"},
+		{"oci://ghcr.io/org/img:v1:/bin/tool", "oci://ghcr.io/org/img:/bin/tool", "v1"},
+		// Registry port without tag stays as-is.
+		{"oci://localhost:5000/org/img", "oci://localhost:5000/org/img", ""},
 	}
 
 	for _, tt := range tests {
@@ -57,6 +69,12 @@ func TestBinaryName(t *testing.T) {
 		{"docker://hashicorp/terraform", "terraform"},
 		{"gitlab.com/org/my-tool", "my-tool"},
 		{"codeberg.org/user/app", "app"},
+		// ":/<path>" takes the basename of the path as the binary name.
+		{"docker://docker@cli:/usr/local/bin/docker", "docker"},
+		{"oci://ghcr.io/org/img@v1:/bin/my-tool", "my-tool"},
+		{"oci://alpine", "alpine"},
+		// Registry port must not be mistaken for path.
+		{"oci://localhost:5000/org/img", "img"},
 	}
 
 	for _, tt := range tests {

@@ -53,21 +53,98 @@ func Detect(ref string) (Provider, error) {
 
 // ParseRef splits a ref like "github.com/org/repo@v1.0" into
 // (github.com/org/repo, v1.0). Version may be empty.
+//
+// For docker:// or oci:// refs, the optional ":/<in-container-path>" suffix
+// is preserved on base (stripped only for the tag scan), and the tag ends
+// up in version. Docker-style "image:tag" is also accepted as a copy-paste
+// convenience — a ':' is treated as a tag separator when it occurs after
+// the last '/' (so registry ports like "localhost:5000/org/img" still parse
+// correctly). Examples:
+//
+//	"docker://docker@cli:/usr/local/bin/docker"  →
+//	   ("docker://docker:/usr/local/bin/docker", "cli")
+//	"oci://ghcr.io/org/img:v1:/bin/tool"         →
+//	   ("oci://ghcr.io/org/img:/bin/tool", "v1")
 func ParseRef(ref string) (base, version string) {
+	if strings.HasPrefix(ref, "docker://") || strings.HasPrefix(ref, "oci://") {
+		imgPart, pathPart := SplitImagePath(ref)
+		// Prefer explicit "@tag".
+		if i := strings.LastIndex(imgPart, "@"); i > 0 {
+			return imgPart[:i] + pathPart, imgPart[i+1:]
+		}
+		// Tolerate docker-style "image:tag" — but only when the ':' is after
+		// the last '/' so registry ports are preserved.
+		lastSlash := strings.LastIndex(imgPart, "/")
+		if i := strings.LastIndex(imgPart, ":"); i > lastSlash && i > 0 {
+			return imgPart[:i] + pathPart, imgPart[i+1:]
+		}
+		return ref, ""
+	}
 	if i := strings.LastIndex(ref, "@"); i > 0 {
 		return ref[:i], ref[i+1:]
 	}
 	return ref, ""
 }
 
+// SplitImagePath locates the ":/<path>" suffix of a docker:// or oci:// ref
+// and returns (imagePart, pathPart). pathPart is either empty or starts with
+// ":/". Uses the last ":/" so registry ports (":443/") in the middle aren't
+// mistaken for the path separator. Skips the protocol prefix's own ":/" so
+// "oci://alpine" doesn't match on the scheme separator.
+func SplitImagePath(ref string) (imagePart, pathPart string) {
+	start := 0
+	if i := strings.Index(ref, "://"); i >= 0 {
+		start = i + 3
+	}
+	if i := strings.LastIndex(ref[start:], ":/"); i >= 0 {
+		abs := start + i
+		return ref[:abs], ref[abs:]
+	}
+	return ref, ""
+}
+
+// ParseImageRef parses a docker:// or oci:// ref into (image, tag, path).
+//
+//	alpine                             → ("alpine", "", "")
+//	alpine@3.19                        → ("alpine", "3.19", "")
+//	alpine:3.19                        → ("alpine", "3.19", "")   // docker-style, tolerated
+//	docker@cli:/usr/local/bin/docker   → ("docker", "cli", "/usr/local/bin/docker")
+//	ghcr.io/org/img@v1:/bin/tool       → ("ghcr.io/org/img", "v1", "/bin/tool")
+//	localhost:5000/org/img             → ("localhost:5000/org/img", "", "")
+//
+// The prefix (docker:// or oci://) must already be stripped. Docker-style
+// "image:tag" is accepted for convenience (a copy-paste from docker docs)
+// but the preferred syntax remains "@tag" to stay consistent across providers.
+func ParseImageRef(ref string) (image, tag, inContainerPath string) {
+	imagePart, pathPart := SplitImagePath(ref)
+	if pathPart != "" {
+		inContainerPath = pathPart[1:] // drop leading ":"
+		ref = imagePart
+	}
+	if i := strings.LastIndex(ref, "@"); i > 0 {
+		tag = ref[i+1:]
+		ref = ref[:i]
+	} else {
+		// Also accept docker-style "image:tag" — only when ':' is after the
+		// last '/' so registry ports ("localhost:5000/org/img") are preserved.
+		lastSlash := strings.LastIndex(ref, "/")
+		if i := strings.LastIndex(ref, ":"); i > lastSlash && i > 0 {
+			tag = ref[i+1:]
+			ref = ref[:i]
+		}
+	}
+	image = ref
+	return
+}
+
 // IsReleaseProvider returns true if the provider uses FetchRelease for downloads
-// (i.e. GitHub, GitLab, Gitea). Returns false for go://, docker://, git://.
+// (i.e. GitHub, GitLab, Gitea). Returns false for go://, docker://, oci://, git://.
 func IsReleaseProvider(p Provider) bool {
 	if p == nil {
 		return false
 	}
 	switch p.(type) {
-	case *GoInstall, *Docker, *Git:
+	case *GoInstall, *Docker, *OCI, *Git:
 		return false
 	default:
 		return true
@@ -91,6 +168,7 @@ func IsProviderRef(s string) bool {
 //
 //	"go://github.com/jrhouston/tfk8s" → "tfk8s",
 //	"docker://hashicorp/terraform" → "terraform"
+//	"docker://docker@cli:/usr/local/bin/docker" → "docker"
 func BinaryName(ref string) string {
 	// git:// refs use the filepath part (after :) as the binary name
 	if strings.HasPrefix(ref, "git://") {
@@ -107,6 +185,21 @@ func BinaryName(ref string) string {
 		}
 	}
 
+	// docker:// or oci:// with ":/<path>" — binary name is basename of path.
+	// Fall through to default derivation if the path is empty or a directory.
+	if strings.HasPrefix(ref, "docker://") || strings.HasPrefix(ref, "oci://") {
+		_, pathPart := SplitImagePath(ref)
+		if pathPart != "" {
+			p := pathPart[1:] // drop leading ":"
+			if p != "" && !strings.HasSuffix(p, "/") {
+				parts := strings.Split(p, "/")
+				if last := parts[len(parts)-1]; last != "" {
+					return last
+				}
+			}
+		}
+	}
+
 	// Strip protocol prefix
 	r := ref
 	if i := strings.Index(r, "://"); i >= 0 {
@@ -116,8 +209,10 @@ func BinaryName(ref string) string {
 	if i := strings.LastIndex(r, "@"); i > 0 {
 		r = r[:i]
 	}
-	// Strip colon (docker image:tag handled by version)
-	if i := strings.LastIndex(r, ":"); i > 0 {
+	// Strip docker-style "image:tag" — only when ":" occurs after the last "/"
+	// so registry ports like "localhost:5000/org/image" are preserved.
+	lastSlash := strings.LastIndex(r, "/")
+	if i := strings.LastIndex(r, ":"); i > lastSlash && i > 0 {
 		r = r[:i]
 	}
 	// Last path segment

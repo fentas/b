@@ -374,14 +374,11 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 	return lock.WriteLock(lockDir, lk, o.bVersion)
 }
 
-// parseBinaryArg parses binary argument in format "name" or "name@version"
+// parseBinaryArg parses binary argument in format "name" or "name@version".
+// Delegates to provider.ParseRef which already handles the docker:// or oci://
+// quirk of preserving a ":/<path>" suffix on name.
 func parseBinaryArg(arg string) (name, version string) {
-	parts := strings.SplitN(arg, "@", 2)
-	name = parts[0]
-	if len(parts) > 1 {
-		version = parts[1]
-	}
-	return
+	return provider.ParseRef(arg)
 }
 
 // parseSCPArg tries to parse an SCP-style env install:
@@ -390,12 +387,18 @@ func parseBinaryArg(arg string) (name, version string) {
 //
 // Returns the parsed envInstall, how many additional args were consumed, and whether it matched.
 func parseSCPArg(arg string, remaining []string) (envInstall, int, bool) {
+	// docker:// and oci:// are always binary installs (never env SCP), even
+	// though they may contain ":/path" for in-container binary location.
+	if strings.HasPrefix(arg, "docker://") || strings.HasPrefix(arg, "oci://") {
+		return envInstall{}, 0, false
+	}
+
 	// Look for colon that signals SCP syntax — must come after a ref (contains /)
-	// and before a glob. Skip protocol prefixes (go://, docker://).
+	// and before a glob. Skip the "://" of protocol prefixes (go://, git://).
 	colonIdx := -1
 	for i := range arg {
 		if arg[i] == ':' {
-			// Skip protocol prefixes (e.g. go://, docker://)
+			// Skip protocol prefixes (e.g. go://, git://)
 			if i+2 < len(arg) && arg[i+1] == '/' && arg[i+2] == '/' {
 				continue
 			}

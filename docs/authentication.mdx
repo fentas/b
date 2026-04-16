@@ -51,6 +51,21 @@ A Gitea token is required for private repositories on Gitea or Forgejo instances
 export GITEA_TOKEN="..."
 ```
 
+## OCI Registry Authentication
+
+For `oci://` refs, `b` pulls images daemonlessly but reuses your local docker
+credentials. It reads `~/.docker/config.json` (or the location pointed to by
+`DOCKER_CONFIG`) and uses whichever helper is configured there. In other
+words, if `docker login ghcr.io` works, `b install oci://ghcr.io/...` works too.
+
+```bash
+# Log in once; b picks it up automatically
+docker login ghcr.io
+b install oci://ghcr.io/org/private-img
+```
+
+No `b`-specific environment variable is needed for OCI auth.
+
 ## SSH Authentication
 
 For private repos, you can also use SSH keys instead of tokens. SSH authentication uses your system's ssh-agent and works for both binaries and env sync:

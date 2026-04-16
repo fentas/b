@@ -50,6 +50,10 @@ b install gitlab.com/org/tool
 b install codeberg.org/user/app@v1.0
 b install go://golang.org/x/tools/cmd/goimports
 b install docker://alpine/helm
+b install docker://docker@cli                         # tag via @ (e.g. docker:cli image)
+b install docker://docker@cli:/usr/local/bin/docker   # explicit in-container path
+b install oci://ghcr.io/org/img@v1                    # daemonless, any OCI registry
+b install oci://docker@cli:/usr/local/bin/docker      # daemonless docker CLI
 b install "git:///home/user/myrepo:.scripts/tool"
 b install "git://github.com/org/repo:bin/app@v1.0"
 
@@ -120,13 +124,18 @@ binaries:
     alias: renvsubst      # alias to renvsubst
   kubectl:
     file: ../kc           # custom path (relative to config)
-  # Install from any provider by ref (GitHub, GitLab, Gitea, go://, docker://, git://)
+  # Install from any provider by ref (GitHub, GitLab, Gitea, go://, docker://, oci://, git://)
   github.com/sharkdp/bat:
     version: v0.24.0
   # Install from a git repo (local or remote)
   git:///home/user/myproject:.scripts/tool:
   git://github.com/org/repo:bin/app:
     version: v1.0
+  # Install from an OCI registry (daemonless — works without docker)
+  oci://ghcr.io/org/img:
+    version: v1.0
+  oci://docker:/usr/local/bin/docker:
+    version: cli
 
 envs:
   # Sync files from upstream git repos
@@ -163,6 +172,8 @@ Set environment variables to authenticate with providers for higher rate limits 
 | `GITHUB_TOKEN` | GitHub |
 | `GITLAB_TOKEN` | GitLab |
 | `GITEA_TOKEN` | Gitea / Forgejo (Codeberg) |
+
+For `oci://` the daemonless client reuses your local registry auth from `~/.docker/config.json` (or the `DOCKER_CONFIG` override) — the same credentials `docker login` writes.
 
 &nbsp;
 

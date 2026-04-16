@@ -66,6 +66,15 @@ func TestParseSCPArg(t *testing.T) {
 			arg:    "kubectl",
 			wantOk: false,
 		},
+		{
+			// docker:// / oci:// — never SCP (binary-path separator ":/")
+			arg:    "docker://docker@cli:/usr/local/bin/docker",
+			wantOk: false,
+		},
+		{
+			arg:    "oci://ghcr.io/org/img@v1:/bin/tool",
+			wantOk: false,
+		},
 	}
 
 	for _, tt := range tests {
