@@ -83,6 +83,10 @@ func TestBinaryName(t *testing.T) {
 		// Trailing slash combined with docker-style "image:tag" still strips the tag.
 		{"oci://alpine:3.19/", "alpine"},
 		{"oci://ghcr.io/org/img:v1/", "img"},
+		// Docker/OCI with ":/<path>" where path ends in '/' (directory-like)
+		// falls back to the image name, not the last path segment.
+		{"oci://ghcr.io/org/img:/bin/tool/", "img"},
+		{"docker://alpine@3.19:/opt/bin/", "alpine"},
 	}
 
 	for _, tt := range tests {

@@ -200,8 +200,15 @@ func BinaryName(ref string) string {
 		}
 	}
 
-	// Strip protocol prefix
+	// For docker:// / oci:// that fell through (empty or directory path),
+	// derive the name from the image part only — the in-container path
+	// shouldn't influence the name.
 	r := ref
+	if strings.HasPrefix(ref, "docker://") || strings.HasPrefix(ref, "oci://") {
+		imgPart, _ := SplitImagePath(ref)
+		r = imgPart
+	}
+	// Strip protocol prefix
 	if i := strings.Index(r, "://"); i >= 0 {
 		r = r[i+3:]
 	}
