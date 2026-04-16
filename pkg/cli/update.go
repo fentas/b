@@ -807,8 +807,11 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 
 	// Load the current lockfile so digest-resolver providers (docker://, oci://)
 	// can short-circuit when the tag's manifest digest hasn't changed upstream.
-	// Not having a lock (fresh project) or read errors are non-fatal: we just
-	// fall through to the normal update path.
+	// ReadLock returns an empty Lock (not nil) when b.lock is missing, so a
+	// fresh project is the no-op case — every FindBinary returns nil and the
+	// digest-match check simply falls through. A real read/parse error is
+	// also non-fatal here: we drop to nil and fall through to the normal
+	// update path.
 	var lk *lock.Lock
 	if readLk, err := lock.ReadLock(o.LockDir()); err == nil {
 		lk = readLk

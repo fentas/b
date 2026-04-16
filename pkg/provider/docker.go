@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,7 +42,8 @@ func (d *Docker) FetchRelease(ref, version string) (*Release, error) {
 // digest for the tag. Keeps Install itself on the container runtime so
 // nothing behaviorally changes for the pull, but gives `b update` a way
 // to detect whether a mutable tag has been repushed. Returns ("", nil)
-// on any registry error so transient outages don't break update flows.
+// on any registry error (including timeout) so transient outages don't
+// break update flows.
 func (d *Docker) ResolveDigest(ref, version string) (string, error) {
 	rest := strings.TrimPrefix(ref, "docker://")
 	image, refTag, _ := ParseImageRef(rest)
@@ -56,7 +58,10 @@ func (d *Docker) ResolveDigest(ref, version string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parsing image ref %s:%s: %w", image, tag, err)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), digestResolveTimeout)
+	defer cancel()
 	desc, err := remote.Head(nameRef,
+		remote.WithContext(ctx),
 		remote.WithAuthFromKeychain(authn.DefaultKeychain),
 		remote.WithPlatform(v1.Platform{
 			OS:           runtime.GOOS,

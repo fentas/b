@@ -2,6 +2,7 @@ package provider
 
 import (
 	"archive/tar"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -9,12 +10,19 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
+
+// digestResolveTimeout bounds the single-manifest HEAD call in
+// ResolveDigest for both docker:// and oci:// providers. Kept short
+// enough that `b update` doesn't hang on a stalled registry, long
+// enough to succeed against most real-world registries.
+const digestResolveTimeout = 10 * time.Second
 
 func init() {
 	Register(&OCI{})
@@ -57,6 +65,10 @@ func (o *OCI) FetchRelease(ref, version string) (*Release, error) {
 // docker-config auth and selecting the current platform's manifest when
 // the tag points at an index. Returns ("", nil) if the registry can't
 // be reached — callers treat empty as "unknown" and proceed to install.
+//
+// A digestResolveTimeout guards against hung registry connections; a
+// stalled HEAD would otherwise block `b update` indefinitely (one call
+// per digest-capable binary).
 func (o *OCI) ResolveDigest(ref, version string) (string, error) {
 	rest := strings.TrimPrefix(ref, "oci://")
 	image, refTag, _ := ParseImageRef(rest)
@@ -71,7 +83,10 @@ func (o *OCI) ResolveDigest(ref, version string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parsing image ref %s:%s: %w", image, tag, err)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), digestResolveTimeout)
+	defer cancel()
 	desc, err := remote.Head(nameRef,
+		remote.WithContext(ctx),
 		remote.WithAuthFromKeychain(authn.DefaultKeychain),
 		remote.WithPlatform(v1.Platform{
 			OS:           runtime.GOOS,
@@ -79,8 +94,9 @@ func (o *OCI) ResolveDigest(ref, version string) (string, error) {
 		}),
 	)
 	if err != nil {
-		// Network / auth / 404 — treat as "unknown" rather than erroring,
-		// so a transient registry outage doesn't break `b update`.
+		// Network / auth / 404 / timeout — treat as "unknown" rather
+		// than erroring, so a transient registry outage doesn't break
+		// `b update`.
 		return "", nil
 	}
 	return desc.Digest.String(), nil
