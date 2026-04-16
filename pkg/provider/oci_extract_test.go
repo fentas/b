@@ -58,7 +58,7 @@ func TestExtractBinaryFromLayer_FindsHighestPriority(t *testing.T) {
 
 	dest := filepath.Join(t.TempDir(), "out")
 	searchPaths := []string{"/usr/local/bin/docker", "/usr/bin/docker"}
-	found, err := extractBinaryFromLayer(layer, searchPaths, dest)
+	found, err := extractBinaryFromLayer(layer, searchPaths, dest, map[string]bool{})
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestExtractBinaryFromLayer_NoMatch(t *testing.T) {
 	layer := fakeLayer(t, entries, contents)
 
 	dest := filepath.Join(t.TempDir(), "out")
-	found, err := extractBinaryFromLayer(layer, []string{"/nope"}, dest)
+	found, err := extractBinaryFromLayer(layer, []string{"/nope"}, dest, map[string]bool{})
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestExtractBinaryFromLayer_SkipsNonRegular(t *testing.T) {
 	layer := fakeLayer(t, entries, nil)
 
 	dest := filepath.Join(t.TempDir(), "out")
-	found, err := extractBinaryFromLayer(layer, []string{"/usr/bin/busybox"}, dest)
+	found, err := extractBinaryFromLayer(layer, []string{"/usr/bin/busybox"}, dest, map[string]bool{})
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
@@ -113,11 +113,74 @@ func TestExtractBinaryFromLayer_SkipsNonRegular(t *testing.T) {
 
 func TestExtractBinaryFromLayer_EmptySearchPaths(t *testing.T) {
 	layer := fakeLayer(t, nil, nil)
-	found, err := extractBinaryFromLayer(layer, nil, filepath.Join(t.TempDir(), "out"))
+	found, err := extractBinaryFromLayer(layer, nil, filepath.Join(t.TempDir(), "out"), map[string]bool{})
 	if err != nil {
 		t.Fatalf("extract: %v", err)
 	}
 	if found {
 		t.Error("expected found=false for empty searchPaths")
+	}
+}
+
+func TestExtractBinaryFromLayer_RespectsWhiteout(t *testing.T) {
+	// A whiteout from a newer layer blocks extraction of /usr/bin/tool
+	// from this (older) layer.
+	entries := []tar.Header{
+		{Name: "usr/bin/tool", Typeflag: tar.TypeReg, Mode: 0755},
+	}
+	contents := map[string][]byte{"usr/bin/tool": []byte("stale")}
+	layer := fakeLayer(t, entries, contents)
+
+	dest := filepath.Join(t.TempDir(), "out")
+	whiteouts := map[string]bool{"/usr/bin/tool": true}
+	found, err := extractBinaryFromLayer(layer, []string{"/usr/bin/tool"}, dest, whiteouts)
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if found {
+		t.Error("whiteout from newer layer should block extraction")
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Error("dest should not be created when path is whited out")
+	}
+}
+
+func TestExtractBinaryFromLayer_RecordsWhiteouts(t *testing.T) {
+	// A whiteout marker in this layer populates the shared map so older
+	// layers skip that path.
+	entries := []tar.Header{
+		{Name: "usr/bin/.wh.deleted", Typeflag: tar.TypeReg, Mode: 0644},
+		{Name: "opt/.wh..wh..opq", Typeflag: tar.TypeReg, Mode: 0644},
+	}
+	layer := fakeLayer(t, entries, nil)
+
+	whiteouts := map[string]bool{}
+	_, err := extractBinaryFromLayer(layer, []string{"/nope"}, filepath.Join(t.TempDir(), "out"), whiteouts)
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if !whiteouts["/usr/bin/deleted"] {
+		t.Errorf("expected /usr/bin/deleted to be whited out, got %v", whiteouts)
+	}
+	if !whiteouts["/opt/"] {
+		t.Errorf("expected /opt/ opaque marker, got %v", whiteouts)
+	}
+}
+
+func TestExtractBinaryFromLayer_OpaqueDirBlocksDescendant(t *testing.T) {
+	// An opaque-dir whiteout on "/usr/local/bin/" should block extraction of
+	// /usr/local/bin/tool from an older layer.
+	entries := []tar.Header{
+		{Name: "usr/local/bin/tool", Typeflag: tar.TypeReg, Mode: 0755},
+	}
+	layer := fakeLayer(t, entries, map[string][]byte{"usr/local/bin/tool": []byte("x")})
+
+	whiteouts := map[string]bool{"/usr/local/bin/": true}
+	found, err := extractBinaryFromLayer(layer, []string{"/usr/local/bin/tool"}, filepath.Join(t.TempDir(), "out"), whiteouts)
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if found {
+		t.Error("opaque-dir whiteout should block extraction of descendants")
 	}
 }

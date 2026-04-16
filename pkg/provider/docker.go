@@ -32,7 +32,7 @@ func (d *Docker) FetchRelease(ref, version string) (*Release, error) {
 
 // Install pulls the image, creates a container, copies the binary out, and cleans up.
 // searchPaths are the paths to search for the binary inside the container.
-// If the ref includes "::<path>", that path is used as the single search path.
+// If the ref includes ":/<path>", that path is used as the single search path.
 func (d *Docker) Install(ref, version, destDir string, searchPaths []string) (string, error) {
 	runtime, err := detectContainerRuntime()
 	if err != nil {
@@ -67,7 +67,7 @@ func (d *Docker) Install(ref, version, destDir string, searchPaths []string) (st
 	containerID := strings.TrimSpace(string(out))
 	defer exec.Command(runtime, "rm", containerID).Run()
 
-	// Determine search paths: explicit "::<path>" overrides everything.
+	// Determine search paths: explicit ":/<path>" overrides everything.
 	if inContainerPath != "" {
 		searchPaths = []string{inContainerPath}
 	} else if searchPaths == nil {

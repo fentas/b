@@ -161,7 +161,7 @@ The syntax is: `<docker://|oci://><image>[@<tag>][:/<path-in-image>]`
 - **tag** (optional, after `@`) — Image tag; defaults to `latest`. Use `@` consistently with every other `b` provider rather than docker's native `image:tag` syntax
 - **path** (optional, after `:/`) — Absolute path to the binary inside the image. When omitted, `b` searches `/usr/local/bin`, `/usr/bin`, `/bin`, and `/app` for a file named after the image's last segment
 
-The leading `/` on the path disambiguates it from an `image:tag` pasted from docker documentation. For private registries, `oci://` reads credentials from `~/.docker/config.json` (same as `docker login`); see the [authentication](../authentication) page.
+The leading `/` on the path disambiguates it from an `image:tag` pasted from docker documentation. For private registries, `oci://` reads credentials from `~/.docker/config.json` (same as `docker login`); see the [authentication](/authentication) page.
 
 ## Flags
 

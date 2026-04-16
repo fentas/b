@@ -25,7 +25,7 @@ func init() {
 //
 // Syntax:
 //
-//	oci://<image>[@<tag>][:<path-in-image>]
+//	oci://<image>[@<tag>][:/<path-in-image>]
 //
 // Examples:
 //
@@ -108,9 +108,11 @@ func (o *OCI) Install(ref, version, destDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("reading layers: %w", err)
 	}
-	// Walk layers newest-first so later overrides win.
+	// Walk layers newest-first so later overrides win. Track OCI whiteouts
+	// from newer layers so we don't resurrect a file deleted in the final image.
+	whiteouts := make(map[string]bool)
 	for i := len(layers) - 1; i >= 0; i-- {
-		found, err := extractBinaryFromLayer(layers[i], searchPaths, dest)
+		found, err := extractBinaryFromLayer(layers[i], searchPaths, dest, whiteouts)
 		if err != nil {
 			return "", err
 		}
@@ -129,7 +131,11 @@ func (o *OCI) Install(ref, version, destDir string) (string, error) {
 // searchPaths. Returns true (and writes to dest) when a match is found.
 // Earlier entries in searchPaths take priority; once a higher-priority match
 // is found, the scan stops.
-func extractBinaryFromLayer(l v1.Layer, searchPaths []string, dest string) (bool, error) {
+//
+// whiteouts tracks OCI whiteout markers (".wh.<name>", ".wh..wh..opq") seen
+// in newer layers so deleted files aren't resurrected from older ones. The
+// map is updated in-place with whiteouts discovered in this layer.
+func extractBinaryFromLayer(l v1.Layer, searchPaths []string, dest string, whiteouts map[string]bool) (bool, error) {
 	if len(searchPaths) == 0 {
 		return false, nil
 	}
@@ -166,11 +172,26 @@ func extractBinaryFromLayer(l v1.Layer, searchPaths []string, dest string) (bool
 			cleanup()
 			return false, fmt.Errorf("reading tar: %w", err)
 		}
+
+		name := path.Clean("/" + strings.TrimPrefix(hdr.Name, "/"))
+		base := path.Base(name)
+
+		// Record whiteouts from this (newer-than-caller) layer so older
+		// layers are prevented from resurrecting deleted paths.
+		if base == ".wh..wh..opq" {
+			// Opaque dir: everything in its parent is hidden from older layers.
+			whiteouts[path.Dir(name)+"/"] = true
+			continue
+		}
+		if strings.HasPrefix(base, ".wh.") {
+			whiteouts[path.Join(path.Dir(name), strings.TrimPrefix(base, ".wh."))] = true
+			continue
+		}
+
 		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-		normalized := path.Clean("/" + strings.TrimPrefix(hdr.Name, "/"))
-		priority, ok := targets[normalized]
+		priority, ok := targets[name]
 		if !ok || priority >= bestPriority {
 			continue
 		}
@@ -204,9 +225,45 @@ func extractBinaryFromLayer(l v1.Layer, searchPaths []string, dest string) (bool
 	if tmpPath == "" {
 		return false, nil
 	}
+	// If a newer layer whited out this path (or an ancestor directory
+	// opaque-marker), don't use the file we found here.
+	if isWhiteoutBlocked(findMatchedPath(searchPaths, bestPriority), whiteouts) {
+		cleanup()
+		return false, nil
+	}
 	if err := os.Rename(tmpPath, dest); err != nil {
 		_ = os.Remove(tmpPath)
 		return false, fmt.Errorf("moving extracted file into place: %w", err)
 	}
 	return true, nil
+}
+
+// findMatchedPath returns the searchPaths entry at the given priority index,
+// normalised to absolute form.
+func findMatchedPath(searchPaths []string, priority int) string {
+	if priority < 0 || priority >= len(searchPaths) {
+		return ""
+	}
+	return path.Clean("/" + strings.TrimPrefix(searchPaths[priority], "/"))
+}
+
+// isWhiteoutBlocked reports whether target (or any ancestor dir marked opaque)
+// has been whited out by a newer layer.
+func isWhiteoutBlocked(target string, whiteouts map[string]bool) bool {
+	if target == "" || len(whiteouts) == 0 {
+		return false
+	}
+	if whiteouts[target] {
+		return true
+	}
+	// Walk ancestor directories to honour opaque whiteouts stored as "dir/".
+	for dir := path.Dir(target); dir != "/" && dir != "."; dir = path.Dir(dir) {
+		if whiteouts[dir+"/"] {
+			return true
+		}
+	}
+	if whiteouts["/"] {
+		return true
+	}
+	return false
 }

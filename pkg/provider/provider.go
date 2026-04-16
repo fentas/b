@@ -54,7 +54,7 @@ func Detect(ref string) (Provider, error) {
 // ParseRef splits a ref like "github.com/org/repo@v1.0" into
 // (github.com/org/repo, v1.0). Version may be empty.
 //
-// For docker:///oci:// refs, the optional ":<in-container-path>" suffix
+// For docker:// or oci:// refs, the optional ":/<in-container-path>" suffix
 // is preserved on base (stripped only for the @ scan), and the tag ends
 // up in version. E.g. "docker://docker@cli:/usr/local/bin/docker" →
 // ("docker://docker:/usr/local/bin/docker", "cli"). The path is recognised
@@ -91,14 +91,14 @@ func SplitImagePath(ref string) (imagePart, pathPart string) {
 	return ref, ""
 }
 
-// ParseImageRef parses a docker://oci:// ref into (image, tag, path).
+// ParseImageRef parses a docker:// or oci:// ref into (image, tag, path).
 //
-//	docker://alpine                             → ("alpine", "", "")
-//	docker://alpine@3.19                        → ("alpine", "3.19", "")
-//	docker://docker@cli:/usr/local/bin/docker   → ("docker", "cli", "/usr/local/bin/docker")
-//	oci://ghcr.io/org/img@v1:/bin/tool          → ("ghcr.io/org/img", "v1", "/bin/tool")
+//	alpine                             → ("alpine", "", "")
+//	alpine@3.19                        → ("alpine", "3.19", "")
+//	docker@cli:/usr/local/bin/docker   → ("docker", "cli", "/usr/local/bin/docker")
+//	ghcr.io/org/img@v1:/bin/tool       → ("ghcr.io/org/img", "v1", "/bin/tool")
 //
-// The prefix (docker://oci://) must already be stripped.
+// The prefix (docker:// or oci://) must already be stripped.
 func ParseImageRef(ref string) (image, tag, inContainerPath string) {
 	imagePart, pathPart := SplitImagePath(ref)
 	if pathPart != "" {
