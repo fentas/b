@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.15.0](https://github.com/fentas/b/compare/v4.14.1...v4.15.0) (2026-04-16)
+
+
+### Features
+
+* **provider:** daemonless oci:// + ::&lt;path&gt; for custom binary location ([#143](https://github.com/fentas/b/issues/143)) ([6fc80e6](https://github.com/fentas/b/commit/6fc80e615d1f2ddc09d3e1cc6d2b1cc6fbfff220))
+
 ## [4.14.1](https://github.com/fentas/b/compare/v4.14.0...v4.14.1) (2026-04-12)
 
 
