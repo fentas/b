@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.16.0](https://github.com/fentas/b/compare/v4.15.1...v4.16.0) (2026-04-16)
+
+
+### Features
+
+* **update:** digest-based re-pull detection for docker:// / oci:// ([#151](https://github.com/fentas/b/issues/151)) ([5ba7ab9](https://github.com/fentas/b/commit/5ba7ab95718d4fda646acd36914cd6283a6fe991))
+
+
+### Bug Fixes
+
+* **preset,binary:** argsh update stuck at old version ([#152](https://github.com/fentas/b/issues/152)) ([5942730](https://github.com/fentas/b/commit/59427303c3242cbbced91cd53ba438cb7f907e80))
+* **state:** preserve 'version:' on b.yaml round-trip (--fix, oci:// tags) ([#149](https://github.com/fentas/b/issues/149)) ([dbdc3a5](https://github.com/fentas/b/commit/dbdc3a51c2d1b3286a0bbc0b89868ddd687a752b))
+* **state:** preserve unknown YAML keys in b.yaml on save ([#148](https://github.com/fentas/b/issues/148)) ([d0250c0](https://github.com/fentas/b/commit/d0250c0bee8530e884b08fc036e4396a46af0cf3))
+
 ## [4.15.1](https://github.com/fentas/b/compare/v4.15.0...v4.15.1) (2026-04-16)
 
 
