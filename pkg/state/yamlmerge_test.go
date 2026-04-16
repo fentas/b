@@ -376,7 +376,21 @@ func TestManagedKey_MatchesMarshalOutput(t *testing.T) {
 	}
 	// binMarshal is map[string]interface{}: {"tool": {"version":..., "alias":..., ...}}
 	// Emitted keys must be managed at path [binaries, <name>].
-	binEntry, _ := binMarshal.(map[string]interface{})["tool"].(map[string]string)
+	binRoot, ok := binMarshal.(map[string]interface{})
+	if !ok {
+		t.Fatalf("BinaryList.MarshalYAML returned %T, want map[string]interface{}", binMarshal)
+	}
+	binEntryAny, ok := binRoot["tool"]
+	if !ok {
+		t.Fatalf("BinaryList.MarshalYAML did not emit 'tool' entry: %v", binRoot)
+	}
+	binEntry, ok := binEntryAny.(map[string]string)
+	if !ok {
+		t.Fatalf("BinaryList.MarshalYAML 'tool' entry is %T, want map[string]string", binEntryAny)
+	}
+	if len(binEntry) == 0 {
+		t.Fatal("BinaryList.MarshalYAML emitted an empty 'tool' entry — drift guard would silently pass")
+	}
 	for key := range binEntry {
 		if !managedKey([]string{"binaries", "tool"}, key) {
 			t.Errorf("managedKey([binaries tool], %q) = false — marshaler emits this key but predicate doesn't manage it", key)
@@ -401,7 +415,21 @@ func TestManagedKey_MatchesMarshalOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnvList.MarshalYAML: %v", err)
 	}
-	envEntry, _ := envMarshal.(map[string]interface{})["github.com/org/infra"].(map[string]interface{})
+	envRoot, ok := envMarshal.(map[string]interface{})
+	if !ok {
+		t.Fatalf("EnvList.MarshalYAML returned %T, want map[string]interface{}", envMarshal)
+	}
+	envEntryAny, ok := envRoot["github.com/org/infra"]
+	if !ok {
+		t.Fatalf("EnvList.MarshalYAML did not emit 'github.com/org/infra' entry: %v", envRoot)
+	}
+	envEntry, ok := envEntryAny.(map[string]interface{})
+	if !ok {
+		t.Fatalf("EnvList.MarshalYAML entry is %T, want map[string]interface{}", envEntryAny)
+	}
+	if len(envEntry) == 0 {
+		t.Fatal("EnvList.MarshalYAML emitted an empty entry — drift guard would silently pass")
+	}
 	for key := range envEntry {
 		if !managedKey([]string{"envs", "github.com/org/infra"}, key) {
 			t.Errorf("managedKey([envs <name>], %q) = false — marshaler emits this key", key)
