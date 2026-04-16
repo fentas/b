@@ -364,6 +364,77 @@ func TestResolveAmbiguousAssets_Interactive_PersistsChoice(t *testing.T) {
 	}
 }
 
+// TestResolveAmbiguousAssets_Interactive_EOFDoesNotPersist verifies that
+// when the user closes stdin without picking (EOF), the default pick is
+// used for this run but NOT persisted to AssetFilter.
+func TestResolveAmbiguousAssets_Interactive_EOFDoesNotPersist(t *testing.T) {
+	origTTY := isTTYFunc
+	isTTYFunc = func() bool { return true }
+	defer func() { isTTYFunc = origTTY }()
+
+	origStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin; r.Close() }()
+	w.Close() // EOF immediately — no input
+
+	b := &binary.Binary{
+		Name:        "tool",
+		AutoDetect:  true,
+		ProviderRef: "faketruetie://org/unique",
+		Version:     "v1.0.0",
+	}
+	out := &streams.IO{Out: &discardWriter{}, ErrOut: &discardWriter{}}
+	resolveAmbiguousAssets([]*binary.Binary{b}, false, out)
+
+	if b.ResolvedAsset == nil {
+		t.Fatal("expected ResolvedAsset to be set to default on EOF")
+	}
+	if b.AssetFilter != "" {
+		t.Errorf("EOF must not persist: AssetFilter = %q", b.AssetFilter)
+	}
+}
+
+// TestResolveAmbiguousAssets_Interactive_InvalidChoiceDoesNotPersist covers
+// the case where the user types a non-numeric or out-of-range value — the
+// default is used but not persisted.
+func TestResolveAmbiguousAssets_Interactive_InvalidChoiceDoesNotPersist(t *testing.T) {
+	origTTY := isTTYFunc
+	isTTYFunc = func() bool { return true }
+	defer func() { isTTYFunc = origTTY }()
+
+	origStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin; r.Close() }()
+	go func() {
+		fmt.Fprintln(w, "nope")
+		w.Close()
+	}()
+
+	b := &binary.Binary{
+		Name:        "tool",
+		AutoDetect:  true,
+		ProviderRef: "faketruetie://org/unique",
+		Version:     "v1.0.0",
+	}
+	out := &streams.IO{Out: &discardWriter{}, ErrOut: &discardWriter{}}
+	resolveAmbiguousAssets([]*binary.Binary{b}, false, out)
+
+	if b.ResolvedAsset == nil {
+		t.Fatal("expected ResolvedAsset to be set to default on invalid input")
+	}
+	if b.AssetFilter != "" {
+		t.Errorf("invalid input must not persist: AssetFilter = %q", b.AssetFilter)
+	}
+}
+
 // TestEscapeAssetGlob verifies that glob metacharacters in asset filenames
 // are escaped so filepath.Match treats the persisted AssetFilter as a
 // literal name on subsequent runs.
