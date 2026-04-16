@@ -29,11 +29,14 @@ func managedKey(path []string, key string) bool {
 		}
 		return false
 	case 2:
-		// Two levels in — individual entry fields.
+		// Two levels in — individual entry fields. Only keys actually
+		// emitted by BinaryList/EnvList MarshalYAML are managed; any
+		// other key here (e.g. a user-owned 'groups:' or 'owner:') is
+		// preserved verbatim.
 		switch path[0] {
 		case "binaries":
 			switch key {
-			case "version", "alias", "file", "asset", "latest", "enforced":
+			case "version", "alias", "file", "asset":
 				return true
 			}
 			return false
@@ -115,10 +118,11 @@ func mergeMappings(dst, src *yaml.Node) {
 	mergeMappingsAt(dst, src, func(_ []string, _ string) bool { return true })
 }
 
-// mergeMappingsAt is the schema-aware variant. path is the key-path from the
-// file root to dst; it's extended on recursion. managed decides whether a
-// dst-only key should be removed — callers pass managedKey (or nil, which
-// maps to the schema-aware default) so unknown user fields survive the save.
+// mergeMappingsAt is the schema-aware variant. It starts the merge at the
+// document root (i.e. with an empty path). On recursion the path grows by
+// the key being descended into. The managed predicate decides whether a
+// dst-only key should be removed — pass nil to use the default managedKey
+// so unknown user fields survive the save.
 func mergeMappingsAt(dst, src *yaml.Node, managed func(path []string, key string) bool) {
 	if dst.Kind != yaml.MappingNode || src.Kind != yaml.MappingNode {
 		return

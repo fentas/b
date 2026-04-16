@@ -197,14 +197,27 @@ groups:
 	}
 	got := string(result)
 
-	if !strings.Contains(got, "kubectl") {
-		t.Errorf("expected newly added binary 'kubectl', got:\n%s", got)
+	// Parse the saved file so assertions are structural — "kubectl"
+	// appears both in the 'groups:' list and under 'binaries:', so a
+	// flat Contains check would pass even if the fix regressed.
+	var saved struct {
+		Binaries map[string]interface{} `yaml:"binaries"`
+		Groups   map[string]interface{} `yaml:"groups"`
 	}
-	if !strings.Contains(got, "groups:") {
+	if err := yaml.Unmarshal(result, &saved); err != nil {
+		t.Fatalf("unmarshal saved yaml: %v\n%s", err, got)
+	}
+	if _, ok := saved.Binaries["kubectl"]; !ok {
+		t.Errorf("expected newly added binary 'kubectl' under binaries:, got:\n%s", got)
+	}
+	if len(saved.Groups) == 0 {
 		t.Errorf("top-level 'groups:' was wiped by SaveConfig, got:\n%s", got)
 	}
-	if !strings.Contains(got, "- jq") || !strings.Contains(got, "- kubectl") {
-		t.Errorf("'groups' nested content was not preserved, got:\n%s", got)
+	if _, ok := saved.Groups["core"]; !ok {
+		t.Errorf("'groups.core' nested content was not preserved, got:\n%s", got)
+	}
+	if _, ok := saved.Groups["optional"]; !ok {
+		t.Errorf("'groups.optional' nested content was not preserved, got:\n%s", got)
 	}
 }
 
@@ -245,14 +258,33 @@ func TestSaveConfig_PreservesUnknownBinaryFields(t *testing.T) {
 	}
 	got := string(result)
 
-	if !strings.Contains(got, "yq") {
-		t.Errorf("expected newly added binary 'yq', got:\n%s", got)
+	// Parse the saved file structurally so we assert the fields live in
+	// the right place — a flat Contains would pass for a stray top-level
+	// 'groups:' block even if the per-binary field was wiped.
+	var saved struct {
+		Binaries map[string]map[string]interface{} `yaml:"binaries"`
 	}
-	// Custom per-binary fields must survive a round-trip through SaveConfig.
-	if !strings.Contains(got, "groups:") {
-		t.Errorf("per-binary 'groups' field was wiped, got:\n%s", got)
+	if err := yaml.Unmarshal(result, &saved); err != nil {
+		t.Fatalf("unmarshal saved yaml: %v\n%s", err, got)
 	}
-	if !strings.Contains(got, "owner: platform-team") {
-		t.Errorf("per-binary 'owner' field was wiped, got:\n%s", got)
+	if _, ok := saved.Binaries["yq"]; !ok {
+		t.Errorf("expected newly added binary 'yq' under binaries:, got:\n%s", got)
+	}
+	jq, ok := saved.Binaries["jq"]
+	if !ok {
+		t.Fatalf("jq entry missing from saved file, got:\n%s", got)
+	}
+	if _, ok := jq["groups"]; !ok {
+		t.Errorf("per-binary 'jq.groups' was wiped, got:\n%s", got)
+	}
+	if owner, _ := jq["owner"].(string); owner != "platform-team" {
+		t.Errorf("per-binary 'jq.owner' was wiped or changed, got %q\nfull:\n%s", owner, got)
+	}
+	kubectl, ok := saved.Binaries["kubectl"]
+	if !ok {
+		t.Fatalf("kubectl entry missing from saved file, got:\n%s", got)
+	}
+	if _, ok := kubectl["groups"]; !ok {
+		t.Errorf("per-binary 'kubectl.groups' was wiped, got:\n%s", got)
 	}
 }
