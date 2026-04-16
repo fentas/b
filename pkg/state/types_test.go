@@ -318,6 +318,8 @@ func TestCreateDefaultConfig(t *testing.T) {
 
 func TestBinaryListMarshalYAML(t *testing.T) {
 	list := BinaryList{
+		// Enforced-only entries now serialize as 'enforced:' (not 'version:')
+		// so --fix pins round-trip correctly instead of being lost.
 		{Name: "jq", Enforced: "jq-1.7"},
 		{Name: "envsubst", Alias: "renvsubst"},
 		{Name: "kubectl", File: "/usr/local/bin/kubectl"},
@@ -334,13 +336,16 @@ func TestBinaryListMarshalYAML(t *testing.T) {
 		t.Fatal("expected map result")
 	}
 
-	// jq should have version
+	// jq should have enforced (not version — those are distinct now)
 	jqCfg, ok := m["jq"].(map[string]string)
 	if !ok {
 		t.Fatal("jq config should be map[string]string")
 	}
-	if jqCfg["version"] != "jq-1.7" {
-		t.Errorf("jq version = %q, want %q", jqCfg["version"], "jq-1.7")
+	if jqCfg["enforced"] != "jq-1.7" {
+		t.Errorf("jq enforced = %q, want %q", jqCfg["enforced"], "jq-1.7")
+	}
+	if jqCfg["version"] != "" {
+		t.Errorf("jq version = %q, want empty (Enforced shouldn't leak into version)", jqCfg["version"])
 	}
 
 	// envsubst should have alias
@@ -549,8 +554,9 @@ func TestBinaryListMarshalYAML_WithAsset(t *testing.T) {
 	if !strings.Contains(s, "asset: argsh-so-*") {
 		t.Errorf("marshal output missing asset field:\n%s", s)
 	}
-	if !strings.Contains(s, "version: v1.0.0") {
-		t.Errorf("marshal output missing version field:\n%s", s)
+	// Enforced now serializes as 'enforced:' not 'version:'.
+	if !strings.Contains(s, "enforced: v1.0.0") {
+		t.Errorf("marshal output missing enforced field:\n%s", s)
 	}
 }
 
