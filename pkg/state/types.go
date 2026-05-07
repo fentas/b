@@ -372,6 +372,11 @@ func (list *BinaryList) MarshalYAML() (interface{}, error) {
 				config["asset"] = b.Asset
 			}
 
+			// Add post-install/update hook
+			if b.OnPost != "" {
+				config["onPost"] = b.OnPost
+			}
+
 			// If we have any configuration, use it; otherwise use empty struct
 			if len(config) > 0 {
 				result[b.Name] = config

@@ -563,6 +563,32 @@ func TestBinaryListMarshalYAML_WithAsset(t *testing.T) {
 	}
 }
 
+func TestBinaryListMarshalYAML_OnPostRoundTrip(t *testing.T) {
+	list := BinaryList{
+		{Name: "github.com/arg-sh/argsh", OnPost: "argsh builtin ${B_EVENT}"},
+	}
+	data, err := yaml.Marshal(&list)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "onPost:") {
+		t.Errorf("marshal output missing onPost field:\n%s", s)
+	}
+
+	// Unmarshal and verify round-trip.
+	var list2 BinaryList
+	if err := yaml.Unmarshal(data, &list2); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(list2) != 1 {
+		t.Fatalf("got %d binaries, want 1", len(list2))
+	}
+	if list2[0].OnPost != "argsh builtin ${B_EVENT}" {
+		t.Errorf("onPost = %q, want %q", list2[0].OnPost, "argsh builtin ${B_EVENT}")
+	}
+}
+
 func TestBinaryListUnmarshalYAML_NilBinary(t *testing.T) {
 	input := `
 terraform:

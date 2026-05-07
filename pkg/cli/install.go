@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -40,6 +41,7 @@ type InstallOptions struct {
 	Fix               bool             // Pin version in b.yaml
 	Alias             string           // Alias for the binary
 	Asset             string           // Asset filter glob pattern
+	OnPost            string           // Shell command to run after install/update
 	specifiedBinaries []*binary.Binary // Binaries specified on command line
 	envInstalls       []envInstall     // SCP-style env installs
 	configEnvRefs     []string         // env refs to sync from config
@@ -93,6 +95,7 @@ func NewInstallCmd(shared *SharedOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&o.Fix, "fix", false, "Pin the specified version in b.yaml")
 	cmd.Flags().StringVar(&o.Alias, "alias", "", "Alias for the binary")
 	cmd.Flags().StringVar(&o.Asset, "asset", "", "Glob pattern to filter release assets (e.g. \"argsh-so-*\")")
+	cmd.Flags().StringVar(&o.OnPost, "on-post", "", "Shell command to run after install/update (saved to b.yaml with --add)")
 	return cmd
 }
 
@@ -148,6 +151,9 @@ func (o *InstallOptions) Complete(args []string) error {
 		b.Alias = o.Alias
 		if o.Asset != "" {
 			b.AssetFilter = o.Asset
+		}
+		if o.OnPost != "" {
+			b.OnPost = o.OnPost
 		}
 		o.specifiedBinaries = append(o.specifiedBinaries, b)
 	}
@@ -258,6 +264,13 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 				err = b.EnsureBinary(false) // Don't update, just ensure
 			}
 
+			// Run onPost hook after a successful download.
+			if err == nil && b.OnPost != "" {
+				if hookErr := binary.RunHook(b.OnPost, o.ProjectRoot(), "install", b.Name, b.Version, b.BinaryPath(), os.Stdout, os.Stderr); hookErr != nil {
+					fmt.Fprintf(o.IO.ErrOut, "Warning: onPost hook for %s failed: %v\n", b.Name, hookErr)
+				}
+			}
+
 			name := b.Name
 			if b.Alias != "" {
 				name = b.Alias + " (" + color.New(color.FgYellow).Sprint(b.Name) + ")"
@@ -330,6 +343,9 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 			}
 			if b.AssetFilter != "" {
 				entry.Asset = b.AssetFilter
+			}
+			if o.OnPost != "" {
+				entry.OnPost = o.OnPost
 			}
 			config.Binaries = append(config.Binaries, entry)
 		}

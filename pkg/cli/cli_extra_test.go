@@ -1374,6 +1374,36 @@ func TestAddToConfig_WithAlias(t *testing.T) {
 	}
 }
 
+func TestAddToConfig_WithOnPost(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, ".bin", "b.yaml")
+
+	o := &InstallOptions{
+		SharedOptions: &SharedOptions{
+			IO:               &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}},
+			ConfigPath:       configPath,
+			loadedConfigPath: configPath,
+			Config:           &state.State{},
+		},
+		OnPost: "argsh builtin ${B_EVENT}",
+	}
+
+	binaries := []*binary.Binary{
+		{Name: "argsh", AutoDetect: true, ProviderRef: "github.com/arg-sh/argsh"},
+	}
+	if err := o.addToConfig(binaries); err != nil {
+		t.Fatalf("addToConfig() error = %v", err)
+	}
+
+	cfg, _ := state.LoadConfigFromPath(configPath)
+	if len(cfg.Binaries) != 1 {
+		t.Fatalf("got %d binaries, want 1", len(cfg.Binaries))
+	}
+	if cfg.Binaries[0].OnPost != "argsh builtin ${B_EVENT}" {
+		t.Errorf("onPost = %q, want %q", cfg.Binaries[0].OnPost, "argsh builtin ${B_EVENT}")
+	}
+}
+
 // --- addEnvToConfig tests ---
 
 func TestAddEnvToConfig_New(t *testing.T) {

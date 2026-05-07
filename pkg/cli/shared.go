@@ -105,6 +105,9 @@ func (o *SharedOptions) resolveBinary(lb *binary.LocalBinary) (*binary.Binary, b
 		if lb.File != "" {
 			b.File = lb.File
 		}
+		if lb.OnPost != "" {
+			b.OnPost = lb.OnPost
+		}
 	}
 
 	return b, ok
@@ -162,6 +165,9 @@ func (o *SharedOptions) GetBinary(name string) (*binary.Binary, bool) {
 			if configEntry.Asset != "" {
 				b.AssetFilter = configEntry.Asset
 			}
+			if configEntry.OnPost != "" {
+				b.OnPost = configEntry.OnPost
+			}
 		}
 		return b, true
 	}
@@ -199,6 +205,9 @@ func (o *SharedOptions) GetBinariesFromConfig() []*binary.Binary {
 			}
 			if lb.Asset != "" {
 				b.AssetFilter = lb.Asset
+			}
+			if lb.OnPost != "" {
+				b.OnPost = lb.OnPost
 			}
 			result = append(result, b)
 		} else if b, ok := o.resolveBinary(lb); ok {

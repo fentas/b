@@ -927,6 +927,13 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 			downloadFailed[b.Name] = attempted && err != nil
 			outcomeMu.Unlock()
 
+			// Run onPost hook after a successful update.
+			if err == nil && b.OnPost != "" {
+				if hookErr := binary.RunHook(b.OnPost, o.ProjectRoot(), "update", b.Name, b.Version, b.BinaryPath(), os.Stdout, os.Stderr); hookErr != nil {
+					fmt.Fprintf(o.IO.ErrOut, "Warning: onPost hook for %s failed: %v\n", b.Name, hookErr)
+				}
+			}
+
 			doneLabel := name + " updated"
 			if b.Alias != "" {
 				doneLabel = b.Alias + " (" + color.New(color.FgYellow).Sprint(b.Name) + ") updated"
