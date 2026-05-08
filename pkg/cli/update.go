@@ -921,15 +921,21 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 				// EnsureBinary's internal skip check may or may not
 				// download; treat it as "attempted" only on error so a
 				// failed preset update doesn't poison the lock either.
-				preSHA := ""
-				if h, shaErr := lock.SHA256File(b.BinaryPath()); shaErr == nil {
-					preSHA = h
+				// Only hash pre/post when a hook might run — avoids
+				// O(file-size) work when there's no onPost hook.
+				var beforeHash string
+				if b.OnPost != "" && !o.effectiveDryRun() {
+					if h, shaErr := lock.SHA256File(b.BinaryPath()); shaErr == nil {
+						beforeHash = h
+					}
 				}
 				err = b.EnsureBinary(true)
 				if err != nil {
 					attempted = true
-				} else if postSHA, shaErr := lock.SHA256File(b.BinaryPath()); shaErr == nil {
-					downloaded = preSHA != postSHA
+				} else if beforeHash != "" {
+					if afterHash, shaErr := lock.SHA256File(b.BinaryPath()); shaErr == nil {
+						downloaded = beforeHash != afterHash
+					}
 				}
 			}
 			outcomeMu.Lock()
