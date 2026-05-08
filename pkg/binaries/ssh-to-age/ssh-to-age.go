@@ -3,20 +3,13 @@ package sshtoage
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"runtime"
+	"strings"
 
 	"github.com/fentas/b/pkg/binaries"
 	"github.com/fentas/b/pkg/binary"
 )
-
-// workaround for version lookup
-// wait for fix https://github.com/Mic92/ssh-to-age/issues/180
-// or get binary sha https://github.com/fentas/b/issues/76
-var versions = map[string]string{
-	"73513156cc8821915ff96b83a9a5780a2993199497c2a3106795de1c54429578": "1.2.0",
-}
 
 func Binary(options *binaries.BinaryOptions) *binary.Binary {
 	if options == nil {
@@ -35,20 +28,17 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 		VersionF:   binary.GithubLatest,
 		IsTarGz:    false,
 		VersionLocalF: func(b *binary.Binary) (string, error) {
-			s, err := b.Exec("-h")
+			// ssh-to-age -version prints a bare version like "1.2.0".
+			// GithubLatest returns "v1.2.0", so prepend "v" for comparison.
+			s, err := b.Exec("-version")
 			if err != nil {
 				return "", err
 			}
-			// create hash from output
-			hash := sha256.New()
-			if _, err := hash.Write([]byte(s)); err != nil {
-				return "", err
+			v := strings.TrimSpace(s)
+			if v != "" && !strings.HasPrefix(v, "v") {
+				v = "v" + v
 			}
-			v := fmt.Sprintf("%x", hash.Sum(nil))
-			if _, ok := versions[v]; !ok {
-				return v, nil
-			}
-			return versions[v], nil
+			return v, nil
 		},
 	}
 }
