@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -40,6 +41,12 @@ func TestRunHook_NonZeroExitReturnsError(t *testing.T) {
 
 func TestRunHook_RunsInDir(t *testing.T) {
 	tmp := t.TempDir()
+	// Resolve symlinks so the comparison works on macOS where
+	// /var → /private/var and t.TempDir() returns the unresolved path.
+	realTmp, err := filepath.EvalSymlinks(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
 	out := filepath.Join(tmp, "pwd.txt")
 	cmd := "pwd > " + out
 	if err := RunHook(cmd, tmp, "install", "x", "v1", "/x", nil, nil); err != nil {
@@ -49,9 +56,9 @@ func TestRunHook_RunsInDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := string(data)
-	if got[:len(got)-1] != tmp {
-		t.Errorf("hook ran in %q, want %q", got, tmp)
+	got := strings.TrimSpace(string(data))
+	if got != realTmp {
+		t.Errorf("hook ran in %q, want %q", got, realTmp)
 	}
 }
 
