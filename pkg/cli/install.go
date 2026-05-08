@@ -40,6 +40,7 @@ type InstallOptions struct {
 	Fix               bool             // Pin version in b.yaml
 	Alias             string           // Alias for the binary
 	Asset             string           // Asset filter glob pattern
+	OnPost            string           // Shell command to run after install/update
 	specifiedBinaries []*binary.Binary // Binaries specified on command line
 	envInstalls       []envInstall     // SCP-style env installs
 	configEnvRefs     []string         // env refs to sync from config
@@ -93,6 +94,7 @@ func NewInstallCmd(shared *SharedOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&o.Fix, "fix", false, "Pin the specified version in b.yaml")
 	cmd.Flags().StringVar(&o.Alias, "alias", "", "Alias for the binary")
 	cmd.Flags().StringVar(&o.Asset, "asset", "", "Glob pattern to filter release assets (e.g. \"argsh-so-*\")")
+	cmd.Flags().StringVar(&o.OnPost, "on-post", "", "Shell command to run after install/update (saved to b.yaml with --add)")
 	return cmd
 }
 
@@ -148,6 +150,9 @@ func (o *InstallOptions) Complete(args []string) error {
 		b.Alias = o.Alias
 		if o.Asset != "" {
 			b.AssetFilter = o.Asset
+		}
+		if o.OnPost != "" {
+			b.OnPost = o.OnPost
 		}
 		o.specifiedBinaries = append(o.specifiedBinaries, b)
 	}
@@ -251,11 +256,23 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 			b.Tracker = tracker
 			b.Writer = pw
 
+			// Track whether a download actually happened so we only run
+			// the onPost hook when the binary changed — not on a no-op
+			// "already exists" skip from EnsureBinary(false).
+			wasMissing := !b.BinaryExists()
 			var err error
 			if o.Force {
 				err = b.DownloadBinary()
 			} else {
 				err = b.EnsureBinary(false) // Don't update, just ensure
+			}
+			downloaded := err == nil && (o.Force || wasMissing)
+
+			// Run onPost hook only when a download actually happened.
+			if downloaded && b.OnPost != "" {
+				if hookErr := binary.RunHook(b.OnPost, o.ProjectRoot(), "install", b.Name, b.Version, b.BinaryPath(), o.IO.ErrOut, o.IO.ErrOut); hookErr != nil {
+					fmt.Fprintf(o.IO.ErrOut, "Warning: onPost hook for %s failed: %v\n", b.Name, hookErr)
+				}
 			}
 
 			name := b.Name
@@ -330,6 +347,9 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 			}
 			if b.AssetFilter != "" {
 				entry.Asset = b.AssetFilter
+			}
+			if b.OnPost != "" {
+				entry.OnPost = b.OnPost
 			}
 			config.Binaries = append(config.Binaries, entry)
 		}

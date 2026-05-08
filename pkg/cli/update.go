@@ -895,10 +895,12 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 
 			var err error
 			attempted := false
+			downloaded := false
 			switch {
 			case o.Force:
 				attempted = true
 				err = b.DownloadBinary()
+				downloaded = err == nil
 			case digestMatchesLock(b, lk, freshDigests[b.Name]) && b.BinaryExists():
 				// Manifest digest matches the locked one AND the binary
 				// is actually on disk: upstream hasn't moved since the
@@ -914,18 +916,51 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 				// otherwise keep the old binary for mutable tags like 'cli'.
 				attempted = true
 				err = b.DownloadBinary()
+				downloaded = err == nil
 			default:
 				// EnsureBinary's internal skip check may or may not
 				// download; treat it as "attempted" only on error so a
 				// failed preset update doesn't poison the lock either.
+				// Detect whether a download happened via two signals:
+				//   - binary was missing → any successful EnsureBinary
+				//     must have downloaded it
+				//   - binary existed → compare SHA before/after
+				// Only compute hashes when a hook might run — avoids
+				// O(file-size) work for binaries without hooks.
+				wasMissing := !b.BinaryExists()
+				var beforeHash string
+				needHookCheck := b.OnPost != "" && !o.effectiveDryRun()
+				if !wasMissing && needHookCheck {
+					beforeHash, _ = lock.SHA256File(b.BinaryPath())
+				}
 				err = b.EnsureBinary(true)
 				if err != nil {
 					attempted = true
+				} else if wasMissing {
+					downloaded = true
+				} else if needHookCheck {
+					// If we can't hash, assume the file changed — better
+					// to run the hook unnecessarily than silently skip it
+					// due to an unrelated I/O error.
+					afterHash, shaErr := lock.SHA256File(b.BinaryPath())
+					if shaErr != nil || beforeHash == "" {
+						downloaded = true
+					} else {
+						downloaded = beforeHash != afterHash
+					}
 				}
 			}
 			outcomeMu.Lock()
 			downloadFailed[b.Name] = attempted && err != nil
 			outcomeMu.Unlock()
+
+			// Run onPost hook only when a download actually changed the
+			// binary, and not in dry-run mode.
+			if downloaded && b.OnPost != "" && !o.effectiveDryRun() {
+				if hookErr := binary.RunHook(b.OnPost, o.ProjectRoot(), "update", b.Name, b.Version, b.BinaryPath(), o.IO.ErrOut, o.IO.ErrOut); hookErr != nil {
+					fmt.Fprintf(o.IO.ErrOut, "Warning: onPost hook for %s failed: %v\n", b.Name, hookErr)
+				}
+			}
 
 			doneLabel := name + " updated"
 			if b.Alias != "" {
