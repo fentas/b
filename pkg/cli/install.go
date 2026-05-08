@@ -270,7 +270,7 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 
 			// Run onPost hook only when a download actually happened.
 			if downloaded && b.OnPost != "" {
-				if hookErr := binary.RunHook(b.OnPost, o.ProjectRoot(), "install", b.Name, b.Version, b.BinaryPath(), o.IO.Out, o.IO.ErrOut); hookErr != nil {
+				if hookErr := binary.RunHook(b.OnPost, o.ProjectRoot(), "install", b.Name, b.Version, b.BinaryPath(), o.IO.ErrOut, o.IO.ErrOut); hookErr != nil {
 					fmt.Fprintf(o.IO.ErrOut, "Warning: onPost hook for %s failed: %v\n", b.Name, hookErr)
 				}
 			}
