@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.17.1](https://github.com/fentas/b/compare/v4.17.0...v4.17.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* **binary:** revert EnsureBinary unknown-version guard ([#152](https://github.com/fentas/b/issues/152) regression) ([#156](https://github.com/fentas/b/issues/156)) ([37428f4](https://github.com/fentas/b/commit/37428f4d8879d9ef3f35f071926f2f0221b1e8cb))
+* **preset:** disable tilt analytics during version check ([#158](https://github.com/fentas/b/issues/158)) ([f30b803](https://github.com/fentas/b/commit/f30b80386c2622a6433f0934253e5d3be2f95e34))
+
 ## [4.17.0](https://github.com/fentas/b/compare/v4.16.0...v4.17.0) (2026-05-08)
 
 
