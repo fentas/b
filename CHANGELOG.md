@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.17.0](https://github.com/fentas/b/compare/v4.16.0...v4.17.0) (2026-05-08)
+
+
+### Features
+
+* **binary:** onPost hook — runs after install/update ([#153](https://github.com/fentas/b/issues/153)) ([8c03360](https://github.com/fentas/b/commit/8c03360ab45edfe2eac331616300bc93e9811768))
+
 ## [4.16.0](https://github.com/fentas/b/compare/v4.15.1...v4.16.0) (2026-04-16)
 
 
