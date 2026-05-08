@@ -929,18 +929,23 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 				// O(file-size) work for binaries without hooks.
 				wasMissing := !b.BinaryExists()
 				var beforeHash string
-				if !wasMissing && b.OnPost != "" && !o.effectiveDryRun() {
-					if h, shaErr := lock.SHA256File(b.BinaryPath()); shaErr == nil {
-						beforeHash = h
-					}
+				needHookCheck := b.OnPost != "" && !o.effectiveDryRun()
+				if !wasMissing && needHookCheck {
+					beforeHash, _ = lock.SHA256File(b.BinaryPath())
 				}
 				err = b.EnsureBinary(true)
 				if err != nil {
 					attempted = true
 				} else if wasMissing {
 					downloaded = true
-				} else if beforeHash != "" {
-					if afterHash, shaErr := lock.SHA256File(b.BinaryPath()); shaErr == nil {
+				} else if needHookCheck {
+					// If we can't hash, assume the file changed — better
+					// to run the hook unnecessarily than silently skip it
+					// due to an unrelated I/O error.
+					afterHash, shaErr := lock.SHA256File(b.BinaryPath())
+					if shaErr != nil || beforeHash == "" {
+						downloaded = true
+					} else {
 						downloaded = beforeHash != afterHash
 					}
 				}
