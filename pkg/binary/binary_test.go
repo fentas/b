@@ -258,46 +258,33 @@ func TestBinary_EnsureBinary_UpdateUpToDate(t *testing.T) {
 	}
 }
 
-// TestBinary_EnsureBinary_UpdateWhenLocalVersionUnknown guards against a
-// regression where a preset whose VersionLocalF errored (e.g. the binary
-// doesn't support the expected subcommand) would silently skip updates —
-// local.Version="" == local.Enforced="" used to satisfy the skip check,
-// so 'b update' did nothing even when the upstream release had moved.
-//
-// Now an empty local.Version means "unknown"; EnsureBinary must proceed
-// to DownloadBinary instead of early-returning.
-func TestBinary_EnsureBinary_UpdateWhenLocalVersionUnknown(t *testing.T) {
+// TestBinary_EnsureBinary_UpdateSkipsWhenVersionUnknown verifies that
+// when VersionLocalF fails (returns empty version), EnsureBinary skips
+// the download — the binary is on disk and we can't prove it's stale.
+// This avoids re-downloading large binaries (e.g. tilt, 41MB) every
+// time just because the version probe fails (e.g. missing `getent` in
+// PATH). The trade-off: a genuinely outdated binary with a broken
+// version probe won't auto-update until the probe is fixed or the user
+// runs `b update --force`.
+func TestBinary_EnsureBinary_UpdateSkipsWhenVersionUnknown(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("PATH_BIN", tmp)
-	// Pre-existing binary on disk, so the BinaryExists branch runs.
 	if err := os.WriteFile(filepath.Join(tmp, "broken"), []byte("stale"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	b := &Binary{
-		Name: "broken",
-		// No pin.
+		Name:    "broken",
 		Version: "",
 		VersionF: func(b *Binary) (string, error) {
-			return "v2", nil // upstream has a newer version
+			return "v2", nil
 		},
 		VersionLocalF: func(b *Binary) (string, error) {
-			// Preset's probe command failed — classic 'argsh version' bug:
-			// subcommand doesn't exist so the binary exits non-zero and
-			// VersionLocalF has no version to report.
 			return "", os.ErrNotExist
 		},
-		// No URL/URLF/GitHubRepo so DownloadBinary will fail with
-		// "no URL provided". That error is our sentinel: it proves the
-		// download branch ran instead of the broken skip path. Before
-		// the fix EnsureBinary returned nil here (Version=="" ==
-		// Enforced=="") and the preset silently appeared up to date.
 	}
 	err := b.EnsureBinary(true)
-	if err == nil {
-		t.Fatal("expected DownloadBinary to be attempted (and fail without a download source), got nil")
-	}
-	if !strings.Contains(err.Error(), "no URL provided") {
-		t.Errorf("expected the 'no URL provided' sentinel error, got: %v", err)
+	if err != nil {
+		t.Errorf("expected skip (nil), got: %v — broken version probe should not trigger re-download", err)
 	}
 }
 
