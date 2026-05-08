@@ -194,9 +194,11 @@ binaries:
     onPost: kubectl completion bash > .completions/kubectl.bash
 ```
 
-Hooks are POSIX shell commands (run via `sh -c`). Non-zero exit produces a warning
-but does not fail the install. Output goes to stderr so it doesn't interfere with
-progress bars.
+Hooks are POSIX shell commands (run via `sh -c`), executed in the **project root
+directory** — so relative paths like `.completions/...` resolve from there. Non-zero
+exit produces a warning but does not fail the install. Output goes to stderr so it
+doesn't interfere with progress bars. Hooks are also skipped during `b update --dry-run`
+and `--plan-json`.
 
 ## Flags
 
