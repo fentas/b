@@ -182,6 +182,9 @@ binaries:
   # custom file paths
   custom-kubectl:
     file: ../bin/kubectl  # relative to config file
+  # post-install hook
+  github.com/arg-sh/argsh:
+    onPost: argsh builtin ${B_EVENT}
 
 envs:
   # Sync files from upstream git repos

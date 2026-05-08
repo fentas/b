@@ -60,6 +60,14 @@ This glossary defines key terms and concepts used throughout the **b** documenta
 
 **Merge Strategy** - Controls how env file updates handle local changes. Options: `replace` (overwrite), `client` (keep local), `merge` (three-way diff).
 
+## O
+
+**onPost** - A per-binary shell command in `b.yaml` that runs after a successful install or update. Receives `B_EVENT`, `B_NAME`, `B_VERSION`, and `B_FILE` as environment variables. Only fires when the on-disk binary actually changed. See also: **onPreSync** / **onPostSync** below for the env-side equivalents.
+
+**onPostSync** - A per-env shell command in `b.yaml` that runs after an env file sync completes. Use it for post-sync tasks such as formatting, permission updates, or notifications related to synced env files.
+
+**onPreSync** - A per-env shell command in `b.yaml` that runs before an env file sync begins. Use it for pre-sync checks or preparation steps related to synced env files.
+
 ## P
 
 **PATH** - The environment variable that tells the shell where to find executable programs.
