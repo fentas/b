@@ -30,11 +30,30 @@ func RunHook(command, dir, event, name, version, file string, stdout, stderr io.
 	cmd.Dir = dir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.Env = append(os.Environ(),
+	// Build env from parent process, filtering out any existing B_ vars
+	// so our values take guaranteed precedence regardless of platform.
+	hookVars := map[string]bool{
+		"B_EVENT=": true, "B_NAME=": true, "B_VERSION=": true, "B_FILE=": true,
+	}
+	env := make([]string, 0, len(os.Environ())+4)
+	for _, e := range os.Environ() {
+		skip := false
+		for prefix := range hookVars {
+			if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			env = append(env, e)
+		}
+	}
+	env = append(env,
 		fmt.Sprintf("B_EVENT=%s", event),
 		fmt.Sprintf("B_NAME=%s", name),
 		fmt.Sprintf("B_VERSION=%s", version),
 		fmt.Sprintf("B_FILE=%s", file),
 	)
+	cmd.Env = env
 	return cmd.Run()
 }

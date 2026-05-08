@@ -1389,7 +1389,7 @@ func TestAddToConfig_WithOnPost(t *testing.T) {
 	}
 
 	binaries := []*binary.Binary{
-		{Name: "argsh", AutoDetect: true, ProviderRef: "github.com/arg-sh/argsh"},
+		{Name: "argsh", AutoDetect: true, ProviderRef: "github.com/arg-sh/argsh", OnPost: "argsh builtin ${B_EVENT}"},
 	}
 	if err := o.addToConfig(binaries); err != nil {
 		t.Fatalf("addToConfig() error = %v", err)

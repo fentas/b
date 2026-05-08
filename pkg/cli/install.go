@@ -348,8 +348,8 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 			if b.AssetFilter != "" {
 				entry.Asset = b.AssetFilter
 			}
-			if o.OnPost != "" {
-				entry.OnPost = o.OnPost
+			if b.OnPost != "" {
+				entry.OnPost = b.OnPost
 			}
 			config.Binaries = append(config.Binaries, entry)
 		}
