@@ -33,6 +33,13 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 		VersionF: binary.GithubLatest,
 		IsTarGz:  true,
 		VersionLocalF: func(b *binary.Binary) (string, error) {
+			// tilt's analytics init calls getent which may not be in
+			// the clean env. Disable analytics so the version check
+			// doesn't fail on minimal environments.
+			if b.Envs == nil {
+				b.Envs = map[string]string{}
+			}
+			b.Envs["TILT_DISABLE_ANALYTICS"] = "1"
 			s, err := b.Exec("version")
 			if err != nil {
 				return "", err
