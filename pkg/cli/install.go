@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -257,16 +256,21 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 			b.Tracker = tracker
 			b.Writer = pw
 
+			// Track whether a download actually happened so we only run
+			// the onPost hook when the binary changed — not on a no-op
+			// "already exists" skip from EnsureBinary(false).
+			wasMissing := !b.BinaryExists()
 			var err error
 			if o.Force {
 				err = b.DownloadBinary()
 			} else {
 				err = b.EnsureBinary(false) // Don't update, just ensure
 			}
+			downloaded := err == nil && (o.Force || wasMissing)
 
-			// Run onPost hook after a successful download.
-			if err == nil && b.OnPost != "" {
-				if hookErr := binary.RunHook(b.OnPost, o.ProjectRoot(), "install", b.Name, b.Version, b.BinaryPath(), os.Stdout, os.Stderr); hookErr != nil {
+			// Run onPost hook only when a download actually happened.
+			if downloaded && b.OnPost != "" {
+				if hookErr := binary.RunHook(b.OnPost, o.ProjectRoot(), "install", b.Name, b.Version, b.BinaryPath(), o.IO.Out, o.IO.ErrOut); hookErr != nil {
 					fmt.Fprintf(o.IO.ErrOut, "Warning: onPost hook for %s failed: %v\n", b.Name, hookErr)
 				}
 			}

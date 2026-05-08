@@ -65,10 +65,11 @@ type LocalBinary struct {
 	Alias string `json:"alias,omitempty"`
 	// Asset is a glob pattern to filter release assets (e.g. "argsh-so-*")
 	Asset string `json:"asset,omitempty"`
-	// OnPost is a shell command run after a successful install/update of this
-	// binary. Receives B_EVENT (install|update), B_NAME, B_VERSION, B_FILE.
-	// Skipped when the binary didn't change or on --dry-run. Non-zero exit is
-	// surfaced as a warning, not a fatal error.
+	// OnPost is a shell command (POSIX, via "sh -c") run after a successful
+	// install/update of this binary. Receives B_EVENT (install|update),
+	// B_NAME, B_VERSION, B_FILE. Only runs when the on-disk binary actually
+	// changed — skipped on no-op installs, digest-match skips, and
+	// --dry-run. Non-zero exit is surfaced as a warning, not a fatal error.
 	OnPost string `json:"onPost,omitempty" yaml:"onPost,omitempty"`
 	// IsProviderRef is true when Name is a provider ref (e.g. github.com/derailed/k9s)
 	IsProviderRef bool `json:"-" yaml:"-"`
