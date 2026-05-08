@@ -921,10 +921,15 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 				// EnsureBinary's internal skip check may or may not
 				// download; treat it as "attempted" only on error so a
 				// failed preset update doesn't poison the lock either.
-				// Only hash pre/post when a hook might run — avoids
-				// O(file-size) work when there's no onPost hook.
+				// Detect whether a download happened via two signals:
+				//   - binary was missing → any successful EnsureBinary
+				//     must have downloaded it
+				//   - binary existed → compare SHA before/after
+				// Only compute hashes when a hook might run — avoids
+				// O(file-size) work for binaries without hooks.
+				wasMissing := !b.BinaryExists()
 				var beforeHash string
-				if b.OnPost != "" && !o.effectiveDryRun() {
+				if !wasMissing && b.OnPost != "" && !o.effectiveDryRun() {
 					if h, shaErr := lock.SHA256File(b.BinaryPath()); shaErr == nil {
 						beforeHash = h
 					}
@@ -932,6 +937,8 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 				err = b.EnsureBinary(true)
 				if err != nil {
 					attempted = true
+				} else if wasMissing {
+					downloaded = true
 				} else if beforeHash != "" {
 					if afterHash, shaErr := lock.SHA256File(b.BinaryPath()); shaErr == nil {
 						downloaded = beforeHash != afterHash

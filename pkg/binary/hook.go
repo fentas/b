@@ -30,8 +30,9 @@ func RunHook(command, dir, event, name, version, file string, stdout, stderr io.
 	cmd.Dir = dir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	// Build env from parent process, filtering out any existing B_ vars
-	// so our values take guaranteed precedence regardless of platform.
+	// Build env from parent process, filtering out the four hook-specific
+	// variables (B_EVENT, B_NAME, B_VERSION, B_FILE) so our values take
+	// guaranteed precedence regardless of platform.
 	hookVars := map[string]bool{
 		"B_EVENT=": true, "B_NAME=": true, "B_VERSION=": true, "B_FILE=": true,
 	}
