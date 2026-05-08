@@ -163,6 +163,41 @@ The syntax is: `<docker://|oci://><image>[@<tag>][:/<path-in-image>]`
 
 The leading `/` on the path disambiguates it from an `image:tag` pasted from docker documentation. For private registries, `oci://` reads credentials from `~/.docker/config.json` (same as `docker login`); see the [authentication](/authentication) page.
 
+### Post-install hooks
+
+Run a shell command after a binary is installed or updated. The hook only fires
+when the on-disk binary actually changed — not on no-op skips or `--dry-run`.
+
+```bash
+# Add a binary with a post-install hook
+b install --add github.com/arg-sh/argsh --on-post 'argsh builtin ${B_EVENT}'
+
+# The hook is saved to b.yaml so it runs on future updates too
+```
+
+The hook receives these environment variables:
+
+| Variable | Description | Example |
+|---|---|---|
+| `B_EVENT` | `install` or `update` | `install` |
+| `B_NAME` | Binary name | `argsh` |
+| `B_VERSION` | Version being installed | `v0.6.6` |
+| `B_FILE` | Absolute path to the binary | `/project/.bin/argsh` |
+
+In `b.yaml`:
+
+```yaml
+binaries:
+  github.com/arg-sh/argsh:
+    onPost: argsh builtin ${B_EVENT}
+  kubectl:
+    onPost: kubectl completion bash > .completions/kubectl.bash
+```
+
+Hooks are POSIX shell commands (run via `sh -c`). Non-zero exit produces a warning
+but does not fail the install. Output goes to stderr so it doesn't interfere with
+progress bars.
+
 ## Flags
 
 | Flag         | Description                               |
@@ -170,6 +205,7 @@ The leading `/` on the path disambiguates it from an `image:tag` pasted from doc
 | `--add`      | Add binary/env to b.yaml during install   |
 | `--alias`    | Install binary under a different name     |
 | `--fix`      | Pin the specified version in b.yaml       |
+| `--on-post`  | Shell command to run after install/update (saved with `--add`) |
 | `-h`, `--help` | help for install                          |
 
 ## Global Flags

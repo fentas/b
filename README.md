@@ -63,6 +63,9 @@ b install "git@github.com:org/private-repo:bin/app"
 # Install and add to b.yaml
 b install --add jq@1.7
 
+# Install with a post-install hook (saved to b.yaml with --add)
+b install --add github.com/arg-sh/argsh --on-post 'argsh builtin ${B_EVENT}'
+
 # Install and pin version in b.yaml
 b install --fix jq@1.7
 
@@ -136,6 +139,9 @@ binaries:
     version: v1.0
   oci://docker:/usr/local/bin/docker:
     version: cli
+  # Post-install hook — runs after install/update when the binary changed
+  github.com/arg-sh/argsh:
+    onPost: argsh builtin ${B_EVENT}
 
 envs:
   # Sync files from upstream git repos

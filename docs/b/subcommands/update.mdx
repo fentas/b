@@ -106,6 +106,22 @@ Only update envs tagged with a specific group:
 b update --group=dev
 ```
 
+### Post-update hooks
+
+Binaries configured with an `onPost` hook in `b.yaml` will run that hook after
+a successful update — the same way it runs after `b install`. The hook only
+fires when the on-disk binary actually changed (not on digest-match skips or
+`--dry-run`).
+
+```yaml
+binaries:
+  github.com/arg-sh/argsh:
+    onPost: argsh builtin ${B_EVENT}   # B_EVENT=update
+```
+
+See [b install — Post-install hooks](/b/subcommands/install#post-install-hooks) for
+the full list of environment variables and examples.
+
 ## Flags
 
 | Flag              | Description                               |
