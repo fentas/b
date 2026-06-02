@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/fentas/b/pkg/provider"
@@ -481,7 +482,14 @@ func (b *Binary) downloadPreset() error {
 			if b.VersionF != nil {
 				latest, _ = b.VersionF(b)
 			}
-			return fmt.Errorf("%s not found ^^ %s", b.Version, latest)
+			// A 404 on the download URL means the requested version+platform
+			// asset doesn't exist. If the requested version differs from the
+			// latest, the version is the likely culprit; otherwise the version
+			// is fine and there's simply no asset for this OS/arch.
+			if latest != "" && latest != b.Version {
+				return fmt.Errorf("%s %s not found (latest: %s)", b.Name, b.Version, latest)
+			}
+			return fmt.Errorf("%s %s not found for %s/%s", b.Name, b.Version, runtime.GOOS, runtime.GOARCH)
 		case http.StatusForbidden:
 		case http.StatusUnauthorized:
 			return fmt.Errorf("Unauthorized")
