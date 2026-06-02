@@ -11,3 +11,5 @@ main
 !/test/coverage/coverage.json
 
 .mise.toml
+
+/.claude/
