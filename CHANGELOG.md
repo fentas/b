@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.17.2](https://github.com/fentas/b/compare/v4.17.1...v4.17.2) (2026-06-02)
+
+
+### Bug Fixes
+
+* **state:** keep relative file paths on save; clearer install errors ([#159](https://github.com/fentas/b/issues/159)) ([10a4a9b](https://github.com/fentas/b/commit/10a4a9b66017c81cf32fced307e1dcf7c8929f19))
+
 ## [4.17.1](https://github.com/fentas/b/compare/v4.17.0...v4.17.1) (2026-05-08)
 
 
