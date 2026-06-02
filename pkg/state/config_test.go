@@ -81,11 +81,10 @@ func TestSaveConfig_KeepsRelativeFilePaths(t *testing.T) {
 	}
 }
 
-// TestSaveConfig_KeepsRelativeFilePaths_RelativeConfigPath covers the case
-// Copilot flagged: when configPath is relative, LoadConfigFromPath joins
-// `file:` into a still-relative path (e.g. ".bin/jira"), so the relativize on
-// save must not gate on filepath.IsAbs — otherwise the round-trip rewrites
-// "jira" to ".bin/jira".
+// TestSaveConfig_KeepsRelativeFilePaths_RelativeConfigPath covers a relative
+// configPath: LoadConfigFromPath joins `file:` into a still-relative path
+// (e.g. ".bin/jira"), so the relativize on save must not gate on
+// filepath.IsAbs — otherwise the round-trip rewrites "jira" to ".bin/jira".
 func TestSaveConfig_KeepsRelativeFilePaths_RelativeConfigPath(t *testing.T) {
 	tmpDir := t.TempDir()
 	binDir := filepath.Join(tmpDir, ".bin")

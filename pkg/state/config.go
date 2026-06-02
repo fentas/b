@@ -59,12 +59,13 @@ func SaveConfig(config *State, configPath string) error {
 		return err
 	}
 
-	// LoadConfigFromPath absolutizes relative `file:` paths so the running
-	// process sees a real on-disk location. Reverse that here so a
-	// load→modify→save round-trip (e.g. `b install --add`) keeps the user's
-	// relative `file:` values relative instead of rewriting them to absolute
-	// paths. relativizeFiles works on a copy, so the caller's in-memory state
-	// is left untouched (it must stay absolute, and may be read concurrently).
+	// LoadConfigFromPath resolves relative `file:` values against the config
+	// dir so the running process sees a usable on-disk location. Reverse that
+	// here so a load→modify→save round-trip (e.g. `b install --add`) keeps the
+	// user's relative `file:` values relative instead of rewriting them to the
+	// resolved path. relativizeFiles works on a copy, so the caller's in-memory
+	// state is left untouched (it must stay resolved, and may be read
+	// concurrently).
 	config = relativizeFiles(config, dir)
 
 	// Try comment-preserving save if file exists
