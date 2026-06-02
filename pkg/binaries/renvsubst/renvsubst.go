@@ -40,7 +40,7 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 		GitHubFileF: func(b *binary.Binary) (string, error) {
 			s := sys()
 			if s == "" {
-				return "", fmt.Errorf("unsupported platform: %s/%s", runtime.GOOS, runtime.GOARCH)
+				return "", fmt.Errorf("no %s/%s build for %s", runtime.GOOS, runtime.GOARCH, b.Name)
 			}
 			return fmt.Sprintf("renvsubst-%s-%s.tar.gz",
 				b.Version,
