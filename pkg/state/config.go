@@ -75,12 +75,18 @@ func SaveConfig(config *State, configPath string) error {
 	return saveConfigClean(config, configPath)
 }
 
-// relativizeFiles returns a copy of config in which each binary's absolute File
-// path that lives under configDir is rewritten relative to configDir — the
-// inverse of the join performed in LoadConfigFromPath. The input config and its
-// binaries are never mutated; unchanged binaries are shared by pointer. Paths
-// that are already relative, or absolute paths outside configDir, are left
-// as-is.
+// relativizeFiles returns a copy of config in which each binary's File path
+// that lives under configDir is rewritten relative to configDir — the inverse
+// of the join performed in LoadConfigFromPath. The input config and its
+// binaries are never mutated; unchanged binaries are shared by pointer.
+//
+// LoadConfigFromPath joins relative `file:` values against configDir; when
+// configPath itself is relative (e.g. `--config ./custom/b.yaml` or the
+// `.bin/b.yaml` default) the joined path stays relative, so we cannot gate on
+// filepath.IsAbs here. filepath.Rel handles both cases: it relativizes a path
+// under configDir and errors (or yields a `..`/`.` prefix) for anything that
+// isn't — including a user-supplied absolute path against a relative configDir
+// — which we skip, leaving such values untouched.
 func relativizeFiles(config *State, configDir string) *State {
 	if config == nil {
 		return nil
@@ -88,14 +94,14 @@ func relativizeFiles(config *State, configDir string) *State {
 	out := *config // shallow copy; Envs/Profiles are untouched and shared
 	bins := make(BinaryList, len(config.Binaries))
 	for i, b := range config.Binaries {
-		if b == nil || b.File == "" || !filepath.IsAbs(b.File) {
+		if b == nil || b.File == "" {
 			bins[i] = b
 			continue
 		}
 		rel, err := filepath.Rel(configDir, b.File)
 		if err != nil || rel == "." || rel == ".." ||
 			strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			// Outside (or equal to) the config dir — keep it absolute.
+			// Outside (or equal to) the config dir — leave it as-is.
 			bins[i] = b
 			continue
 		}

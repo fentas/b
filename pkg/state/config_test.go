@@ -81,6 +81,58 @@ func TestSaveConfig_KeepsRelativeFilePaths(t *testing.T) {
 	}
 }
 
+// TestSaveConfig_KeepsRelativeFilePaths_RelativeConfigPath covers the case
+// Copilot flagged: when configPath is relative, LoadConfigFromPath joins
+// `file:` into a still-relative path (e.g. ".bin/jira"), so the relativize on
+// save must not gate on filepath.IsAbs — otherwise the round-trip rewrites
+// "jira" to ".bin/jira".
+func TestSaveConfig_KeepsRelativeFilePaths_RelativeConfigPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	binDir := filepath.Join(tmpDir, ".bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run with cwd == tmpDir so a relative config path resolves correctly.
+	t.Chdir(tmpDir)
+
+	relConfigPath := filepath.Join(".bin", "b.yaml") // relative, with a dir component
+	initial := `binaries:
+  github.com/ankitpokhrel/jira-cli:
+    file: jira
+  jq: {}
+`
+	if err := os.WriteFile(relConfigPath, []byte(initial), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	config, err := LoadConfigFromPath(relConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sanity: load produced a still-relative joined path (the trigger).
+	if got := mustFile(config, "github.com/ankitpokhrel/jira-cli"); got != filepath.Join(".bin", "jira") {
+		t.Fatalf("expected joined-but-relative %q, got %q", filepath.Join(".bin", "jira"), got)
+	}
+
+	config.Binaries = append(config.Binaries, &binary.LocalBinary{Name: "yq"})
+	if err := SaveConfig(config, relConfigPath); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(relConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "file: jira\n") {
+		t.Errorf("expected jira-cli to keep 'file: jira', got:\n%s", got)
+	}
+	if strings.Contains(got, ".bin/jira") {
+		t.Errorf("file: path leaked the config dir prefix, got:\n%s", got)
+	}
+}
+
 // TestSaveConfig_KeepsRelativeFilePaths_NewFile covers the clean-save path
 // (no pre-existing file), where the binaries are marshaled from scratch.
 func TestSaveConfig_KeepsRelativeFilePaths_NewFile(t *testing.T) {
