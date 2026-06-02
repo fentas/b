@@ -63,9 +63,9 @@ func SaveConfig(config *State, configPath string) error {
 	// process sees a real on-disk location. Reverse that here so a
 	// load→modify→save round-trip (e.g. `b install --add`) keeps the user's
 	// relative `file:` values relative instead of rewriting them to absolute
-	// paths. Mutate-and-restore avoids changing the caller's in-memory state,
-	// which must stay absolute for the rest of the process.
-	defer relativizeFiles(config, dir)()
+	// paths. relativizeFiles works on a copy, so the caller's in-memory state
+	// is left untouched (it must stay absolute, and may be read concurrently).
+	config = relativizeFiles(config, dir)
 
 	// Try comment-preserving save if file exists
 	if _, err := os.Stat(configPath); err == nil {
@@ -75,37 +75,36 @@ func SaveConfig(config *State, configPath string) error {
 	return saveConfigClean(config, configPath)
 }
 
-// relativizeFiles temporarily converts each binary's absolute File path that
-// lives under configDir back to a path relative to configDir, returning a
-// function that restores the original values. Paths that are already relative,
-// or absolute paths outside configDir, are left untouched. This is the inverse
-// of the join performed in LoadConfigFromPath.
-func relativizeFiles(config *State, configDir string) func() {
+// relativizeFiles returns a copy of config in which each binary's absolute File
+// path that lives under configDir is rewritten relative to configDir — the
+// inverse of the join performed in LoadConfigFromPath. The input config and its
+// binaries are never mutated; unchanged binaries are shared by pointer. Paths
+// that are already relative, or absolute paths outside configDir, are left
+// as-is.
+func relativizeFiles(config *State, configDir string) *State {
 	if config == nil {
-		return func() {}
+		return nil
 	}
-	type saved struct {
-		b    *binary.LocalBinary
-		file string
-	}
-	var originals []saved
-	for _, b := range config.Binaries {
+	out := *config // shallow copy; Envs/Profiles are untouched and shared
+	bins := make(BinaryList, len(config.Binaries))
+	for i, b := range config.Binaries {
 		if b == nil || b.File == "" || !filepath.IsAbs(b.File) {
+			bins[i] = b
 			continue
 		}
 		rel, err := filepath.Rel(configDir, b.File)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			// Outside the config dir — keep it absolute.
+		if err != nil || rel == "." || rel == ".." ||
+			strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			// Outside (or equal to) the config dir — keep it absolute.
+			bins[i] = b
 			continue
 		}
-		originals = append(originals, saved{b, b.File})
-		b.File = rel
+		clone := *b
+		clone.File = rel
+		bins[i] = &clone
 	}
-	return func() {
-		for _, s := range originals {
-			s.b.File = s.file
-		}
-	}
+	out.Binaries = bins
+	return &out
 }
 
 // saveConfigClean does a plain marshal+write without preserving comments.

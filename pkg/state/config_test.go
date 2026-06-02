@@ -62,8 +62,9 @@ func TestSaveConfig_KeepsRelativeFilePaths(t *testing.T) {
 		t.Errorf("config should not contain absolute paths (%s), got:\n%s", tmpDir, got)
 	}
 
-	// In-memory state must be restored to absolute so the running process is
-	// unaffected by the save.
+	// SaveConfig must not mutate the caller's in-memory state — the paths it
+	// relativizes for disk are written to a copy, so the live config keeps the
+	// absolute paths the running process depends on.
 	if khelm := config.Binaries.Get("khelm"); khelm == nil || !filepath.IsAbs(khelm.File) {
 		t.Errorf("expected khelm.File to remain absolute in memory after save, got %q", mustFile(config, "khelm"))
 	}
@@ -112,22 +113,29 @@ func TestSaveConfig_KeepsRelativeFilePaths_NewFile(t *testing.T) {
 }
 
 // TestRelativizeFiles_LeavesOutsidePathsAbsolute ensures absolute File paths
-// that don't live under the config dir are preserved verbatim.
+// that don't live under the config dir (and the degenerate "equals configDir"
+// case) are preserved verbatim, and that the input config is never mutated.
 func TestRelativizeFiles_LeavesOutsidePathsAbsolute(t *testing.T) {
+	configDir := filepath.Join(string(filepath.Separator)+"home", "user", ".bin")
 	outside := filepath.Join(string(filepath.Separator)+"opt", "bin", "tool")
 	config := &State{
 		Binaries: BinaryList{
 			&binary.LocalBinary{Name: "tool", File: outside},
+			&binary.LocalBinary{Name: "self", File: configDir}, // rel would be "."
 		},
 	}
 
-	restore := relativizeFiles(config, filepath.Join(string(filepath.Separator)+"home", "user", ".bin"))
-	if got := mustFile(config, "tool"); got != outside {
+	out := relativizeFiles(config, configDir)
+
+	if got := mustFile(out, "tool"); got != outside {
 		t.Errorf("outside path should stay absolute, got %q", got)
 	}
-	restore()
+	if got := mustFile(out, "self"); got != configDir {
+		t.Errorf("path equal to configDir should stay absolute, got %q", got)
+	}
+	// Input must be untouched (no-mutation contract).
 	if got := mustFile(config, "tool"); got != outside {
-		t.Errorf("restore changed an untouched path, got %q", got)
+		t.Errorf("input config was mutated, got %q", got)
 	}
 }
 
