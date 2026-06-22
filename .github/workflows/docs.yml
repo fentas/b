@@ -5,10 +5,12 @@ on:
     branches: [ main ]
     paths:
       - 'docs/**'
+      - 'install.sh'
   pull_request:
     branches: [ main ]
     paths:
       - 'docs/**'
+      - 'install.sh'
 
 permissions:
   contents: read
@@ -35,6 +37,7 @@ jobs:
           path: main-repo
           sparse-checkout: |
             docs
+            install.sh
           sparse-checkout-cone-mode: false
 
       - name: Copy main branch docs to content directory
@@ -45,6 +48,12 @@ jobs:
             echo "Copied docs from main branch"
           else
             echo "No docs directory found in main branch, using existing content"
+          fi
+          # Publish the installer at binary.help/get.sh — Docusaurus serves
+          # static/* from the site root. Copied from main so it is always current.
+          if [ -f "main-repo/install.sh" ]; then
+            cp main-repo/install.sh apps/docs/static/get.sh
+            echo "Published install.sh -> /get.sh"
           fi
 
       - name: Setup Node.js
