@@ -215,23 +215,39 @@ func (o *UpdateOptions) resolveUpdateArg(arg string) (envKey string, b *binary.B
 		if sug := o.suggestEnv(arg); sug != "" {
 			fmt.Fprintf(o.IO.ErrOut,
 				"  note: updating %q as a binary; env %q targets the same repo — to update that env run: %s\n",
-				name, sug, envUpdateHint(sug))
+				name, sug, o.envUpdateHint(sug))
 		}
 	}
 	return "", bin, nil
 }
 
 // envUpdateHint returns a copy-pasteable command that resolves to the env keyed
-// `key`. It suggests the exact key (always works) and, when the repo tail is
-// unambiguous to derive, a short-handle alternative. It deliberately does NOT
-// suggest "append '#' to what you typed" — for an https arg pointing at an
-// SSH-keyed env, that form does not match (issue #166 review).
-func envUpdateHint(key string) string {
+// `key`. It always suggests the exact key (which round-trips), and adds a short
+// handle only when that handle is unambiguous — otherwise the short form would
+// itself fail to resolve. It deliberately does NOT suggest "append '#' to what
+// you typed" — for an https arg pointing at an SSH-keyed env, that form does not
+// match (issue #166 review).
+func (o *UpdateOptions) envUpdateHint(key string) string {
 	hint := fmt.Sprintf("b update %q", key)
-	if short := repoTail(key); short != "" {
+	if short := repoTail(key); short != "" && o.shortHandleUnique(short) {
 		hint += fmt.Sprintf(" (or short: b update %s#)", short)
 	}
 	return hint
+}
+
+// shortHandleUnique reports whether exactly one configured env has the given
+// "org/repo" tail — i.e. whether `<tail>#` would resolve unambiguously.
+func (o *UpdateOptions) shortHandleUnique(tail string) bool {
+	if o.Config == nil {
+		return false
+	}
+	n := 0
+	for _, e := range o.Config.Envs {
+		if repoTail(e.Key) == tail {
+			n++
+		}
+	}
+	return n == 1
 }
 
 // isConfigBinary reports whether name is a known binary — a preset or an entry
@@ -324,7 +340,7 @@ func pathHasSuffix(full, suf []string) bool {
 // (e.g. the user typed the https path for an SSH-keyed env — issue #166).
 func (o *UpdateOptions) unknownArgError(arg string) error {
 	if sug := o.suggestEnv(arg); sug != "" {
-		return fmt.Errorf("unknown binary or env: %s — did you mean env %q? run: %s", arg, sug, envUpdateHint(sug))
+		return fmt.Errorf("unknown binary or env: %s — did you mean env %q? run: %s", arg, sug, o.envUpdateHint(sug))
 	}
 	return fmt.Errorf("unknown binary or env: %s", arg)
 }

@@ -163,13 +163,42 @@ func TestRunAll_PlanJSON_BinariesOnlyConfig_EmitsEmptyArray(t *testing.T) {
 			&binary.LocalBinary{Name: "github.com/derailed/k9s", IsProviderRef: true},
 		},
 	}
-	o := &UpdateOptions{SharedOptions: shared, PlanJSON: true}
+	binariesRan := false
+	o := &UpdateOptions{
+		SharedOptions:   shared,
+		PlanJSON:        true,
+		updateBinariesF: func([]*binary.Binary) error { binariesRan = true; return nil },
+	}
 
 	if err := o.runAll(); err != nil {
 		t.Fatalf("runAll: %v", err)
 	}
 	if got := strings.TrimSpace(out.String()); got != "[]" {
 		t.Errorf("plan-json with binaries but no envs should emit '[]', got: %q", got)
+	}
+	if binariesRan {
+		t.Error("--plan-json must not run binary updates (would corrupt the JSON)")
+	}
+}
+
+// When two envs share an org/repo tail across hosts, the env hint must NOT
+// suggest the ambiguous `tail#` short handle (it wouldn't resolve) — only the
+// exact key.
+func TestEnvUpdateHint_OmitsAmbiguousShortHandle(t *testing.T) {
+	o, _ := envAddrOpts(t, "github.com/org/infra#a", "gitlab.com/org/infra#b")
+
+	hint := o.envUpdateHint("github.com/org/infra#a")
+	if !strings.Contains(hint, "github.com/org/infra#a") {
+		t.Errorf("hint should cite the exact key, got: %q", hint)
+	}
+	if strings.Contains(hint, "or short") {
+		t.Errorf("hint must not suggest the ambiguous short handle, got: %q", hint)
+	}
+
+	// A unique tail still gets the short-handle suggestion.
+	o2, _ := envAddrOpts(t, "git@github.com:kernpilot/lok8s#main")
+	if h := o2.envUpdateHint("git@github.com:kernpilot/lok8s#main"); !strings.Contains(h, "kernpilot/lok8s#") {
+		t.Errorf("unique tail should suggest the short handle, got: %q", h)
 	}
 }
 
