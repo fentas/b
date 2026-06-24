@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.18.0](https://github.com/fentas/b/compare/v4.17.2...v4.18.0) (2026-06-24)
+
+
+### Features
+
+* **update:** address envs by their printed key; add scope flags ([#166](https://github.com/fentas/b/issues/166)) ([#167](https://github.com/fentas/b/issues/167)) ([8d02543](https://github.com/fentas/b/commit/8d02543f8577a539d59386dc4a53a82bcbfa273a))
+
 ## [4.17.2](https://github.com/fentas/b/compare/v4.17.1...v4.17.2) (2026-06-02)
 
 
