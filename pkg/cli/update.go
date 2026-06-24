@@ -212,10 +212,8 @@ func (o *UpdateOptions) resolveUpdateArg(arg string) (envKey string, b *binary.B
 	// (e.g. typed the https path of an SSH-keyed env — issue #166). The ad-hoc
 	// binary update is still valid, so just say so rather than refuse.
 	if !o.isConfigBinary(name) {
-		if sug := o.suggestEnv(arg); sug != "" {
-			fmt.Fprintf(o.IO.ErrOut,
-				"  note: updating %q as a binary; env %q targets the same repo — to update that env run: %s\n",
-				name, sug, o.envUpdateHint(sug))
+		if hint := o.envHint(arg); hint != "" {
+			fmt.Fprintf(o.IO.ErrOut, "  note: updating %q as a binary; %s\n", name, hint)
 		}
 	}
 	return "", bin, nil
@@ -339,29 +337,49 @@ func pathHasSuffix(full, suf []string) bool {
 // hint when a configured env points at the same repo via a different ref form
 // (e.g. the user typed the https path for an SSH-keyed env — issue #166).
 func (o *UpdateOptions) unknownArgError(arg string) error {
-	if sug := o.suggestEnv(arg); sug != "" {
-		return fmt.Errorf("unknown binary or env: %s — did you mean env %q? run: %s", arg, sug, o.envUpdateHint(sug))
+	if hint := o.envHint(arg); hint != "" {
+		return fmt.Errorf("unknown binary or env: %s — did you mean %s", arg, hint)
 	}
 	return fmt.Errorf("unknown binary or env: %s", arg)
 }
 
-// suggestEnv returns a configured env key that shares the same trailing
-// org/repo path as arg, or "" if none. Used only to enrich the not-found
-// error — it never changes resolution.
-func (o *UpdateOptions) suggestEnv(arg string) string {
+// suggestEnvs returns all configured env keys that share arg's trailing
+// org/repo path (transport-independent), so callers can hint at the env(s) the
+// user may have meant. Empty when none match. Used only to enrich messages —
+// it never changes resolution.
+func (o *UpdateOptions) suggestEnvs(arg string) []string {
 	if o.Config == nil {
-		return ""
+		return nil
 	}
 	want := repoTail(arg)
 	if want == "" {
-		return ""
+		return nil
 	}
+	var keys []string
 	for _, e := range o.Config.Envs {
 		if repoTail(e.Key) == want {
-			return e.Key
+			keys = append(keys, e.Key)
 		}
 	}
-	return ""
+	return keys
+}
+
+// envHint builds a "did you mean env" clause for the env(s) matching arg, or ""
+// when none match. A single match names the key with a copy-paste command; when
+// several envs share the same repo tail (e.g. github + gitlab mirrors) it lists
+// the candidates instead of arbitrarily picking the first — pointing at the
+// wrong key would be misleading (issue #166 review).
+func (o *UpdateOptions) envHint(arg string) string {
+	keys := o.suggestEnvs(arg)
+	switch len(keys) {
+	case 0:
+		return ""
+	case 1:
+		return fmt.Sprintf("env %q targets the same repo — to update it run: %s", keys[0], o.envUpdateHint(keys[0]))
+	default:
+		return fmt.Sprintf("%d envs target the same repo (%s) — pass the exact key to update one",
+			len(keys), strings.Join(keys, ", "))
+	}
 }
 
 // repoTail returns the "org/repo" tail of a git ref, lowercased and transport-

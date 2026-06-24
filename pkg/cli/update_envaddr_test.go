@@ -257,6 +257,27 @@ func TestResolveArg_HttpsPathForSSHEnv_HintsEnv(t *testing.T) {
 	}
 }
 
+// When several configured envs share the same repo tail, the ad-hoc-binary note
+// must list all candidates rather than arbitrarily naming the first, and must
+// not suggest an ambiguous short handle (Copilot round-3).
+func TestResolveArg_HttpsPathForSSHEnv_HintsAllOnAmbiguousTail(t *testing.T) {
+	o, errBuf := envAddrOpts(t, "git@github.com:org/infra#a", "gitlab.com/org/infra#b")
+
+	if err := o.Complete([]string{"github.com/org/infra"}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if len(o.specifiedBinaries) != 1 {
+		t.Fatalf("expected ad-hoc binary resolution, got %d", len(o.specifiedBinaries))
+	}
+	note := errBuf.String()
+	if !strings.Contains(note, "git@github.com:org/infra#a") || !strings.Contains(note, "gitlab.com/org/infra#b") {
+		t.Errorf("note should list both candidate envs, got: %q", note)
+	}
+	if strings.Contains(note, "or short") {
+		t.Errorf("note must not suggest an ambiguous short handle, got: %q", note)
+	}
+}
+
 // A '#' inside a docker:// in-container path is a path character, not an env
 // label — the ref must stay in binary space.
 func TestResolveArg_DockerPathHash_StaysBinary(t *testing.T) {
