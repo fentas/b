@@ -214,11 +214,24 @@ func (o *UpdateOptions) resolveUpdateArg(arg string) (envKey string, b *binary.B
 	if !o.isConfigBinary(name) {
 		if sug := o.suggestEnv(arg); sug != "" {
 			fmt.Fprintf(o.IO.ErrOut,
-				"  note: updating %q as a binary; env %q targets the same repo — pass %q (or append '#') to update the env\n",
-				name, sug, sug)
+				"  note: updating %q as a binary; env %q targets the same repo — to update that env run: %s\n",
+				name, sug, envUpdateHint(sug))
 		}
 	}
 	return "", bin, nil
+}
+
+// envUpdateHint returns a copy-pasteable command that resolves to the env keyed
+// `key`. It suggests the exact key (always works) and, when the repo tail is
+// unambiguous to derive, a short-handle alternative. It deliberately does NOT
+// suggest "append '#' to what you typed" — for an https arg pointing at an
+// SSH-keyed env, that form does not match (issue #166 review).
+func envUpdateHint(key string) string {
+	hint := fmt.Sprintf("b update %q", key)
+	if short := repoTail(key); short != "" {
+		hint += fmt.Sprintf(" (or short: b update %s#)", short)
+	}
+	return hint
 }
 
 // isConfigBinary reports whether name is a known binary — a preset or an entry
@@ -276,13 +289,13 @@ func (o *UpdateOptions) matchEnv(arg string, allowShort bool) (string, bool, err
 // Returns (key, nil) on a unique hit, or ("", candidates) when zero or
 // multiple envs match so the caller can report ambiguity.
 func (o *UpdateOptions) matchEnvShort(arg string) (string, []string) {
-	want := cleanRepoPath(gitcache.RefBase(arg))
-	if len(want) == 0 || want[0] == "" {
+	want := gitcache.RepoPath(arg)
+	if len(want) == 0 {
 		return "", nil
 	}
 	var matches []string
 	for _, e := range o.Config.Envs {
-		if pathHasSuffix(cleanRepoPath(gitcache.RefBase(e.Key)), want) {
+		if pathHasSuffix(gitcache.RepoPath(e.Key), want) {
 			matches = append(matches, e.Key)
 		}
 	}
@@ -311,7 +324,7 @@ func pathHasSuffix(full, suf []string) bool {
 // (e.g. the user typed the https path for an SSH-keyed env — issue #166).
 func (o *UpdateOptions) unknownArgError(arg string) error {
 	if sug := o.suggestEnv(arg); sug != "" {
-		return fmt.Errorf("unknown binary or env: %s (did you mean env %q? append '#' to force env)", arg, sug)
+		return fmt.Errorf("unknown binary or env: %s — did you mean env %q? run: %s", arg, sug, envUpdateHint(sug))
 	}
 	return fmt.Errorf("unknown binary or env: %s", arg)
 }
@@ -323,41 +336,27 @@ func (o *UpdateOptions) suggestEnv(arg string) string {
 	if o.Config == nil {
 		return ""
 	}
-	want := repoTail(gitcache.RefBase(arg))
+	want := repoTail(arg)
 	if want == "" {
 		return ""
 	}
 	for _, e := range o.Config.Envs {
-		if repoTail(gitcache.RefBase(e.Key)) == want {
+		if repoTail(e.Key) == want {
 			return e.Key
 		}
 	}
 	return ""
 }
 
-// repoTail returns the "org/repo" tail of a git ref base, lowercased and
-// without a .git suffix, so https and SSH forms of the same repo compare equal.
-func repoTail(base string) string {
-	parts := cleanRepoPath(base)
-	if len(parts) < 2 || parts[0] == "" {
+// repoTail returns the "org/repo" tail of a git ref, lowercased and transport-
+// independent, so https and SSH forms of the same repo compare equal. Returns
+// "" when the ref has fewer than two path segments.
+func repoTail(ref string) string {
+	parts := gitcache.RepoPath(ref)
+	if len(parts) < 2 {
 		return ""
 	}
 	return strings.ToLower(strings.Join(parts[len(parts)-2:], "/"))
-}
-
-// cleanRepoPath strips a .git suffix, any scheme, and an SSH "user@host:" /
-// "host:" prefix from a git ref base, returning the remaining path split into
-// segments (e.g. "git@github.com:org/repo.git" → ["org","repo"]). Transport is
-// dropped so https and SSH forms of the same repo yield identical segments.
-func cleanRepoPath(base string) []string {
-	base = strings.TrimSuffix(base, ".git")
-	if i := strings.LastIndex(base, "://"); i >= 0 {
-		base = base[i+3:]
-	}
-	if i := strings.Index(base, ":"); i >= 0 && !strings.Contains(base[:i], "/") {
-		base = base[i+1:]
-	}
-	return strings.Split(strings.Trim(base, "/"), "/")
 }
 
 // canonicalEnvKey normalizes a ref to the form used as an env map key: the ref
@@ -483,7 +482,11 @@ func (o *UpdateOptions) runAll() error {
 		}
 	}
 
-	nothingBinaries := !doBinaries || len(binariesToUpdate) == 0
+	// In plan-json mode binaries never produce output, so they count as
+	// "nothing" for the empty-array fallback — otherwise a binaries-only project
+	// run with --plan-json would print no JSON at all (the opposite of the
+	// "consumers always get valid JSON" contract).
+	nothingBinaries := !doBinaries || len(binariesToUpdate) == 0 || o.PlanJSON
 	nothingEnvs := !doEnvs || !hasEnvs
 	if nothingBinaries && nothingEnvs {
 		// In plan-json mode the human-readable line would corrupt

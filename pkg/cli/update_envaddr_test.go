@@ -128,6 +128,51 @@ func TestResolveArg_ShortHandle_Ambiguous(t *testing.T) {
 	}
 }
 
+// A short handle whose org segment is wrong must NOT match — suffix matching
+// compares whole segments, so `wrongorg/lok8s#` cannot reach kernpilot/lok8s.
+func TestResolveArg_ShortHandle_WrongOrg(t *testing.T) {
+	o, _ := envAddrOpts(t, "git@github.com:kernpilot/lok8s#main")
+
+	err := o.Complete([]string{"wrongorg/lok8s#"})
+	if err == nil || !strings.Contains(err.Error(), "unknown env") {
+		t.Fatalf("wrong org should not match, want unknown env, got: %v", err)
+	}
+}
+
+// Short-handle matching is case-insensitive.
+func TestResolveArg_ShortHandle_CaseInsensitive(t *testing.T) {
+	o, _ := envAddrOpts(t, "git@github.com:kernpilot/lok8s#main")
+
+	if err := o.Complete([]string{"LOK8S#"}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if len(o.specifiedEnvRefs) != 1 || o.specifiedEnvRefs[0] != "git@github.com:kernpilot/lok8s#main" {
+		t.Errorf("case-insensitive handle → %v, want the SSH key", o.specifiedEnvRefs)
+	}
+}
+
+// --plan-json with binaries configured but no envs must still emit a valid
+// (empty) JSON array — binaries never appear in the plan (Copilot round-2).
+func TestRunAll_PlanJSON_BinariesOnlyConfig_EmitsEmptyArray(t *testing.T) {
+	t.Setenv("PATH_BIN", t.TempDir())
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{
+		Binaries: state.BinaryList{
+			&binary.LocalBinary{Name: "github.com/derailed/k9s", IsProviderRef: true},
+		},
+	}
+	o := &UpdateOptions{SharedOptions: shared, PlanJSON: true}
+
+	if err := o.runAll(); err != nil {
+		t.Fatalf("runAll: %v", err)
+	}
+	if got := strings.TrimSpace(out.String()); got != "[]" {
+		t.Errorf("plan-json with binaries but no envs should emit '[]', got: %q", got)
+	}
+}
+
 // A bare short name (no '#') must NOT match an env — it stays in binary space
 // so plain `b update <name>` can never shadow a binary.
 func TestResolveArg_BareShortName_NotEnv(t *testing.T) {
@@ -173,8 +218,13 @@ func TestResolveArg_HttpsPathForSSHEnv_HintsEnv(t *testing.T) {
 		t.Fatalf("expected ad-hoc binary resolution, got %d", len(o.specifiedBinaries))
 	}
 	note := errBuf.String()
-	if !strings.Contains(note, "git@github.com:acme/framework#main") || !strings.Contains(note, "env") {
-		t.Errorf("expected a 'did you mean env' note, got: %q", note)
+	if !strings.Contains(note, "git@github.com:acme/framework#main") {
+		t.Errorf("note should cite the exact env key, got: %q", note)
+	}
+	// The hint must offer a WORKING form — a short handle — not "append '#'" to
+	// the https arg, which would not match the SSH key (Copilot round-2).
+	if !strings.Contains(note, "acme/framework#") {
+		t.Errorf("note should suggest the working short handle, got: %q", note)
 	}
 }
 

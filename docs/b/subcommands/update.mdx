@@ -71,8 +71,10 @@ you to use the fuller key.
 
 If you type the plain https path of an SSH-keyed env (e.g. `github.com/org/infra`
 for an env keyed `git@github.com:org/infra`), `b` updates it as an ad-hoc
-**binary** and prints a hint pointing at the env — paste the key `b env status`
-prints, or append `#`, to target the env instead.
+**binary** and prints a hint pointing at the env. To target the env instead,
+paste the exact key `b env status` prints, or use a short handle (`org/infra#`) —
+appending `#` to the https path won't match, since the SSH key has no host
+segment.
 
 ### Scope: envs only / binaries only
 

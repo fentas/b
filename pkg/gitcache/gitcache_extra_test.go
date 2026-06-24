@@ -72,6 +72,35 @@ func TestRefBase_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestRepoPath(t *testing.T) {
+	tests := []struct {
+		ref  string
+		want []string
+	}{
+		{"github.com/org/repo", []string{"github.com", "org", "repo"}},
+		{"git@github.com:org/repo", []string{"org", "repo"}},
+		{"git@github.com:org/repo.git#main", []string{"org", "repo"}},
+		{"github.com/org/repo@v2.0", []string{"github.com", "org", "repo"}},
+		{"ssh://git@host/org/repo", []string{"org", "repo"}},
+		{"single", []string{"single"}},
+		{"/abs/local/path", nil},
+		{"./rel", nil},
+	}
+	for _, tt := range tests {
+		got := RepoPath(tt.ref)
+		if len(got) != len(tt.want) {
+			t.Errorf("RepoPath(%q) = %v, want %v", tt.ref, got, tt.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("RepoPath(%q) = %v, want %v", tt.ref, got, tt.want)
+				break
+			}
+		}
+	}
+}
+
 func TestRefLabel_EdgeCases(t *testing.T) {
 	tests := []struct {
 		ref  string
