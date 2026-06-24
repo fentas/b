@@ -3,6 +3,9 @@ name: Release-please
 on:
   push:
     branches: [main]
+  # Manual fallback for when a merge push to main doesn't fire the push event
+  # (intermittent GitHub miss) and the release PR isn't opened automatically.
+  workflow_dispatch:
 
 permissions:
   contents: write
