@@ -48,6 +48,8 @@ type UpdateOptions struct {
 	Yes               bool                         // skip prompt confirmations (treat prompt as auto)
 	Rollback          bool                         // rollback to previous commit from lock
 	Group             string                       // only update envs in this group
+	EnvsOnly          bool                         // update envs only, skip binaries
+	BinariesOnly      bool                         // update binaries only, skip envs
 	stdinReader       io.Reader                    // overridden by tests; nil means os.Stdin
 	updateBinariesF   func([]*binary.Binary) error // overridden by tests; nil means o.updateBinaries
 }
@@ -70,8 +72,20 @@ func NewUpdateCmd(shared *SharedOptions) *cobra.Command {
 			# Update specific binary
 			b update jq
 
-			# Update specific env
+			# Update specific env (paste the key 'b env status' prints)
 			b update github.com/org/infra
+			b update git@github.com:org/infra#main
+
+			# Force env resolution for a key that is also a valid binary ref
+			# by appending '#' (works for any env, incl. label-less ones)
+			b update github.com/org/infra#
+
+			# Update only envs (skip the toolchain), optionally by group
+			b update --envs-only
+			b update --group dev
+
+			# Update only binaries (skip env sync)
+			b update --binaries-only
 
 			# Force update (overwrite existing)
 			b update --force kubectl
@@ -99,7 +113,9 @@ func NewUpdateCmd(shared *SharedOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&o.PlanJSON, "plan-json", false, "Emit a machine-readable plan as JSON (implies --dry-run)")
 	cmd.Flags().BoolVarP(&o.Yes, "yes", "y", false, "Skip prompt confirmation (treat prompt as auto)")
 	cmd.Flags().BoolVar(&o.Rollback, "rollback", false, "Rollback envs to previous commit from lock")
-	cmd.Flags().StringVar(&o.Group, "group", "", "Only update envs in this group")
+	cmd.Flags().StringVar(&o.Group, "group", "", "Only update envs in this group (implies --envs-only)")
+	cmd.Flags().BoolVar(&o.EnvsOnly, "envs-only", false, "Only update envs, skip binaries")
+	cmd.Flags().BoolVar(&o.BinariesOnly, "binaries-only", false, "Only update binaries, skip envs")
 
 	return cmd
 }
@@ -125,23 +141,15 @@ func (o *UpdateOptions) Complete(args []string) error {
 
 	o.specifiedArgs = args
 
-	// Resolve specified args (binaries or env refs) and store them
+	// Resolve specified args (binaries or env refs) and store them.
 	for _, arg := range args {
-		name, version := parseBinaryArg(arg)
-
-		// Check if it's an env ref
-		if o.Config != nil && o.Config.Envs.Get(name) != nil {
-			o.specifiedEnvRefs = append(o.specifiedEnvRefs, name)
+		envKey, b, err := o.resolveUpdateArg(arg)
+		if err != nil {
+			return err
+		}
+		if envKey != "" {
+			o.specifiedEnvRefs = append(o.specifiedEnvRefs, envKey)
 			continue
-		}
-
-		// Resolve binary once and keep the reference
-		b, ok := o.GetBinary(name)
-		if !ok {
-			return fmt.Errorf("unknown binary or env: %s", name)
-		}
-		if version != "" {
-			b.Version = version
 		}
 		o.specifiedBinaries = append(o.specifiedBinaries, b)
 	}
@@ -149,8 +157,185 @@ func (o *UpdateOptions) Complete(args []string) error {
 	return nil
 }
 
+// resolveUpdateArg maps a single CLI arg to either an env (returns its config
+// key) or a binary (returns the resolved *binary.Binary). Exactly one of the
+// two is non-empty on success.
+//
+// The arg addresses two namespaces (binaries and envs) whose grammars overlap,
+// so resolution is driven by config membership and an env marker rather than by
+// guessing from shape (issue #166):
+//
+//	docker:// / oci:// / go://   → always a binary ('#' there is a path/module
+//	                               char, never an env label)
+//	local path or contains '#'   → env marker: resolve as env, error if no such
+//	                               env (the user was explicit)
+//	otherwise                    → env-exact first (so the literal key printed by
+//	                               `b env status` round-trips, incl. SSH `git@…`
+//	                               keys whose '@' the binary parser would split),
+//	                               then binary.
+func (o *UpdateOptions) resolveUpdateArg(arg string) (envKey string, b *binary.Binary, err error) {
+	// Env marker: a local path, or a '#' outside a binary-only protocol.
+	if !hasBinaryProto(arg) && (isLocalRefPath(arg) || strings.Contains(arg, "#")) {
+		key, ok := o.matchEnv(arg)
+		if !ok {
+			return "", nil, fmt.Errorf("unknown env: %s", arg)
+		}
+		return key, nil, nil
+	}
+
+	// No marker: try envs by exact/canonical key before falling into binary
+	// space — otherwise a ref like github.com/org/infra that is an env would be
+	// hijacked by the github provider convention and fail as a binary.
+	if key, ok := o.matchEnv(arg); ok {
+		return key, nil, nil
+	}
+
+	name, version := parseBinaryArg(arg)
+	bin, ok := o.GetBinary(name)
+	if !ok {
+		return "", nil, o.unknownArgError(arg)
+	}
+	if version != "" {
+		bin.Version = version
+	}
+	// If this resolved to an ad-hoc provider binary (not in config) while a
+	// configured env targets the same repo, the user probably meant the env
+	// (e.g. typed the https path of an SSH-keyed env — issue #166). The ad-hoc
+	// binary update is still valid, so just say so rather than refuse.
+	if !o.isConfigBinary(name) {
+		if sug := o.suggestEnv(arg); sug != "" {
+			fmt.Fprintf(o.IO.ErrOut,
+				"  note: updating %q as a binary; env %q targets the same repo — pass %q (or append '#') to update the env\n",
+				name, sug, sug)
+		}
+	}
+	return "", bin, nil
+}
+
+// isConfigBinary reports whether name is a known binary — a preset or an entry
+// in b.yaml's binaries — as opposed to an ad-hoc provider ref synthesized on
+// the fly.
+func (o *UpdateOptions) isConfigBinary(name string) bool {
+	if _, ok := o.lookup[name]; ok {
+		return true
+	}
+	if o.Config == nil {
+		return false
+	}
+	for _, lb := range o.Config.Binaries {
+		if lb.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// matchEnv resolves arg to a configured env key, trying the literal string
+// first (so the exact key `b env status` prints round-trips) and then a
+// canonical form with any trailing version stripped and label normalized.
+func (o *UpdateOptions) matchEnv(arg string) (string, bool) {
+	if o.Config == nil {
+		return "", false
+	}
+	if e := o.Config.Envs.Get(arg); e != nil {
+		return e.Key, true
+	}
+	if key := canonicalEnvKey(arg); key != arg {
+		if e := o.Config.Envs.Get(key); e != nil {
+			return e.Key, true
+		}
+	}
+	return "", false
+}
+
+// unknownArgError builds the not-found error, adding a "did you mean env …"
+// hint when a configured env points at the same repo via a different ref form
+// (e.g. the user typed the https path for an SSH-keyed env — issue #166).
+func (o *UpdateOptions) unknownArgError(arg string) error {
+	if sug := o.suggestEnv(arg); sug != "" {
+		return fmt.Errorf("unknown binary or env: %s (did you mean env %q? append '#' to force env)", arg, sug)
+	}
+	return fmt.Errorf("unknown binary or env: %s", arg)
+}
+
+// suggestEnv returns a configured env key that shares the same trailing
+// org/repo path as arg, or "" if none. Used only to enrich the not-found
+// error — it never changes resolution.
+func (o *UpdateOptions) suggestEnv(arg string) string {
+	if o.Config == nil {
+		return ""
+	}
+	want := repoTail(gitcache.RefBase(arg))
+	if want == "" {
+		return ""
+	}
+	for _, e := range o.Config.Envs {
+		if repoTail(gitcache.RefBase(e.Key)) == want {
+			return e.Key
+		}
+	}
+	return ""
+}
+
+// repoTail returns the "org/repo" tail of a git ref base, lowercased and
+// without a .git suffix, so https and SSH forms of the same repo compare equal.
+func repoTail(base string) string {
+	base = strings.TrimSuffix(base, ".git")
+	// Drop an SSH "user@host:" or "host:" prefix and any scheme.
+	if i := strings.LastIndex(base, "://"); i >= 0 {
+		base = base[i+3:]
+	}
+	if i := strings.Index(base, ":"); i >= 0 && !strings.Contains(base[:i], "/") {
+		base = base[i+1:]
+	}
+	parts := strings.Split(strings.Trim(base, "/"), "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.ToLower(strings.Join(parts[len(parts)-2:], "/"))
+}
+
+// canonicalEnvKey normalizes a ref to the form used as an env map key: the ref
+// base (version stripped) plus "#label" when a label is present. Local paths
+// are returned as-is (their '#'/'@' are literal path characters).
+func canonicalEnvKey(arg string) string {
+	base := gitcache.RefBase(arg)
+	if label := gitcache.RefLabel(arg); label != "" {
+		return base + "#" + label
+	}
+	return base
+}
+
+// hasBinaryProto reports whether s carries a protocol that only binaries use,
+// where a '#' is a path/module character rather than an env label.
+func hasBinaryProto(s string) bool {
+	return strings.HasPrefix(s, "docker://") ||
+		strings.HasPrefix(s, "oci://") ||
+		strings.HasPrefix(s, "go://")
+}
+
+// isLocalRefPath reports whether s is a local filesystem ref (an env source),
+// matching gitcache's own local-path detection.
+func isLocalRefPath(s string) bool {
+	return strings.HasPrefix(s, "/") ||
+		strings.HasPrefix(s, "./") ||
+		strings.HasPrefix(s, "../")
+}
+
 // Validate checks if the update operation is valid
 func (o *UpdateOptions) Validate() error {
+	// Scope flags select which namespace the "update all" form touches; they
+	// are contradictory together and meaningless once specific args narrow the
+	// scope already.
+	if o.EnvsOnly && o.BinariesOnly {
+		return fmt.Errorf("--envs-only and --binaries-only are mutually exclusive")
+	}
+	if o.BinariesOnly && o.Group != "" {
+		return fmt.Errorf("--group filters envs and cannot be combined with --binaries-only")
+	}
+	if (o.EnvsOnly || o.BinariesOnly) && len(o.specifiedArgs) > 0 {
+		return fmt.Errorf("--envs-only/--binaries-only apply to 'b update' with no arguments; remove them when naming binaries or envs explicitly")
+	}
 	if o.Strategy != "" {
 		switch o.Strategy {
 		case env.StrategyReplace, env.StrategyClient, env.StrategyMerge:
@@ -202,24 +387,34 @@ func (o *UpdateOptions) effectiveDryRun() bool {
 
 // runAll updates all binaries and envs from config.
 func (o *UpdateOptions) runAll() error {
+	// Scope which namespaces this run touches. `group` is an env-only concept,
+	// so --group implies env scope (binaries have no groups — issue #166).
+	doBinaries := !o.EnvsOnly && o.Group == ""
+	doEnvs := !o.BinariesOnly
+
 	// Update binaries — but NOT in plan-json mode, where binary
 	// progress output would corrupt the JSON document on stdout.
-	//.
-	binariesToUpdate := o.GetBinariesFromConfig()
-	if len(binariesToUpdate) > 0 && !o.PlanJSON {
-		if err := o.callUpdateBinaries(binariesToUpdate); err != nil {
-			return err
+	var binariesToUpdate []*binary.Binary
+	if doBinaries {
+		binariesToUpdate = o.GetBinariesFromConfig()
+		if len(binariesToUpdate) > 0 && !o.PlanJSON {
+			if err := o.callUpdateBinaries(binariesToUpdate); err != nil {
+				return err
+			}
 		}
 	}
 
 	// Update envs
-	if o.Config != nil && len(o.Config.Envs) > 0 {
+	hasEnvs := o.Config != nil && len(o.Config.Envs) > 0
+	if doEnvs && hasEnvs {
 		if err := o.updateEnvs(nil); err != nil {
 			return err
 		}
 	}
 
-	if len(binariesToUpdate) == 0 && (o.Config == nil || len(o.Config.Envs) == 0) {
+	nothingBinaries := !doBinaries || len(binariesToUpdate) == 0
+	nothingEnvs := !doEnvs || !hasEnvs
+	if nothingBinaries && nothingEnvs {
 		// In plan-json mode the human-readable line would corrupt
 		// the JSON output. Emit an empty array instead so consumers
 		// always get valid JSON.
