@@ -364,6 +364,29 @@ Check for upstream changes and local drift without syncing:
 b env status
 ```
 
+### Update a specific env
+
+Pass the exact key `b env status` prints — `https`, SSH (`git@…`), and `#label`
+forms all round-trip as-is:
+
+```bash
+b update github.com/org/infra
+b update git@github.com:org/infra#main
+```
+
+You can also use a **short handle** (the repo name, or `org/repo`) by appending
+a `#` marker; ambiguous handles list the candidates:
+
+```bash
+b update infra#
+b update org/infra#
+```
+
+To refresh vendored env content without bumping any binaries, scope the run with
+`--envs-only` (or `--group`, which is env-only); `--binaries-only` does the
+reverse. See [b update](/b/subcommands/update#update-a-specific-env) for the full
+addressing rules.
+
 ### Preview
 
 Test what a glob matches before adding it to config:
@@ -491,6 +514,7 @@ envs:
 ```
 
 ```bash
+# groups are env-only, so --group updates just these envs (no binaries)
 b update --group=dev
 ```
 
