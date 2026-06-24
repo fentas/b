@@ -294,6 +294,22 @@ func TestResolveArg_DockerPathHash_StaysBinary(t *testing.T) {
 	}
 }
 
+// A '#' inside a git:// binary ref's in-repo file path is a path character, not
+// an env-label marker — the ref must resolve as a binary (Copilot round-3).
+func TestResolveArg_GitProtoPathHash_StaysBinary(t *testing.T) {
+	o, _ := envAddrOpts(t) // no envs
+
+	if err := o.Complete([]string{"git://github.com/org/repo:bin/we#rd"}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if len(o.specifiedEnvRefs) != 0 {
+		t.Errorf("git:// binary ref must not resolve as env, got %d", len(o.specifiedEnvRefs))
+	}
+	if len(o.specifiedBinaries) != 1 {
+		t.Errorf("expected 1 binary, got %d", len(o.specifiedBinaries))
+	}
+}
+
 // repoTail folds https and SSH forms of the same repo to one comparable tail.
 func TestRepoTail(t *testing.T) {
 	cases := map[string]string{

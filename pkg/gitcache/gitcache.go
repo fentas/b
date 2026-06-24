@@ -385,21 +385,29 @@ func RepoPath(ref string) []string {
 	if isLocalPath(ref) {
 		return nil
 	}
-	base := strings.TrimSuffix(RefBase(ref), ".git")
-	if i := strings.LastIndex(base, "://"); i >= 0 {
+	base := RefBase(ref)
+	hadScheme := false
+	if i := strings.Index(base, "://"); i >= 0 {
 		base = base[i+3:]
-	}
-	// Drop an SSH scp-style "user@host:" or bare "host:" prefix (a colon with
-	// no slash before it); "host/org/repo" style paths are left intact.
-	if i := strings.Index(base, ":"); i >= 0 && !strings.Contains(base[:i], "/") {
-		base = base[i+1:]
+		hadScheme = true
 	}
 	base = strings.Trim(base, "/")
+	// Drop an scp-style "user@host:" or bare "host:" prefix (a colon with no
+	// slash before it) — but ONLY when there was no explicit scheme. With a
+	// scheme, a colon before the first slash is a host:port, not an scp path
+	// separator (e.g. ssh://host:2222/org/repo, https://host:443/org/repo).
+	if !hadScheme {
+		if i := strings.Index(base, ":"); i >= 0 && !strings.Contains(base[:i], "/") {
+			base = base[i+1:]
+		}
+	}
+	// Trim a .git suffix after slashes are gone so "repo.git/" normalizes too.
+	base = strings.Trim(strings.TrimSuffix(base, ".git"), "/")
 	if base == "" {
 		return nil
 	}
 	parts := strings.Split(base, "/")
-	// Drop a leading "user@host" segment from the ssh:// explicit form.
+	// Drop a leading "user@host[:port]" segment from the ssh:// explicit form.
 	if len(parts) > 1 && strings.Contains(parts[0], "@") {
 		parts = parts[1:]
 	}

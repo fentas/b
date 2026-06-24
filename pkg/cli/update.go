@@ -404,12 +404,16 @@ func canonicalEnvKey(arg string) string {
 	return base
 }
 
-// hasBinaryProto reports whether s carries a protocol that only binaries use,
-// where a '#' is a path/module character rather than an env label.
+// hasBinaryProto reports whether s carries a protocol for which a '#' must NOT
+// be treated as an env-label marker. docker:// / oci:// / go:// are binary-only.
+// git:// is ambiguous (a git-sourced binary's in-repo file path may legally
+// contain '#', e.g. git://repo:bin/we#rd), so we exclude it from the marker
+// rule too; git:// envs are still addressable by their exact/canonical key.
 func hasBinaryProto(s string) bool {
 	return strings.HasPrefix(s, "docker://") ||
 		strings.HasPrefix(s, "oci://") ||
-		strings.HasPrefix(s, "go://")
+		strings.HasPrefix(s, "go://") ||
+		strings.HasPrefix(s, "git://")
 }
 
 // isLocalRefPath reports whether s is a local filesystem ref (an env source),
