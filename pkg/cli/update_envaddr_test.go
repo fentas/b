@@ -88,6 +88,62 @@ func TestResolveArg_EnvMarkerNoMatch_Errors(t *testing.T) {
 	}
 }
 
+// A short handle ('#'-marked) resolves to an env by repo basename or org/repo
+// tail — even an SSH-keyed env with a label. Closes issue #166's "short handle"
+// gap (Gemini review #1).
+func TestResolveArg_ShortHandle(t *testing.T) {
+	cases := []struct{ name, arg, want string }{
+		{"basename", "lok8s#", "git@github.com:kernpilot/lok8s#main"},
+		{"orgRepoTail", "kernpilot/lok8s#", "git@github.com:kernpilot/lok8s#main"},
+		{"labelledHttps", "github.com/org/infra#", "github.com/org/infra#prod"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			o, _ := envAddrOpts(t, "git@github.com:kernpilot/lok8s#main", "github.com/org/infra#prod")
+			if err := o.Complete([]string{tc.arg}); err != nil {
+				t.Fatalf("Complete(%q): %v", tc.arg, err)
+			}
+			if len(o.specifiedBinaries) != 0 {
+				t.Errorf("%q must not resolve to a binary", tc.arg)
+			}
+			if len(o.specifiedEnvRefs) != 1 || o.specifiedEnvRefs[0] != tc.want {
+				t.Errorf("%q → env refs %v, want [%s]", tc.arg, o.specifiedEnvRefs, tc.want)
+			}
+		})
+	}
+}
+
+// An ambiguous short handle (matching two envs) errors with the candidates,
+// rather than silently picking one.
+func TestResolveArg_ShortHandle_Ambiguous(t *testing.T) {
+	o, _ := envAddrOpts(t, "github.com/org/infra#a", "gitlab.com/org/infra#b")
+
+	err := o.Complete([]string{"infra#"})
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("expected ambiguity error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "github.com/org/infra#a") ||
+		!strings.Contains(err.Error(), "gitlab.com/org/infra#b") {
+		t.Errorf("ambiguity error should list both candidates, got: %v", err)
+	}
+}
+
+// A bare short name (no '#') must NOT match an env — it stays in binary space
+// so plain `b update <name>` can never shadow a binary.
+func TestResolveArg_BareShortName_NotEnv(t *testing.T) {
+	o, _ := envAddrOpts(t, "git@github.com:kernpilot/lok8s#main")
+
+	// 'lok8s' is not a preset/provider binary, so this should fail as a binary
+	// lookup — crucially NOT silently resolve to the env.
+	err := o.Complete([]string{"lok8s"})
+	if err == nil || !strings.Contains(err.Error(), "unknown binary or env") {
+		t.Fatalf("bare name should fall to binary space, got: %v", err)
+	}
+	if len(o.specifiedEnvRefs) != 0 {
+		t.Errorf("bare name must not resolve to an env, got %v", o.specifiedEnvRefs)
+	}
+}
+
 // The documented `b update github.com/org/infra` (no '#') must still resolve to
 // the env when it is configured as one — not get hijacked into binary space by
 // the github provider convention.
@@ -164,7 +220,9 @@ func TestUpdateValidate_ScopeFlags(t *testing.T) {
 	}{
 		{"both", UpdateOptions{EnvsOnly: true, BinariesOnly: true}, "mutually exclusive"},
 		{"binsAndGroup", UpdateOptions{BinariesOnly: true, Group: "dev"}, "cannot be combined"},
+		{"binsAndPlanJSON", UpdateOptions{BinariesOnly: true, PlanJSON: true}, "no effect with --binaries-only"},
 		{"scopeWithArgs", UpdateOptions{EnvsOnly: true, specifiedArgs: []string{"jq"}}, "no arguments"},
+		{"groupWithArgs", UpdateOptions{Group: "dev", specifiedArgs: []string{"github.com/org/infra"}}, "no arguments"},
 		{"envsOnlyOK", UpdateOptions{EnvsOnly: true}, ""},
 		{"groupOK", UpdateOptions{Group: "dev"}, ""},
 	}

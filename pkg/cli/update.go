@@ -174,9 +174,14 @@ func (o *UpdateOptions) Complete(args []string) error {
 //	                               keys whose '@' the binary parser would split),
 //	                               then binary.
 func (o *UpdateOptions) resolveUpdateArg(arg string) (envKey string, b *binary.Binary, err error) {
-	// Env marker: a local path, or a '#' outside a binary-only protocol.
+	// Env marker: a local path, or a '#' outside a binary-only protocol. The
+	// user was explicit, so short handles (repo basename / org/repo tail) are
+	// allowed in addition to exact/canonical keys.
 	if !hasBinaryProto(arg) && (isLocalRefPath(arg) || strings.Contains(arg, "#")) {
-		key, ok := o.matchEnv(arg)
+		key, ok, mErr := o.matchEnv(arg, true)
+		if mErr != nil {
+			return "", nil, mErr
+		}
 		if !ok {
 			return "", nil, fmt.Errorf("unknown env: %s", arg)
 		}
@@ -185,8 +190,12 @@ func (o *UpdateOptions) resolveUpdateArg(arg string) (envKey string, b *binary.B
 
 	// No marker: try envs by exact/canonical key before falling into binary
 	// space — otherwise a ref like github.com/org/infra that is an env would be
-	// hijacked by the github provider convention and fail as a binary.
-	if key, ok := o.matchEnv(arg); ok {
+	// hijacked by the github provider convention and fail as a binary. Short
+	// handles are NOT allowed here so a bare name can never shadow a binary;
+	// they require the explicit '#'/path marker handled above.
+	if key, ok, mErr := o.matchEnv(arg, false); mErr != nil {
+		return "", nil, mErr
+	} else if ok {
 		return key, nil, nil
 	}
 
@@ -230,22 +239,71 @@ func (o *UpdateOptions) isConfigBinary(name string) bool {
 	return false
 }
 
-// matchEnv resolves arg to a configured env key, trying the literal string
-// first (so the exact key `b env status` prints round-trips) and then a
-// canonical form with any trailing version stripped and label normalized.
-func (o *UpdateOptions) matchEnv(arg string) (string, bool) {
+// matchEnv resolves arg to a configured env key. It tries, in order: the
+// literal string (so the exact key `b env status` prints round-trips), a
+// canonical form with any trailing version stripped and label normalized, and
+// — only when allowShort is set — a short handle that suffix-matches an env's
+// repo path (e.g. "lok8s" or "org/lok8s" → "git@github.com:org/lok8s#main").
+// An ambiguous short handle returns an error listing the candidate keys.
+func (o *UpdateOptions) matchEnv(arg string, allowShort bool) (string, bool, error) {
 	if o.Config == nil {
-		return "", false
+		return "", false, nil
 	}
 	if e := o.Config.Envs.Get(arg); e != nil {
-		return e.Key, true
+		return e.Key, true, nil
 	}
 	if key := canonicalEnvKey(arg); key != arg {
 		if e := o.Config.Envs.Get(key); e != nil {
-			return e.Key, true
+			return e.Key, true, nil
 		}
 	}
-	return "", false
+	if allowShort {
+		key, candidates := o.matchEnvShort(arg)
+		if key != "" {
+			return key, true, nil
+		}
+		if len(candidates) > 1 {
+			return "", false, fmt.Errorf("ambiguous env %q matches %d keys: %s — use the full key",
+				arg, len(candidates), strings.Join(candidates, ", "))
+		}
+	}
+	return "", false, nil
+}
+
+// matchEnvShort matches arg as a short handle against configured env keys: the
+// arg's cleaned repo path must be a trailing segment-suffix of an env's. So
+// "lok8s" or "org/lok8s" both reach an env keyed "git@github.com:org/lok8s".
+// Returns (key, nil) on a unique hit, or ("", candidates) when zero or
+// multiple envs match so the caller can report ambiguity.
+func (o *UpdateOptions) matchEnvShort(arg string) (string, []string) {
+	want := cleanRepoPath(gitcache.RefBase(arg))
+	if len(want) == 0 || want[0] == "" {
+		return "", nil
+	}
+	var matches []string
+	for _, e := range o.Config.Envs {
+		if pathHasSuffix(cleanRepoPath(gitcache.RefBase(e.Key)), want) {
+			matches = append(matches, e.Key)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	return "", matches
+}
+
+// pathHasSuffix reports whether suf is a trailing whole-segment suffix of full
+// (case-insensitive), e.g. ["org","repo"] is a suffix of ["host","org","repo"].
+func pathHasSuffix(full, suf []string) bool {
+	if len(suf) == 0 || len(suf) > len(full) {
+		return false
+	}
+	for i := 1; i <= len(suf); i++ {
+		if !strings.EqualFold(full[len(full)-i], suf[len(suf)-i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // unknownArgError builds the not-found error, adding a "did you mean env …"
@@ -280,19 +338,26 @@ func (o *UpdateOptions) suggestEnv(arg string) string {
 // repoTail returns the "org/repo" tail of a git ref base, lowercased and
 // without a .git suffix, so https and SSH forms of the same repo compare equal.
 func repoTail(base string) string {
+	parts := cleanRepoPath(base)
+	if len(parts) < 2 || parts[0] == "" {
+		return ""
+	}
+	return strings.ToLower(strings.Join(parts[len(parts)-2:], "/"))
+}
+
+// cleanRepoPath strips a .git suffix, any scheme, and an SSH "user@host:" /
+// "host:" prefix from a git ref base, returning the remaining path split into
+// segments (e.g. "git@github.com:org/repo.git" → ["org","repo"]). Transport is
+// dropped so https and SSH forms of the same repo yield identical segments.
+func cleanRepoPath(base string) []string {
 	base = strings.TrimSuffix(base, ".git")
-	// Drop an SSH "user@host:" or "host:" prefix and any scheme.
 	if i := strings.LastIndex(base, "://"); i >= 0 {
 		base = base[i+3:]
 	}
 	if i := strings.Index(base, ":"); i >= 0 && !strings.Contains(base[:i], "/") {
 		base = base[i+1:]
 	}
-	parts := strings.Split(strings.Trim(base, "/"), "/")
-	if len(parts) < 2 {
-		return ""
-	}
-	return strings.ToLower(strings.Join(parts[len(parts)-2:], "/"))
+	return strings.Split(strings.Trim(base, "/"), "/")
 }
 
 // canonicalEnvKey normalizes a ref to the form used as an env map key: the ref
@@ -333,8 +398,14 @@ func (o *UpdateOptions) Validate() error {
 	if o.BinariesOnly && o.Group != "" {
 		return fmt.Errorf("--group filters envs and cannot be combined with --binaries-only")
 	}
-	if (o.EnvsOnly || o.BinariesOnly) && len(o.specifiedArgs) > 0 {
-		return fmt.Errorf("--envs-only/--binaries-only apply to 'b update' with no arguments; remove them when naming binaries or envs explicitly")
+	if o.BinariesOnly && o.PlanJSON {
+		return fmt.Errorf("--plan-json describes env changes only and has no effect with --binaries-only")
+	}
+	// --group is env-only, so naming binaries/envs explicitly contradicts it the
+	// same way the scope flags do — and a non-matching --group would otherwise
+	// silently drop the named env to a no-op.
+	if (o.EnvsOnly || o.BinariesOnly || o.Group != "") && len(o.specifiedArgs) > 0 {
+		return fmt.Errorf("--group/--envs-only/--binaries-only apply to 'b update' with no arguments; remove them when naming binaries or envs explicitly")
 	}
 	if o.Strategy != "" {
 		switch o.Strategy {
