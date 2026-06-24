@@ -372,6 +372,48 @@ func RefVersion(ref string) string {
 	return ""
 }
 
+// RepoPath returns the transport-independent path segments identifying the repo
+// in ref: scheme, an SSH "user@host:"/"user@host/" prefix, version, label, and
+// any .git suffix are removed. e.g. "git@github.com:org/repo.git#main" →
+// ["org","repo"]; "https://github.com/org/repo" → ["github.com","org","repo"];
+// "ssh://git@host/org/repo" → ["org","repo"].
+//
+// Unlike GitURL, which preserves transport (the clone URL differs for ssh vs
+// https), RepoPath describes repo IDENTITY, so different transport forms of the
+// same repo yield comparable trailing segments. Returns nil for local paths.
+func RepoPath(ref string) []string {
+	if isLocalPath(ref) {
+		return nil
+	}
+	base := RefBase(ref)
+	hadScheme := false
+	if i := strings.Index(base, "://"); i >= 0 {
+		base = base[i+3:]
+		hadScheme = true
+	}
+	base = strings.Trim(base, "/")
+	// Drop an scp-style "user@host:" or bare "host:" prefix (a colon with no
+	// slash before it) — but ONLY when there was no explicit scheme. With a
+	// scheme, a colon before the first slash is a host:port, not an scp path
+	// separator (e.g. ssh://host:2222/org/repo, https://host:443/org/repo).
+	if !hadScheme {
+		if i := strings.Index(base, ":"); i >= 0 && !strings.Contains(base[:i], "/") {
+			base = base[i+1:]
+		}
+	}
+	// Trim a .git suffix after slashes are gone so "repo.git/" normalizes too.
+	base = strings.Trim(strings.TrimSuffix(base, ".git"), "/")
+	if base == "" {
+		return nil
+	}
+	parts := strings.Split(base, "/")
+	// Drop a leading "user@host[:port]" segment from the ssh:// explicit form.
+	if len(parts) > 1 && strings.Contains(parts[0], "@") {
+		parts = parts[1:]
+	}
+	return parts
+}
+
 // isLocalPath returns true if the ref looks like a local filesystem path.
 func isLocalPath(ref string) bool {
 	return strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, "./") || strings.HasPrefix(ref, "../")

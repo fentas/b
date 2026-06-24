@@ -76,6 +76,15 @@ b install github.com/org/infra@v2.0:/manifests/base/** .
 # Update all binaries and envs
 b update
 
+# Update a specific env — paste the key `b env status` prints, or a short handle
+b update github.com/org/infra
+b update git@github.com:org/infra#main
+b update infra#                          # short handle (the `#` marks it an env)
+
+# Update only envs (skip the toolchain) — or only binaries
+b update --envs-only
+b update --binaries-only
+
 # Update with merge strategy (three-way merge on local changes)
 b update --strategy=merge
 

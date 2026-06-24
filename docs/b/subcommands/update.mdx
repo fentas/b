@@ -34,6 +34,60 @@ Update a single binary to its latest version.
 b update jq
 ```
 
+### Update a specific env
+
+Pass the exact env key that `b env status` prints — including SSH (`git@…`) keys
+and `#label` refs. The key round-trips as-is:
+
+```bash
+b update github.com/org/infra
+b update git@github.com:org/infra#main
+```
+
+A ref like `github.com/org/infra` is a valid env key **and** a valid binary
+provider ref. When it is configured as an env, `b` resolves it to the env. To
+force env resolution explicitly — useful for label-less keys, or when the same
+ref exists as both a binary and an env — append a `#`:
+
+```bash
+b update github.com/org/infra#
+```
+
+> The `#` is safe unquoted as long as there is no space before it
+> (`name#label`, `name#`). A space before `#` starts a shell comment.
+
+With the `#` marker you can also use a **short handle** — the repo name, or
+`org/repo` — instead of the full key. `b` matches it against the trailing
+segments of your configured env keys:
+
+```bash
+# both target an env keyed git@github.com:org/infra#main
+b update infra#
+b update org/infra#
+```
+
+If a short handle matches more than one env, `b` lists the candidates and asks
+you to use the fuller key.
+
+If you type the plain https path of an SSH-keyed env (e.g. `github.com/org/infra`
+for an env keyed `git@github.com:org/infra`), `b` updates it as an ad-hoc
+**binary** and prints a hint pointing at the env. To target the env instead,
+paste the exact key `b env status` prints, or use a short handle (`org/infra#`) —
+appending `#` to the https path won't match, since the SSH key has no host
+segment.
+
+### Scope: envs only / binaries only
+
+Refresh vendored env content without touching the toolchain, or vice versa:
+
+```bash
+# Sync every env, skip binaries
+b update --envs-only
+
+# Update every binary, skip env sync
+b update --binaries-only
+```
+
 ### Force an update
 
 Force an update even if the binary is already at the latest version. This is useful for re-installing a corrupted binary.
@@ -100,7 +154,8 @@ b update --rollback github.com/org/infra
 
 ### Group filtering
 
-Only update envs tagged with a specific group:
+Only update envs tagged with a specific group. Groups are an env-only concept,
+so `--group` implies `--envs-only` — binaries are left untouched:
 
 ```bash
 b update --group=dev
@@ -129,7 +184,9 @@ the full list of environment variables and examples.
 | `--strategy`      | Merge strategy for env updates: `replace`, `client`, or `merge` |
 | `--dry-run`       | Show what would change without writing files |
 | `--rollback`      | Rollback envs to their previous commit from lock |
-| `--group`         | Only update envs in this group |
+| `--group`         | Only update envs in this group (implies `--envs-only`) |
+| `--envs-only`     | Only update envs, skip binaries |
+| `--binaries-only` | Only update binaries, skip envs |
 | `-h`, `--help`    | help for update                           |
 
 ## Global Flags

@@ -72,6 +72,40 @@ func TestRefBase_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestRepoPath(t *testing.T) {
+	tests := []struct {
+		ref  string
+		want []string
+	}{
+		{"github.com/org/repo", []string{"github.com", "org", "repo"}},
+		{"git@github.com:org/repo", []string{"org", "repo"}},
+		{"git@github.com:org/repo.git#main", []string{"org", "repo"}},
+		{"github.com/org/repo@v2.0", []string{"github.com", "org", "repo"}},
+		{"ssh://git@host/org/repo", []string{"org", "repo"}},
+		// host:port must not be mistaken for an scp "host:path" separator.
+		{"ssh://git@host:2222/org/repo", []string{"org", "repo"}},
+		{"https://github.com:443/org/repo", []string{"github.com:443", "org", "repo"}},
+		// .git must be stripped even with a trailing slash.
+		{"github.com/org/repo.git/", []string{"github.com", "org", "repo"}},
+		{"single", []string{"single"}},
+		{"/abs/local/path", nil},
+		{"./rel", nil},
+	}
+	for _, tt := range tests {
+		got := RepoPath(tt.ref)
+		if len(got) != len(tt.want) {
+			t.Errorf("RepoPath(%q) = %v, want %v", tt.ref, got, tt.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("RepoPath(%q) = %v, want %v", tt.ref, got, tt.want)
+				break
+			}
+		}
+	}
+}
+
 func TestRefLabel_EdgeCases(t *testing.T) {
 	tests := []struct {
 		ref  string
