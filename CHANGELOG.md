@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.18.4](https://github.com/fentas/b/compare/v4.18.3...v4.18.4) (2026-06-25)
+
+
+### Bug Fixes
+
+* **env:** prune orphaned lock entries + idempotent UpsertEnv ([#176](https://github.com/fentas/b/issues/176)) ([44eb405](https://github.com/fentas/b/commit/44eb405e4e498a062669745296ce7ffb7d051f76))
+
 ## [4.18.3](https://github.com/fentas/b/compare/v4.18.2...v4.18.3) (2026-06-25)
 
 
