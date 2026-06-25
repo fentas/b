@@ -52,10 +52,8 @@ func NewEnvResolveCmd(shared *SharedOptions) *cobra.Command {
 		Long: `Inspect synced env files for unresolved git-style merge conflict markers
 and optionally pick a side in bulk.
 
-Env files are synced by ` + "`b update`" + ` / ` + "`b install`" + ` (there is no
-` + "`b env sync`" + ` or ` + "`b env update`" + ` subcommand); conflict markers are
-left when ` + "`b update --strategy=merge`" + ` can't auto-merge a hunk
-(` + "`--strategy`" + ` is a ` + "`b update`" + ` flag).
+Env files are synced by ` + "`b update`" + ` / ` + "`b install`" + ` (there is no ` + "`b env sync`" + ` or ` + "`b env update`" + ` subcommand).
+Conflict markers are left when ` + "`b update --strategy=merge`" + ` can't auto-merge a hunk (` + "`--strategy`" + ` is a ` + "`b update`" + ` flag).
 
 Without --ours or --theirs the command lists every conflicted file. With
 either flag, the listed files are rewritten in place by keeping that
