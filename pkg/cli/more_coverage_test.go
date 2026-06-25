@@ -174,6 +174,9 @@ func TestNewListCmd(t *testing.T) {
 
 func TestVerifyRun_WithEntries(t *testing.T) {
 	dir := t.TempDir()
+	// Env dests resolve against the project root; pin it to dir so the matching
+	// a.yaml below is genuinely checked rather than resolving to the repo root.
+	t.Setenv("PATH_BASE", dir)
 	binDir := filepath.Join(dir, ".bin")
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -235,6 +238,53 @@ func TestVerifyRun_WithEntries(t *testing.T) {
 	// Lock has intentional mismatches/missing files — Run should report failures.
 	if err := o.Run(); err == nil {
 		t.Error("expected verify to return an error for mismatched/missing entries")
+	}
+}
+
+// TestVerifyRun_DefaultBinLayout_FindsEnvFiles is the regression for the default
+// `.bin/b.yaml` layout: lockDir is <root>/.bin but env files live at the project
+// root (<root>/<dest>). verify must resolve dests against the project root — not
+// lockDir, which made it stat <root>/.bin/<dest> and report present, matching
+// files as "missing" (b verify unusable on envs synced into the project root).
+func TestVerifyRun_DefaultBinLayout_FindsEnvFiles(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PATH_BASE", root) // projectRoot = root
+	binDir := filepath.Join(root, ".bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Env file at the project root (where SyncEnv writes it), not under .bin.
+	envPath := filepath.Join(root, "configs", "a.yaml")
+	if err := os.MkdirAll(filepath.Dir(envPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(envPath, []byte("data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	envHash, err := lock.SHA256File(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Lock lives in .bin (lockDir); dest is project-root-relative.
+	lk := &lock.Lock{
+		Version: 1,
+		Envs: []lock.EnvEntry{
+			{Ref: "github.com/org/infra", Files: []lock.LockFile{
+				{Path: "a.yaml", Dest: "configs/a.yaml", SHA256: envHash},
+			}},
+		},
+	}
+	if err := lock.WriteLock(binDir, lk, "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	shared := NewSharedOptions(mkIO(), nil)
+	shared.ConfigPath = filepath.Join(binDir, "b.yaml") // lockDir = <root>/.bin
+	o := &VerifyOptions{SharedOptions: shared}
+	if err := o.Run(); err != nil {
+		t.Errorf("verify should pass for a present, matching env file on .bin layout, got: %v", err)
 	}
 }
 
