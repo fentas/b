@@ -233,6 +233,13 @@ func (o *EnvStatusOptions) Run() error {
 		return err
 	}
 
+	// Env file dests are stored relative to the project root (that's the base
+	// SyncEnv writes and validates against — pkg/env/env.go), NOT the config
+	// dir. Resolving them against lockDir here made `b env status` report every
+	// file "missing" whenever the config lived in a subdir like .bin/ (the
+	// default layout), because it stat'd .bin/<dest> instead of <root>/<dest>.
+	projectRoot := o.ProjectRoot()
+
 	for _, entry := range o.Config.Envs {
 		label := gitcache.RefLabel(entry.Key)
 		ref := gitcache.RefBase(entry.Key)
@@ -276,12 +283,12 @@ func (o *EnvStatusOptions) Run() error {
 		for _, f := range lockEntry.Files {
 			destPath := f.Dest
 			if !filepath.IsAbs(destPath) {
-				destPath = filepath.Join(lockDir, destPath)
+				destPath = filepath.Join(projectRoot, destPath)
 			}
 			destPath = filepath.Clean(destPath)
 
 			// Skip paths that escape the project root (including via symlinks)
-			if err := env.ValidatePathUnderRoot(lockDir, destPath); err != nil {
+			if err := env.ValidatePathUnderRoot(projectRoot, destPath); err != nil {
 				localDrift++
 				continue
 			}
@@ -413,17 +420,21 @@ func (o *EnvRemoveOptions) Run(key string) error {
 		if err != nil {
 			return err
 		}
+		// Dests are project-root-relative (the base SyncEnv writes against), not
+		// config-dir-relative — resolving against lockDir here silently missed
+		// the real files (and orphaned them) on the default .bin/ layout.
+		projectRoot := o.ProjectRoot()
 		lockEntry := lk.FindEnv(ref, label)
 		if lockEntry != nil {
 			for _, f := range lockEntry.Files {
 				destPath := f.Dest
 				if !filepath.IsAbs(destPath) {
-					destPath = filepath.Join(lockDir, destPath)
+					destPath = filepath.Join(projectRoot, destPath)
 				}
 				destPath = filepath.Clean(destPath)
 
 				// Path traversal check (including symlinks): refuse to delete outside project root
-				if err := env.ValidatePathUnderRoot(lockDir, destPath); err != nil {
+				if err := env.ValidatePathUnderRoot(projectRoot, destPath); err != nil {
 					fmt.Fprintf(o.IO.ErrOut, "  Warning: skipping %s (resolves outside project root)\n", f.Dest)
 					continue
 				}

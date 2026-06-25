@@ -90,6 +90,8 @@ func TestEnvStatus_UpToDate(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
+	// Env dests resolve against the project root, so pin it to tmpDir.
+	t.Setenv("PATH_BASE", tmpDir)
 	// Create a synced file
 	destPath := filepath.Join(tmpDir, "test.yaml")
 	os.WriteFile(destPath, []byte("content"), 0644)
@@ -135,6 +137,7 @@ func TestEnvStatus_UpstreamChanged(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
+	t.Setenv("PATH_BASE", tmpDir)
 	destPath := filepath.Join(tmpDir, "test.yaml")
 	os.WriteFile(destPath, []byte("content"), 0644)
 	hash, _ := lock.SHA256File(destPath)
@@ -178,6 +181,7 @@ func TestEnvStatus_LocalDrift(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
+	t.Setenv("PATH_BASE", tmpDir)
 	destPath := filepath.Join(tmpDir, "test.yaml")
 	os.WriteFile(destPath, []byte("modified content"), 0644)
 
@@ -220,6 +224,7 @@ func TestEnvStatus_PathTraversalInLock(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
+	t.Setenv("PATH_BASE", tmpDir)
 
 	// Lock entry with a path that escapes project root
 	lk := &lock.Lock{
@@ -253,6 +258,60 @@ func TestEnvStatus_PathTraversalInLock(t *testing.T) {
 	// Should count the escaping path as drift, not try to read /etc/passwd
 	if !strings.Contains(out.String(), "modified locally") {
 		t.Errorf("expected drift for path traversal entry, got: %q", out.String())
+	}
+}
+
+// TestEnvStatus_DefaultBinLayout_FindsFiles is the regression for the default
+// `.bin/b.yaml` layout, where lockDir (<root>/.bin) differs from the project
+// root (<root>). Env files are written relative to the project root, so status
+// must resolve dests there — not under lockDir, which made it stat
+// <root>/.bin/<dest> and falsely report every file missing (issue: successful
+// sync still reports everything "missing").
+func TestEnvStatus_DefaultBinLayout_FindsFiles(t *testing.T) {
+	saveHooks(t)
+	resolveRefFunc = func(url, version string) (string, error) { return "abc123def456", nil }
+
+	root := t.TempDir()
+	t.Setenv("PATH_BASE", root) // projectRoot = root
+	binDir := filepath.Join(root, ".bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// File lives at the project root (where SyncEnv writes it), NOT under .bin.
+	destPath := filepath.Join(root, "manifests", "deploy.yaml")
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(destPath, []byte("content"), 0644)
+	hash, _ := lock.SHA256File(destPath)
+
+	// Lock lives in .bin (lockDir); dest is project-root-relative.
+	lk := &lock.Lock{
+		Envs: []lock.EnvEntry{{
+			Ref:    "github.com/org/infra",
+			Commit: "abc123def456",
+			Files:  []lock.LockFile{{Path: "manifests/deploy.yaml", Dest: "manifests/deploy.yaml", SHA256: hash}},
+		}},
+	}
+	lock.WriteLock(binDir, lk, "v1.0")
+
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{Envs: state.EnvList{{Key: "github.com/org/infra"}}}
+	shared.loadedConfigPath = filepath.Join(binDir, "b.yaml") // lockDir = <root>/.bin
+
+	o := &EnvStatusOptions{SharedOptions: shared}
+	if err := o.Run(); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	got := out.String()
+	if strings.Contains(got, "missing") {
+		t.Errorf("status falsely reported missing on .bin layout: %q", got)
+	}
+	if !strings.Contains(got, "up to date") {
+		t.Errorf("expected 'up to date', got: %q", got)
 	}
 }
 
@@ -336,6 +395,7 @@ func TestEnvRemove_RemovesFromLock(t *testing.T) {
 
 func TestEnvRemove_DeletesFiles(t *testing.T) {
 	tmpDir := t.TempDir()
+	t.Setenv("PATH_BASE", tmpDir)
 
 	// Create synced file
 	destPath := filepath.Join(tmpDir, "deploy.yaml")
@@ -368,6 +428,50 @@ func TestEnvRemove_DeletesFiles(t *testing.T) {
 
 	if _, err := os.Stat(destPath); !os.IsNotExist(err) {
 		t.Error("synced file should be deleted")
+	}
+}
+
+// TestEnvRemove_DeletesFiles_DefaultBinLayout is the sibling regression: with
+// config in <root>/.bin, --delete-files must remove the file at the project
+// root (<root>/<dest>), not look under lockDir (<root>/.bin/<dest>) and
+// silently orphan it.
+func TestEnvRemove_DeletesFiles_DefaultBinLayout(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("PATH_BASE", root)
+	binDir := filepath.Join(root, ".bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	destPath := filepath.Join(root, "manifests", "deploy.yaml")
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(destPath, []byte("content"), 0644)
+
+	lk := &lock.Lock{
+		Envs: []lock.EnvEntry{{
+			Ref:    "github.com/org/infra",
+			Commit: "abc",
+			Files:  []lock.LockFile{{Path: "manifests/deploy.yaml", Dest: "manifests/deploy.yaml"}},
+		}},
+	}
+	lock.WriteLock(binDir, lk, "v1.0")
+
+	out := &bytes.Buffer{}
+	io := &streams.IO{Out: out, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{}
+	shared.loadedConfigPath = filepath.Join(binDir, "b.yaml")
+	shared.bVersion = "v1.0"
+
+	o := &EnvRemoveOptions{SharedOptions: shared, DeleteFiles: true}
+	if err := o.Run("github.com/org/infra"); err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+
+	if _, err := os.Stat(destPath); !os.IsNotExist(err) {
+		t.Error("file at project root should be deleted on .bin layout (not orphaned)")
 	}
 }
 
