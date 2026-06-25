@@ -284,6 +284,71 @@ func TestSyncEnv_LocalResyncWhenFileMissing(t *testing.T) {
 	}
 }
 
+// TestSyncEnv_LocalResyncWhenFileDrifted verifies that SyncEnv re-syncs (and
+// thus re-records the lock) when the commit is unchanged but a locked file's
+// on-disk hash no longer matches the lock — e.g. a lock poisoned with wrong
+// hashes by an older buggy version, with the files on disk still correct.
+// Without the hash check this was unhealable: status/verify reported drift
+// forever while update printed "(up to date)".
+func TestSyncEnv_LocalResyncWhenFileDrifted(t *testing.T) {
+	bare, commit := setupLocalBareRepo(t)
+	project := t.TempDir()
+
+	cfg := EnvConfig{
+		Ref:      bare,
+		Strategy: StrategyReplace,
+		Files: map[string]envmatch.GlobConfig{
+			"cfg/*.yaml": {Dest: "configs"},
+		},
+	}
+
+	// First sync — files on disk are byte-identical to upstream.
+	res, err := SyncEnv(cfg, project, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+	if len(res.Files) == 0 {
+		t.Fatal("expected synced files")
+	}
+
+	// Build a lock at the SAME commit but POISON one file's hash. The file on
+	// disk is left untouched (still correct/byte-identical to upstream).
+	const badHash = "0000000000000000000000000000000000000000000000000000000000000000"
+	lockEntry := &lock.EnvEntry{Commit: commit, Files: make([]lock.LockFile, len(res.Files))}
+	var poisonedDest, origHash string
+	for i, f := range res.Files {
+		sha := f.SHA256
+		if i == 0 {
+			poisonedDest, origHash = f.Dest, f.SHA256
+			sha = badHash
+		}
+		lockEntry.Files[i] = lock.LockFile{Path: f.Path, Dest: f.Dest, SHA256: sha}
+	}
+
+	// Re-sync at the same commit — must NOT skip (drift detected via hash).
+	res2, err := SyncEnv(cfg, project, t.TempDir(), lockEntry)
+	if err != nil {
+		t.Fatalf("re-sync: %v", err)
+	}
+	if res2.Skipped {
+		t.Fatal("expected Skipped=false when a locked file's hash drifted from disk")
+	}
+
+	// The healed result must carry the real hash, not the poisoned one.
+	var found bool
+	for _, f := range res2.Files {
+		if f.Dest == poisonedDest {
+			found = true
+			if f.SHA256 != origHash {
+				t.Errorf("expected re-recorded hash %q for %s, got %q", origHash, f.Dest, f.SHA256)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("re-sync result missing the poisoned dest %q", poisonedDest)
+	}
+}
+
 func TestSyncEnv_LocalDryRun(t *testing.T) {
 	bare, _ := setupLocalBareRepo(t)
 	project := t.TempDir()
