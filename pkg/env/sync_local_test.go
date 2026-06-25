@@ -212,14 +212,28 @@ func TestSyncEnv_LocalSkippedWhenUpToDate(t *testing.T) {
 		},
 	}
 
-	// Lock entry with the same commit → skip path
-	lockEntry := &lock.EnvEntry{Commit: commit}
+	// First sync to populate files on disk and capture their real hashes.
+	first, err := SyncEnv(cfg, project, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+	if len(first.Files) == 0 {
+		t.Fatal("expected synced files")
+	}
+
+	// Lock entry at the same commit WITH the recorded files+hashes, so the skip
+	// path exercises the in-sync hash-match branch (not a vacuous empty list).
+	lockEntry := &lock.EnvEntry{Commit: commit, Files: make([]lock.LockFile, len(first.Files))}
+	for i, f := range first.Files {
+		lockEntry.Files[i] = lock.LockFile{Path: f.Path, Dest: f.Dest, SHA256: f.SHA256}
+	}
+
 	res, err := SyncEnv(cfg, project, t.TempDir(), lockEntry)
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
 	if !res.Skipped {
-		t.Errorf("expected Skipped=true")
+		t.Errorf("expected Skipped=true when commit unchanged and files match their hashes")
 	}
 }
 

@@ -126,6 +126,19 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			if err := ValidatePathUnderRoot(projectRoot, dest); err != nil {
 				return nil, fmt.Errorf("lock entry has invalid dest %q: %w", f.Dest, err)
 			}
+			// A legacy/partial lock entry with no recorded hash can't be compared;
+			// fall back to an existence check (and don't read the file, so a
+			// present-but-unreadable file stays skippable as before).
+			if f.SHA256 == "" {
+				if _, err := os.Stat(dest); err != nil {
+					if os.IsNotExist(err) {
+						inSync = false // missing → re-sync
+						break
+					}
+					return nil, fmt.Errorf("checking synced env file %q: %w", dest, err)
+				}
+				continue
+			}
 			localHash, err := lock.SHA256File(dest)
 			if err != nil {
 				if os.IsNotExist(err) {
@@ -134,9 +147,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 				}
 				return nil, fmt.Errorf("checking synced env file %q: %w", dest, err)
 			}
-			// An empty recorded hash (legacy/partial lock entry) can't be
-			// compared; treat presence as sufficient so we don't re-sync needlessly.
-			if f.SHA256 != "" && localHash != f.SHA256 {
+			if localHash != f.SHA256 {
 				inSync = false // drifted → re-sync (heals a poisoned lock)
 				break
 			}
