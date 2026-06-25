@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.18.3](https://github.com/fentas/b/compare/v4.18.2...v4.18.3) (2026-06-25)
+
+
+### Bug Fixes
+
+* **env:** re-sync on hash drift at unchanged commit (auto-heal stale lock) ([#174](https://github.com/fentas/b/issues/174)) ([4b9741c](https://github.com/fentas/b/commit/4b9741cb33e46256a86f5dcff7502b1967593ee3))
+
 ## [4.18.2](https://github.com/fentas/b/compare/v4.18.1...v4.18.2) (2026-06-25)
 
 
