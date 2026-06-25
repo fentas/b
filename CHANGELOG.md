@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.18.1](https://github.com/fentas/b/compare/v4.18.0...v4.18.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **env:** status/remove resolve file paths against project root, not lockDir ([#170](https://github.com/fentas/b/issues/170)) ([ff82f4f](https://github.com/fentas/b/commit/ff82f4f7a88b3c6bbb534600e4dd2035391d8000))
+
 ## [4.18.0](https://github.com/fentas/b/compare/v4.17.2...v4.18.0) (2026-06-24)
 
 
