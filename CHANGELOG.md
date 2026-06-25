@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.18.2](https://github.com/fentas/b/compare/v4.18.1...v4.18.2) (2026-06-25)
+
+
+### Bug Fixes
+
+* **verify:** resolve env file paths against project root, not lockDir ([#172](https://github.com/fentas/b/issues/172)) ([3c1836a](https://github.com/fentas/b/commit/3c1836a0dede99ba1b286c9a52d5d2712b0c1c6e))
+
 ## [4.18.1](https://github.com/fentas/b/compare/v4.18.0...v4.18.1) (2026-06-25)
 
 
