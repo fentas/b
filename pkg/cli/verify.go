@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/fentas/b/pkg/env"
 	"github.com/fentas/b/pkg/lock"
 	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/goodies/templates"
@@ -82,18 +83,32 @@ func (o *VerifyOptions) Run() error {
 		}
 	}
 
+	// Env file dests are stored relative to the project root (the base SyncEnv
+	// writes against — pkg/env/env.go), NOT the config dir. Resolving against
+	// LockDir made `b verify` report every env file "missing" on the default
+	// .bin/ layout, where lockDir (.bin) differs from the project root.
+	projectRoot := o.ProjectRoot()
+
 	// Verify env files
-	for _, env := range lk.Envs {
+	for _, envEntry := range lk.Envs {
 		label := ""
-		if env.Label != "" {
-			label = "#" + env.Label
+		if envEntry.Label != "" {
+			label = "#" + envEntry.Label
 		}
-		fmt.Fprintf(o.IO.Out, "  %s%s\n", env.Ref, label)
-		for _, f := range env.Files {
-			// Resolve dest relative to project root
+		fmt.Fprintf(o.IO.Out, "  %s%s\n", envEntry.Ref, label)
+		for _, f := range envEntry.Files {
 			destPath := f.Dest
 			if !filepath.IsAbs(destPath) {
-				destPath = filepath.Join(dir, destPath)
+				destPath = filepath.Join(projectRoot, destPath)
+			}
+			destPath = filepath.Clean(destPath)
+			// Refuse to read paths that escape the project root — a malicious or
+			// hand-edited lock must not make verify stat arbitrary files. Matches
+			// the guard in env status/remove/resolve.
+			if err := env.ValidatePathUnderRoot(projectRoot, destPath); err != nil {
+				fmt.Fprintf(o.IO.Out, "    %-38s ✗ escapes project root\n", f.Dest)
+				failures++
+				continue
 			}
 			if _, err := os.Stat(destPath); os.IsNotExist(err) {
 				fmt.Fprintf(o.IO.Out, "    %-38s ✗ missing\n", f.Dest)
