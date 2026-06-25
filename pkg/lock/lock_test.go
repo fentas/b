@@ -190,6 +190,41 @@ func TestUpsertEnv(t *testing.T) {
 	}
 }
 
+// TestUpsertEnv_CollapsesDuplicates verifies UpsertEnv is idempotent: a lock
+// that already holds two entries for the same (ref,label) collapses to a single
+// updated entry, rather than leaving a stale duplicate behind.
+func TestUpsertEnv_CollapsesDuplicates(t *testing.T) {
+	lk := &Lock{
+		Envs: []EnvEntry{
+			{Ref: "github.com/org/infra", Label: "main", Commit: "stale"},
+			{Ref: "github.com/org/other", Label: "", Commit: "keep"},
+			{Ref: "github.com/org/infra", Label: "main", Commit: "alsostale"},
+		},
+	}
+
+	lk.UpsertEnv(EnvEntry{Ref: "github.com/org/infra", Label: "main", Commit: "fresh"})
+
+	// Exactly one infra#main entry, with the fresh commit; the other env intact.
+	var infra int
+	for _, e := range lk.Envs {
+		if e.Ref == "github.com/org/infra" && e.Label == "main" {
+			infra++
+			if e.Commit != "fresh" {
+				t.Errorf("infra#main commit = %q, want fresh", e.Commit)
+			}
+		}
+	}
+	if infra != 1 {
+		t.Errorf("expected exactly 1 infra#main entry after collapse, got %d", infra)
+	}
+	if len(lk.Envs) != 2 {
+		t.Errorf("expected 2 envs total (infra#main + other), got %d", len(lk.Envs))
+	}
+	if lk.FindEnv("github.com/org/other", "") == nil {
+		t.Error("unrelated env was dropped")
+	}
+}
+
 func TestReadWriteLockWithEnvs(t *testing.T) {
 	dir := t.TempDir()
 

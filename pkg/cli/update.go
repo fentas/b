@@ -827,10 +827,65 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		return aggregateEnvErrors(refusedEnvs, failedEnvs)
 	}
 
+	// Reconcile the lock to the config before writing: drop env entries no
+	// longer in b.yaml (e.g. an env whose label was renamed). Such orphans are
+	// never re-synced (FindEnv/UpsertEnv key on the configured ref+label) yet
+	// `b verify` still checks them, so their stale hashes report mismatches
+	// forever for dests a live env now owns.
+	o.pruneOrphanedEnvs(lk)
+
 	if err := lock.WriteLock(lockDir, lk, o.bVersion); err != nil {
 		return err
 	}
 	return aggregateEnvErrors(refusedEnvs, failedEnvs)
+}
+
+// pruneOrphanedEnvs normalizes the lock's env entries against the config,
+// returning the number removed. It drops entries whose (ref,label) is not in
+// b.yaml (orphans, e.g. a renamed label) AND collapses duplicates of the same
+// configured (ref,label), keeping the first occurrence. The dedup matters when
+// the env is up-to-date this run: SyncEnv skips it so UpsertEnv never runs to
+// collapse a same-key twin, yet the lock is still rewritten — without this, the
+// stale duplicate would survive and `b verify` would keep flagging it.
+//
+// Keys are derived exactly as updateEnvs writes them (gitcache.RefBase/RefLabel
+// of the config key), so a live config env — even one not synced this run
+// (group/arg filtered, or up-to-date) — is never pruned. No-op when no env is
+// configured.
+func (o *UpdateOptions) pruneOrphanedEnvs(lk *lock.Lock) int {
+	if lk == nil || o.Config == nil || len(o.Config.Envs) == 0 {
+		return 0
+	}
+	configured := make(map[string]bool, len(o.Config.Envs))
+	for _, e := range o.Config.Envs {
+		configured[gitcache.RefBase(e.Key)+"\x00"+gitcache.RefLabel(e.Key)] = true
+	}
+	seen := make(map[string]bool, len(lk.Envs))
+	kept := lk.Envs[:0]
+	var pruned []string
+	for _, e := range lk.Envs {
+		key := e.Ref + "\x00" + e.Label
+		display := e.Ref
+		if e.Label != "" {
+			display += "#" + e.Label
+		}
+		switch {
+		case !configured[key]:
+			pruned = append(pruned, display+" (not in b.yaml)")
+		case seen[key]:
+			pruned = append(pruned, display+" (duplicate)")
+		default:
+			seen[key] = true
+			kept = append(kept, e)
+		}
+	}
+	if len(pruned) == 0 {
+		return 0
+	}
+	lk.Envs = kept
+	fmt.Fprintf(o.IO.ErrOut, "  pruned %d stale env entry(ies) from b.lock: %s\n",
+		len(pruned), strings.Join(pruned, ", "))
+	return len(pruned)
 }
 
 // aggregateEnvErrors returns a single error summarizing safety refusals
