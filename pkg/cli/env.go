@@ -178,7 +178,7 @@ func hashAndScanConflicts(path string) (string, bool, error) {
 func NewEnvCmd(shared *SharedOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "env",
-		Short: "Inspect and configure env file sync",
+		Short: "Inspect and manage env file sync settings",
 		Long: `Commands for inspecting and configuring env file sync.
 
 The sync itself runs from the top level — there is no ` + "`b env sync`" + ` or
