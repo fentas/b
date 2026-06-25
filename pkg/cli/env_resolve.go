@@ -18,9 +18,9 @@ import (
 // EnvResolveOptions holds options for `b env resolve`.
 //
 // The command lists files that contain unresolved git-style conflict
-// markers (left there by `b env update` after a 3-way merge couldn't
-// auto-merge a hunk) and optionally rewrites them in bulk by picking
-// one side of every conflict region.
+// markers (left there by `b update --strategy=merge` after a 3-way merge
+// couldn't auto-merge a hunk) and optionally rewrites them in bulk by
+// picking one side of every conflict region.
 //
 // Conflict marker shape (the `git merge-file --diff3` output b uses):
 //
@@ -48,9 +48,12 @@ func NewEnvResolveCmd(shared *SharedOptions) *cobra.Command {
 	o := &EnvResolveOptions{SharedOptions: shared}
 	cmd := &cobra.Command{
 		Use:   "resolve [env...]",
-		Short: "List or auto-resolve merge conflicts left by `b env update`",
+		Short: "List or auto-resolve merge conflicts left by `b update --strategy=merge`",
 		Long: `Inspect synced env files for unresolved git-style merge conflict markers
 and optionally pick a side in bulk.
+
+Env files are synced by ` + "`b update`" + ` / ` + "`b install`" + ` (there is no ` + "`b env sync`" + ` or ` + "`b env update`" + ` subcommand).
+Conflict markers are left when ` + "`b update --strategy=merge`" + ` can't auto-merge a hunk (` + "`--strategy`" + ` is a ` + "`b update`" + ` flag).
 
 Without --ours or --theirs the command lists every conflicted file. With
 either flag, the listed files are rewritten in place by keeping that
