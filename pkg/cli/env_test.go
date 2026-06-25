@@ -658,6 +658,49 @@ func TestUpdateEnvs_PrunesOrphanedLockEntries(t *testing.T) {
 	}
 }
 
+// TestUpdateEnvs_DedupsConfiguredLockEntries covers Copilot's edge case: two
+// lock entries for the SAME configured (ref,label). When the env is up-to-date
+// SyncEnv skips it, so UpsertEnv never collapses the twin — the normalize pass
+// must dedup configured keys (keep first) so the rewritten lock is clean.
+func TestUpdateEnvs_DedupsConfiguredLockEntries(t *testing.T) {
+	saveHooks(t)
+
+	tmpDir := t.TempDir()
+	lk := &lock.Lock{
+		Envs: []lock.EnvEntry{
+			{Ref: "github.com/org/infra", Label: "", Commit: "abc",
+				Files: []lock.LockFile{{Path: "a.yaml", Dest: "a.yaml", SHA256: "good"}}},
+			{Ref: "github.com/org/infra", Label: "", Commit: "abc",
+				Files: []lock.LockFile{{Path: "a.yaml", Dest: "a.yaml", SHA256: "stale-twin"}}},
+		},
+	}
+	lock.WriteLock(tmpDir, lk, "v1.0")
+
+	syncEnvFunc = func(cfg env.EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEntry) (*env.SyncResult, error) {
+		return &env.SyncResult{Ref: cfg.Ref, Label: cfg.Label, Commit: "abc", Skipped: true, Message: "(up to date)"}, nil
+	}
+
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{Envs: state.EnvList{{Key: "github.com/org/infra"}}}
+	shared.loadedConfigPath = filepath.Join(tmpDir, "b.yaml")
+	shared.bVersion = "v1.0"
+
+	o := &UpdateOptions{SharedOptions: shared}
+	if err := o.updateEnvs(nil); err != nil {
+		t.Fatalf("updateEnvs error: %v", err)
+	}
+
+	lk2, _ := lock.ReadLock(tmpDir)
+	if len(lk2.Envs) != 1 {
+		t.Fatalf("expected 1 env after dedup, got %d", len(lk2.Envs))
+	}
+	// First occurrence kept (the up-to-date / FindEnv-visible one).
+	if len(lk2.Envs[0].Files) != 1 || lk2.Envs[0].Files[0].SHA256 != "good" {
+		t.Errorf("expected the first entry kept (good hash), got %+v", lk2.Envs[0].Files)
+	}
+}
+
 // --- Feature 10: group filtering ---
 
 func TestUpdateEnvs_GroupFilter(t *testing.T) {
