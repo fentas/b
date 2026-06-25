@@ -139,15 +139,27 @@ func (l *Lock) RemoveEnv(ref, label string) bool {
 	return false
 }
 
-// UpsertEnv adds or updates an env entry in the lock.
+// UpsertEnv adds or updates an env entry in the lock. It replaces the first
+// matching (ref,label) entry in place and drops any further duplicates, so the
+// write is idempotent: a lock that somehow accumulated two entries for the same
+// env collapses to one here instead of leaving a stale twin behind.
 func (l *Lock) UpsertEnv(entry EnvEntry) {
-	for i := range l.Envs {
-		if l.Envs[i].Ref == entry.Ref && l.Envs[i].Label == entry.Label {
-			l.Envs[i] = entry
-			return
+	replaced := false
+	kept := l.Envs[:0]
+	for _, e := range l.Envs {
+		if e.Ref == entry.Ref && e.Label == entry.Label {
+			if !replaced {
+				kept = append(kept, entry)
+				replaced = true
+			}
+			continue // drop duplicate
 		}
+		kept = append(kept, e)
 	}
-	l.Envs = append(l.Envs, entry)
+	if !replaced {
+		kept = append(kept, entry)
+	}
+	l.Envs = kept
 }
 
 // SHA256File computes the SHA256 checksum of a file.

@@ -827,10 +827,52 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		return aggregateEnvErrors(refusedEnvs, failedEnvs)
 	}
 
+	// Reconcile the lock to the config before writing: drop env entries no
+	// longer in b.yaml (e.g. an env whose label was renamed). Such orphans are
+	// never re-synced (FindEnv/UpsertEnv key on the configured ref+label) yet
+	// `b verify` still checks them, so their stale hashes report mismatches
+	// forever for dests a live env now owns.
+	o.pruneOrphanedEnvs(lk)
+
 	if err := lock.WriteLock(lockDir, lk, o.bVersion); err != nil {
 		return err
 	}
 	return aggregateEnvErrors(refusedEnvs, failedEnvs)
+}
+
+// pruneOrphanedEnvs removes lock env entries whose (ref,label) no longer
+// corresponds to any configured env, returning the number removed. The keys are
+// derived exactly as updateEnvs writes them (gitcache.RefBase/RefLabel of the
+// config key), so a live config env — even one not synced this run (group/arg
+// filtered, or up-to-date) — is never pruned. No-op when no env is configured.
+func (o *UpdateOptions) pruneOrphanedEnvs(lk *lock.Lock) int {
+	if lk == nil || o.Config == nil || len(o.Config.Envs) == 0 {
+		return 0
+	}
+	configured := make(map[string]bool, len(o.Config.Envs))
+	for _, e := range o.Config.Envs {
+		configured[gitcache.RefBase(e.Key)+"\x00"+gitcache.RefLabel(e.Key)] = true
+	}
+	kept := lk.Envs[:0]
+	var pruned []string
+	for _, e := range lk.Envs {
+		if configured[e.Ref+"\x00"+e.Label] {
+			kept = append(kept, e)
+			continue
+		}
+		key := e.Ref
+		if e.Label != "" {
+			key += "#" + e.Label
+		}
+		pruned = append(pruned, key)
+	}
+	if len(pruned) == 0 {
+		return 0
+	}
+	lk.Envs = kept
+	fmt.Fprintf(o.IO.ErrOut, "  pruned %d orphaned env entry(ies) from b.lock (not in b.yaml): %s\n",
+		len(pruned), strings.Join(pruned, ", "))
+	return len(pruned)
 }
 
 // aggregateEnvErrors returns a single error summarizing safety refusals
