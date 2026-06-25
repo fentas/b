@@ -106,25 +106,53 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 	}
 
 	// Check if up-to-date (skip when forcing a specific commit).
-	// NOTE: This skips when the commit hasn't changed. If only the local config
-	// changed (e.g. select filters), use --force to re-sync.
+	//
+	// Skip only when the commit is unchanged AND every locked file is still
+	// byte-identical to its recorded hash. A missing OR drifted file — local
+	// edits, or a lock written with stale/wrong hashes (e.g. by an older buggy
+	// version) — falls through to a full re-sync, which reconciles via the
+	// per-file strategy + safety gate and re-records the lock. Without the hash
+	// check, a stale lock at an unchanged commit was unhealable: status/verify
+	// reported drift forever while update kept printing "(up to date)".
+	//
+	// This trades a local hash of each synced file (no network) on the
+	// commit-unchanged fast path for self-healing + drift detection — a
+	// deliberate UX-over-compute choice; the network fetch still happens only
+	// when drift is actually found.
 	if cfg.ForceCommit == "" && lockEntry != nil && lockEntry.Commit == commit {
-		// Verify locked files still exist on disk; re-sync if any are missing.
-		allPresent := true
+		inSync := true
 		for _, f := range lockEntry.Files {
 			dest := filepath.Join(projectRoot, f.Dest)
 			if err := ValidatePathUnderRoot(projectRoot, dest); err != nil {
 				return nil, fmt.Errorf("lock entry has invalid dest %q: %w", f.Dest, err)
 			}
-			if _, err := os.Stat(dest); err != nil {
+			// A legacy/partial lock entry with no recorded hash can't be compared;
+			// fall back to an existence check (and don't read the file, so a
+			// present-but-unreadable file stays skippable as before).
+			if f.SHA256 == "" {
+				if _, err := os.Stat(dest); err != nil {
+					if os.IsNotExist(err) {
+						inSync = false // missing → re-sync
+						break
+					}
+					return nil, fmt.Errorf("checking synced env file %q: %w", dest, err)
+				}
+				continue
+			}
+			localHash, err := lock.SHA256File(dest)
+			if err != nil {
 				if os.IsNotExist(err) {
-					allPresent = false
+					inSync = false // missing → re-sync
 					break
 				}
 				return nil, fmt.Errorf("checking synced env file %q: %w", dest, err)
 			}
+			if localHash != f.SHA256 {
+				inSync = false // drifted → re-sync (heals a poisoned lock)
+				break
+			}
 		}
-		if allPresent {
+		if inSync {
 			return &SyncResult{
 				Ref:     baseRef,
 				Label:   cfg.Label,
