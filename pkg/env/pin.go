@@ -55,6 +55,14 @@ const PinAnnotation = "b.pin"
 // for that one file. applyPinsYAML returns local verbatim when it
 // sees a root pin, so the splice's bytes are preserved exactly.
 //
+// mayCarryPins is the shared cheap pre-check: pinning is YAML-only and
+// requires the `b.pin` annotation substring, so a file failing either test
+// can't possibly carry a pin. Substring matches can produce false positives
+// (e.g. a key literally named "b.pin" elsewhere); callers only use this as a
+// gate — applyPinsYAML falls through to the structural collectPinnedPaths
+// (the source of truth), and the up-to-date fast path merely downgrades such
+// a file to the lock-hash comparison. Both directions are safe.
+//
 // Formatting caveat: when pin restoration actually substitutes a
 // subtree, the file is round-tripped through the yaml.v3 encoder,
 // so comments and whitespace on the affected file are NOT
@@ -64,22 +72,9 @@ const PinAnnotation = "b.pin"
 // splice's bytes verbatim — so the common no-drift case keeps
 // splice's byte-preservation guarantees.
 func applyPinsYAML(local, pending []byte, filePath string) ([]byte, error) {
-	ext := strings.ToLower(filepath.Ext(filePath))
-	if ext != ".yaml" && ext != ".yml" {
-		return pending, nil
-	}
-	if len(local) == 0 {
-		// No local file → nothing pinned to honor.
-		return pending, nil
-	}
-	// Cheap pre-check: a file with no `b.pin` substring anywhere
-	// can't possibly carry a pin annotation, and we'd spend the
-	// yaml.Unmarshal cost on every sync of every YAML file just to
-	// learn that. Substring matches can produce false positives
-	// (e.g. a key literally named "b.pin" elsewhere), but those
-	// just trigger the slow path — the structural collectPinnedPaths
-	// is the source of truth.
-	if !bytes.Contains(local, []byte(PinAnnotation)) {
+	// mayCarryPins covers the ext + annotation-substring gate (an empty
+	// local trivially has no annotation → nothing pinned to honor).
+	if !mayCarryPins(filePath, local) {
 		return pending, nil
 	}
 
@@ -389,4 +384,32 @@ func addPath(doc *yaml.Node, path []string, value *yaml.Node) {
 		}
 		n = found
 	}
+}
+
+// mayCarryPins reports whether content may carry `b.pin` annotations that make
+// it legitimately diverge from the raw upstream blob. Shared gate for
+// applyPinsYAML and the up-to-date fast path — see the applyPinsYAML doc
+// comment for the false-positive contract.
+func mayCarryPins(sourcePath string, data []byte) bool {
+	ext := strings.ToLower(filepath.Ext(sourcePath))
+	if ext != ".yaml" && ext != ".yml" {
+		return false
+	}
+	return bytes.Contains(data, []byte(PinAnnotation))
+}
+
+// hasActivePins reports whether the content structurally carries at least one
+// `b.pin` annotation. The fast path uses it to confirm a mayCarryPins substring
+// hit before excluding a file from source verification — a substring false
+// positive (e.g. a comment mentioning "b.pin") would otherwise silently
+// downgrade that file to the lock-only comparison, reintroducing the
+// undetectable-stale state this check exists to prevent. Unparseable content
+// cannot carry effective pins (applyPinsYAML leaves such files alone), so it
+// reports false and the file stays source-verified.
+func hasActivePins(data []byte) bool {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return false
+	}
+	return len(collectPinnedPaths(&doc, nil)) > 0
 }

@@ -107,50 +107,24 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 
 	// Check if up-to-date (skip when forcing a specific commit).
 	//
-	// Skip only when the commit is unchanged AND every locked file is still
-	// byte-identical to its recorded hash. A missing OR drifted file — local
-	// edits, or a lock written with stale/wrong hashes (e.g. by an older buggy
-	// version) — falls through to a full re-sync, which reconciles via the
-	// per-file strategy + safety gate and re-records the lock. Without the hash
-	// check, a stale lock at an unchanged commit was unhealable: status/verify
-	// reported drift forever while update kept printing "(up to date)".
+	// Skip only when the commit is unchanged AND the on-disk state still
+	// matches both the lock and — for plainly-written files — the actual
+	// source content at that commit. The lock alone is not trusted as ground
+	// truth: a lock whose commit pointer was advanced without its content
+	// (e.g. by an older buggy version) would otherwise read as "up to date"
+	// forever while the tree stayed stale. Any mismatch — missing file, local
+	// edit, changed glob config, or lock+disk both stale relative to source —
+	// falls through to a full re-sync, which reconciles via the per-file
+	// strategy + safety gate and re-records the lock.
 	//
-	// This trades a local hash of each synced file (no network) on the
-	// commit-unchanged fast path for self-healing + drift detection — a
-	// deliberate UX-over-compute choice; the network fetch still happens only
-	// when drift is actually found.
+	// This is a deliberate UX-over-compute choice: the fast path costs a local
+	// read+hash per synced file and one `git ls-tree` against the local cache
+	// (the pinned commit is fetched when missing; a failed fetch degrades
+	// source verification to the lock comparison for that run).
 	if cfg.ForceCommit == "" && lockEntry != nil && lockEntry.Commit == commit {
-		inSync := true
-		for _, f := range lockEntry.Files {
-			dest := filepath.Join(projectRoot, f.Dest)
-			if err := ValidatePathUnderRoot(projectRoot, dest); err != nil {
-				return nil, fmt.Errorf("lock entry has invalid dest %q: %w", f.Dest, err)
-			}
-			// A legacy/partial lock entry with no recorded hash can't be compared;
-			// fall back to an existence check (and don't read the file, so a
-			// present-but-unreadable file stays skippable as before).
-			if f.SHA256 == "" {
-				if _, err := os.Stat(dest); err != nil {
-					if os.IsNotExist(err) {
-						inSync = false // missing → re-sync
-						break
-					}
-					return nil, fmt.Errorf("checking synced env file %q: %w", dest, err)
-				}
-				continue
-			}
-			localHash, err := lock.SHA256File(dest)
-			if err != nil {
-				if os.IsNotExist(err) {
-					inSync = false // missing → re-sync
-					break
-				}
-				return nil, fmt.Errorf("checking synced env file %q: %w", dest, err)
-			}
-			if localHash != f.SHA256 {
-				inSync = false // drifted → re-sync (heals a poisoned lock)
-				break
-			}
+		inSync, err := lockedStateInSync(cfg, resolved, projectRoot, cacheRoot, baseRef, commit, strategy, lockEntry)
+		if err != nil {
+			return nil, err
 		}
 		if inSync {
 			return &SyncResult{
@@ -877,6 +851,148 @@ func ValidatePathUnderRoot(root, destPath string) error {
 	}
 
 	return nil
+}
+
+// lockedStateInSync reports whether the on-disk state still matches the lock
+// AND, where verifiable, the source content at the pinned commit — the
+// precondition for SyncEnv's "(up to date)" fast path.
+//
+// Three layers, strongest available wins:
+//
+//  1. Managed-set check: the glob match of the CURRENT config against the tree
+//     at `commit` must equal the lock's file set. A changed glob/ignore/dest
+//     config alters what belongs on disk even at an unchanged commit;
+//     previously this skipped silently (the old comment said "use --force",
+//     which never existed for envs).
+//  2. Lock check (per file): on-disk bytes must hash to the recorded SHA-256 —
+//     catches local edits and deletions. Legacy entries with no recorded hash
+//     fall back to an existence check (no read, so a present-but-unreadable
+//     file stays skippable as before).
+//  3. Source check (per file): for files whose on-disk bytes are supposed to
+//     equal the raw upstream blob — replace strategy, no select filter, no
+//     local `b.pin` annotations — the disk content's git blob OID must match
+//     the tree entry's OID. This catches a lock whose commit pointer was
+//     advanced without its content (lock == disk == stale): indistinguishable
+//     from "up to date" by layers 1–2, yet the tree is stale relative to the
+//     pinned commit. client/merge strategies and select/pinned files
+//     intentionally diverge from upstream, so for those the recorded lock
+//     hash remains the contract.
+//
+// Source context (layers 1 and 3) is best-effort: the pinned commit is used
+// from the cache when present, fetched once when not; if it cannot be
+// obtained (offline against an evicted cache, listing failure) the check
+// degrades to layer 2 rather than failing the update.
+func lockedStateInSync(cfg EnvConfig, resolved gitcache.ResolvedRef, projectRoot, cacheRoot, baseRef, commit, strategy string, lockEntry *lock.EnvEntry) (bool, error) {
+	srcOID := make(map[string]string)  // source path → blob OID at commit
+	selective := make(map[string]bool) // path\x00dest → has select filter
+	sourceOK := false
+
+	repoDir := ""
+	if resolved.IsLocal {
+		repoDir = resolved.URL
+	} else if gitcache.HasCommit(cacheRoot, baseRef, commit) {
+		repoDir = gitcache.CacheDir(cacheRoot, baseRef)
+	} else if gitcache.EnsureCloneAuth(cacheRoot, baseRef, resolved.URL, resolved.AuthHeader) == nil &&
+		gitcache.FetchAuth(cacheRoot, baseRef, commit, resolved.AuthHeader) == nil {
+		// Commit not cached (fresh machine / evicted cache): fetch it so the
+		// fast path can verify against source. On failure, source verification
+		// degrades to the lock comparison for this run and the fetch is simply
+		// retried on the next update — transient failures self-heal, a
+		// persistently failing fetch costs one attempt per run.
+		repoDir = gitcache.CacheDir(cacheRoot, baseRef)
+	}
+	if repoDir != "" {
+		if entries, err := gitcache.ListTreeWithModesDir(repoDir, commit); err == nil {
+			paths := make([]string, 0, len(entries))
+			for _, e := range entries {
+				paths = append(paths, e.Path)
+				if e.Type == "" || e.Type == "blob" {
+					srcOID[e.Path] = e.OID
+				}
+			}
+			matched := envmatch.MatchGlobs(paths, cfg.Files, cfg.Ignore)
+			if len(matched) != len(lockEntry.Files) {
+				return false, nil // managed set changed → re-sync
+			}
+			want := make(map[string]int, len(matched))
+			for _, m := range matched {
+				k := m.SourcePath + "\x00" + m.DestPath
+				want[k]++
+				if len(m.Select) > 0 {
+					selective[k] = true
+				}
+			}
+			for _, f := range lockEntry.Files {
+				k := f.Path + "\x00" + f.Dest
+				if want[k] == 0 {
+					return false, nil // managed set changed → re-sync
+				}
+				want[k]--
+			}
+			sourceOK = true
+		}
+	}
+
+	// Layer 3 needs the full file bytes (blob OID + pin detection); files it
+	// won't apply to get the cheaper streaming hash instead.
+	needSource := sourceOK && strategy == StrategyReplace
+
+	for _, f := range lockEntry.Files {
+		dest := filepath.Join(projectRoot, f.Dest)
+		if err := ValidatePathUnderRoot(projectRoot, dest); err != nil {
+			return false, fmt.Errorf("lock entry has invalid dest %q: %w", f.Dest, err)
+		}
+		// Legacy/partial lock entry with no recorded hash: existence only.
+		if f.SHA256 == "" {
+			if _, err := os.Stat(dest); err != nil {
+				if os.IsNotExist(err) {
+					return false, nil // missing → re-sync
+				}
+				return false, fmt.Errorf("checking synced env file %q: %w", dest, err)
+			}
+			continue
+		}
+		k := f.Path + "\x00" + f.Dest
+		if !needSource || selective[k] {
+			// Lock-only comparison (layer 2): stream the hash, no full read.
+			localHash, err := lock.SHA256File(dest)
+			if err != nil {
+				if os.IsNotExist(err) {
+					return false, nil // missing → re-sync
+				}
+				return false, fmt.Errorf("checking synced env file %q: %w", dest, err)
+			}
+			if localHash != f.SHA256 {
+				return false, nil // local drift → re-sync (heals a poisoned lock)
+			}
+			continue
+		}
+		data, err := os.ReadFile(dest)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return false, nil // missing → re-sync
+			}
+			return false, fmt.Errorf("checking synced env file %q: %w", dest, err)
+		}
+		if fmt.Sprintf("%x", sha256.Sum256(data)) != f.SHA256 {
+			return false, nil // local drift → re-sync (heals a poisoned lock)
+		}
+		// Layer 3: source-authoritative check for plainly-written files. A
+		// substring hit alone is not enough to exempt a file — confirm the
+		// pins structurally so a mere mention of "b.pin" (comment, value)
+		// doesn't silently exclude the file from source verification.
+		if mayCarryPins(f.Path, data) && hasActivePins(data) {
+			continue
+		}
+		oid, ok := srcOID[f.Path]
+		if !ok {
+			return false, nil // no longer a blob in the tree → re-sync
+		}
+		if gitcache.BlobOID(data, len(oid)) != oid {
+			return false, nil // lock+disk stale vs source → re-sync heals both
+		}
+	}
+	return true, nil
 }
 
 // safeShort returns the first 12 chars of s, or s itself if shorter.
