@@ -397,3 +397,19 @@ func mayCarryPins(sourcePath string, data []byte) bool {
 	}
 	return bytes.Contains(data, []byte(PinAnnotation))
 }
+
+// hasActivePins reports whether the content structurally carries at least one
+// `b.pin` annotation. The fast path uses it to confirm a mayCarryPins substring
+// hit before excluding a file from source verification — a substring false
+// positive (e.g. a comment mentioning "b.pin") would otherwise silently
+// downgrade that file to the lock-only comparison, reintroducing the
+// undetectable-stale state this check exists to prevent. Unparseable content
+// cannot carry effective pins (applyPinsYAML leaves such files alone), so it
+// reports false and the file stays source-verified.
+func hasActivePins(data []byte) bool {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return false
+	}
+	return len(collectPinnedPaths(&doc, nil)) > 0
+}

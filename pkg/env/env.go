@@ -977,8 +977,11 @@ func lockedStateInSync(cfg EnvConfig, resolved gitcache.ResolvedRef, projectRoot
 		if fmt.Sprintf("%x", sha256.Sum256(data)) != f.SHA256 {
 			return false, nil // local drift → re-sync (heals a poisoned lock)
 		}
-		// Layer 3: source-authoritative check for plainly-written files.
-		if mayCarryPins(f.Path, data) {
+		// Layer 3: source-authoritative check for plainly-written files. A
+		// substring hit alone is not enough to exempt a file — confirm the
+		// pins structurally so a mere mention of "b.pin" (comment, value)
+		// doesn't silently exclude the file from source verification.
+		if mayCarryPins(f.Path, data) && hasActivePins(data) {
 			continue
 		}
 		oid, ok := srcOID[f.Path]

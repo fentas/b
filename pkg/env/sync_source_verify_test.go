@@ -215,6 +215,43 @@ func TestSyncEnv_PinnedFileFastPathStaysSkippable(t *testing.T) {
 	}
 }
 
+// TestSyncEnv_PinMentionDoesNotExemptFromSourceCheck: a file that merely
+// MENTIONS "b.pin" (comment/value) without a structural pin annotation must
+// still be source-verified — a substring false positive must not reintroduce
+// the undetectable stale-lock state for that file (Copilot round-2).
+func TestSyncEnv_PinMentionDoesNotExemptFromSourceCheck(t *testing.T) {
+	mention := "# docs: use b.pin to pin keys\nv: 1\n"
+	bare, commitB := sourceVerifyRepo(t, map[string]string{"cfg/doc.yaml": mention})
+	project := t.TempDir()
+	cfg := EnvConfig{Ref: bare, Strategy: StrategyReplace,
+		Files: map[string]envmatch.GlobConfig{"cfg/*.yaml": {Dest: "configs"}}}
+
+	res, err := SyncEnv(cfg, project, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("sync A: %v", err)
+	}
+	le := lockFromResult(res)
+
+	// Upstream changes the mentioning file; poison the lock like the S3 state.
+	newMention := "# docs: use b.pin to pin keys\nv: 2\n"
+	le.Commit = commitB(map[string]string{"cfg/doc.yaml": newMention})
+
+	res2, err := SyncEnv(cfg, project, t.TempDir(), le)
+	if err != nil {
+		t.Fatalf("sync B: %v", err)
+	}
+	if res2.Skipped {
+		t.Fatal("a b.pin MENTION (no structural pin) must not exempt the file from source verification")
+	}
+	data, err := os.ReadFile(filepath.Join(project, "configs", "doc.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != newMention {
+		t.Errorf("disk = %q, want healed to the new content", data)
+	}
+}
+
 // TestSyncEnv_ClientStrategyFastPathUnaffected: under strategy client, local
 // divergence from upstream is the contract — the source check must not apply,
 // or every update would re-sync (and re-keep) forever.
