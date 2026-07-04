@@ -2,7 +2,9 @@ package gitcache
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -103,6 +105,90 @@ func TestRepoPath(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+func TestHasCommit(t *testing.T) {
+	tmp := t.TempDir()
+	work := filepath.Join(tmp, "work")
+	bare := filepath.Join(tmp, "bare.git")
+	cacheRoot := filepath.Join(tmp, "cache")
+	run := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+	run("git", "init", "-q", "-b", "main", work)
+	run("git", "-C", work, "config", "user.email", "t@t.com")
+	run("git", "-C", work, "config", "user.name", "T")
+	if err := os.WriteFile(filepath.Join(work, "f"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("git", "-C", work, "add", "-A")
+	run("git", "-C", work, "commit", "-q", "-m", "c", "--no-gpg-sign")
+	run("git", "clone", "--bare", "-q", work, bare)
+
+	// Cache dir doesn't exist yet → false, no error.
+	if HasCommit(cacheRoot, "r", "0000000000000000000000000000000000000000") {
+		t.Error("HasCommit on missing cache dir should be false")
+	}
+	if err := EnsureClone(cacheRoot, "r", bare); err != nil {
+		t.Fatal(err)
+	}
+	commit, err := ResolveRef(bare, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Fetch(cacheRoot, "r", commit); err != nil {
+		t.Fatal(err)
+	}
+	if !HasCommit(cacheRoot, "r", commit) {
+		t.Error("HasCommit should be true for a fetched commit")
+	}
+	if HasCommit(cacheRoot, "r", "1111111111111111111111111111111111111111") {
+		t.Error("HasCommit should be false for an unknown sha")
+	}
+}
+
+func TestBlobOIDAndTreeOIDs(t *testing.T) {
+	tmp := t.TempDir()
+	work := filepath.Join(tmp, "work")
+	run := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command(args[0], args[1:]...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	run("git", "init", "-q", "-b", "main", work)
+	run("git", "-C", work, "config", "user.email", "t@t.com")
+	run("git", "-C", work, "config", "user.name", "T")
+	content := []byte("hello blob\n")
+	if err := os.WriteFile(filepath.Join(work, "f.txt"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("git", "-C", work, "add", "-A")
+	run("git", "-C", work, "commit", "-q", "-m", "c", "--no-gpg-sign")
+
+	// BlobOID must equal what git itself computes.
+	gitOID := run("git", "-C", work, "hash-object", filepath.Join(work, "f.txt"))
+	if got := BlobOID(content, len(gitOID)); got != gitOID {
+		t.Errorf("BlobOID = %s, want %s (git hash-object)", got, gitOID)
+	}
+
+	// ListTreeWithModesDir must surface type + OID per entry.
+	commit := run("git", "-C", work, "rev-parse", "HEAD")
+	entries, err := ListTreeWithModesDir(work, commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(entries))
+	}
+	if entries[0].Type != "blob" || entries[0].OID != gitOID {
+		t.Errorf("entry = %+v, want type=blob oid=%s", entries[0], gitOID)
 	}
 }
 

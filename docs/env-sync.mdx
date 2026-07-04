@@ -707,5 +707,6 @@ Uses shallow bare clones (`--depth 1`) to minimize disk usage.
 - **Verify**: `b verify` checks all artifacts against `b.lock` checksums.
 - **Conflicts**: If two env entries write to the same path, **b** warns before syncing.
 - **Auth**: Private repos need `GITHUB_TOKEN`, `GITLAB_TOKEN`, or `GITEA_TOKEN`. See [Authentication](/authentication).
-- **Force**: `b update --force` re-syncs even when up-to-date.
+- **Self-healing**: at an unchanged commit, `b update` verifies the on-disk files against the lock **and** the actual source content at the pinned commit (for plainly-synced files under `replace`). Any drift — local edits, a stale/corrupted lock, or a changed `files:` glob config — triggers a re-sync that reconciles via your strategy and re-records the lock. No `--force` needed.
+- **Keeps are one-shot**: under `replace`, an interactive "keep" survives only until the next update — source is authoritative. For durable local divergence use `strategy: client`/`merge`, a `select` scope, or a `b.pin` annotation.
 - **Unchanged**: Files identical to upstream are automatically skipped.

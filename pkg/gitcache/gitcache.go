@@ -4,7 +4,9 @@ package gitcache
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -60,6 +62,15 @@ func FetchAuth(root, ref, commitOrTag, authHeader string) error {
 		return redactWrap(err, authHeader)
 	}
 	return nil
+}
+
+// HasCommit reports whether the given commit object is already present in the
+// cache for ref, so callers can skip a redundant fetch (and the network probe
+// it entails) on the up-to-date fast path.
+func HasCommit(root, ref, commit string) bool {
+	dir := CacheDir(root, ref)
+	cmd := exec.Command("git", "-C", dir, "cat-file", "-e", commit+"^{commit}")
+	return cmd.Run() == nil
 }
 
 // redactWrap wraps an error with a redacted message while preserving the error chain.
@@ -130,6 +141,8 @@ func ResolveRefAuth(url, version, authHeader string) (string, error) {
 type TreeEntry struct {
 	Path string
 	Mode string // git mode, e.g. "100644", "100755"
+	Type string // git object type, e.g. "blob", "commit" (submodule)
+	OID  string // git object id of the entry (blob hash for files)
 }
 
 // ListTree returns all file paths in the repo at the given commit.
@@ -181,13 +194,37 @@ func ListTreeWithModesDir(dir, commit string) ([]TreeEntry, error) {
 		}
 		path := line[tabIdx+1:]
 		fields := strings.Fields(line[:tabIdx])
+		// ls-tree line shape: "<mode> <type> <oid>\t<path>".
 		mode := "100644"
 		if len(fields) >= 1 {
 			mode = fields[0]
 		}
-		entries = append(entries, TreeEntry{Path: path, Mode: mode})
+		entry := TreeEntry{Path: path, Mode: mode}
+		if len(fields) >= 3 {
+			entry.Type = fields[1]
+			entry.OID = fields[2]
+		}
+		entries = append(entries, entry)
 	}
 	return entries, nil
+}
+
+// BlobOID computes the git object id of a blob with the given content, using
+// the hash implied by hexLen (40 → SHA-1, git's default object format; 64 →
+// SHA-256 for sha256 repositories). This lets callers compare on-disk bytes
+// against `git ls-tree` output without spawning git once per file.
+func BlobOID(content []byte, hexLen int) string {
+	header := fmt.Sprintf("blob %d\x00", len(content))
+	if hexLen == 64 {
+		h := sha256.New()
+		h.Write([]byte(header))
+		h.Write(content)
+		return hex.EncodeToString(h.Sum(nil))
+	}
+	h := sha1.New() // matches git's default (sha1) object format
+	h.Write([]byte(header))
+	h.Write(content)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // runAuth executes a git command with optional auth env vars.
