@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.18.5](https://github.com/fentas/b/compare/v4.18.4...v4.18.5) (2026-07-04)
+
+
+### Bug Fixes
+
+* **env:** verify up-to-date fast path against source, not just the lock ([#178](https://github.com/fentas/b/issues/178)) ([05166f3](https://github.com/fentas/b/commit/05166f3caaffec748953f2128730ba4460523e01))
+
 ## [4.18.4](https://github.com/fentas/b/compare/v4.18.3...v4.18.4) (2026-06-25)
 
 
