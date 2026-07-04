@@ -2,7 +2,6 @@
 package env
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -119,8 +118,9 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 	// strategy + safety gate and re-records the lock.
 	//
 	// This is a deliberate UX-over-compute choice: the fast path costs a local
-	// read+hash per synced file and one `git ls-tree` (against the local
-	// cache; the pinned commit is fetched at most once per machine).
+	// read+hash per synced file and one `git ls-tree` against the local cache
+	// (the pinned commit is fetched when missing; a failed fetch degrades
+	// source verification to the lock comparison for that run).
 	if cfg.ForceCommit == "" && lockEntry != nil && lockEntry.Commit == commit {
 		inSync, err := lockedStateInSync(cfg, resolved, projectRoot, cacheRoot, baseRef, commit, strategy, lockEntry)
 		if err != nil {
@@ -895,7 +895,10 @@ func lockedStateInSync(cfg EnvConfig, resolved gitcache.ResolvedRef, projectRoot
 	} else if gitcache.EnsureCloneAuth(cacheRoot, baseRef, resolved.URL, resolved.AuthHeader) == nil &&
 		gitcache.FetchAuth(cacheRoot, baseRef, commit, resolved.AuthHeader) == nil {
 		// Commit not cached (fresh machine / evicted cache): fetch it so the
-		// fast path can verify against source. On failure, degrade gracefully.
+		// fast path can verify against source. On failure, source verification
+		// degrades to the lock comparison for this run and the fetch is simply
+		// retried on the next update — transient failures self-heal, a
+		// persistently failing fetch costs one attempt per run.
 		repoDir = gitcache.CacheDir(cacheRoot, baseRef)
 	}
 	if repoDir != "" {
@@ -930,6 +933,10 @@ func lockedStateInSync(cfg EnvConfig, resolved gitcache.ResolvedRef, projectRoot
 		}
 	}
 
+	// Layer 3 needs the full file bytes (blob OID + pin detection); files it
+	// won't apply to get the cheaper streaming hash instead.
+	needSource := sourceOK && strategy == StrategyReplace
+
 	for _, f := range lockEntry.Files {
 		dest := filepath.Join(projectRoot, f.Dest)
 		if err := ValidatePathUnderRoot(projectRoot, dest); err != nil {
@@ -945,6 +952,21 @@ func lockedStateInSync(cfg EnvConfig, resolved gitcache.ResolvedRef, projectRoot
 			}
 			continue
 		}
+		k := f.Path + "\x00" + f.Dest
+		if !needSource || selective[k] {
+			// Lock-only comparison (layer 2): stream the hash, no full read.
+			localHash, err := lock.SHA256File(dest)
+			if err != nil {
+				if os.IsNotExist(err) {
+					return false, nil // missing → re-sync
+				}
+				return false, fmt.Errorf("checking synced env file %q: %w", dest, err)
+			}
+			if localHash != f.SHA256 {
+				return false, nil // local drift → re-sync (heals a poisoned lock)
+			}
+			continue
+		}
 		data, err := os.ReadFile(dest)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -956,11 +978,7 @@ func lockedStateInSync(cfg EnvConfig, resolved gitcache.ResolvedRef, projectRoot
 			return false, nil // local drift → re-sync (heals a poisoned lock)
 		}
 		// Layer 3: source-authoritative check for plainly-written files.
-		if !sourceOK || strategy != StrategyReplace {
-			continue
-		}
-		k := f.Path + "\x00" + f.Dest
-		if selective[k] || mayCarryPins(f.Path, data) {
+		if mayCarryPins(f.Path, data) {
 			continue
 		}
 		oid, ok := srcOID[f.Path]
@@ -972,19 +990,6 @@ func lockedStateInSync(cfg EnvConfig, resolved gitcache.ResolvedRef, projectRoot
 		}
 	}
 	return true, nil
-}
-
-// mayCarryPins reports whether the on-disk content may carry `b.pin`
-// annotations that make it legitimately diverge from the raw upstream blob.
-// Mirrors applyPinsYAML's cheap pre-check: pinning is YAML-only and requires
-// the annotation substring. False positives (a key literally named "b.pin")
-// merely downgrade that file to the lock-hash comparison — safe.
-func mayCarryPins(sourcePath string, data []byte) bool {
-	ext := strings.ToLower(filepath.Ext(sourcePath))
-	if ext != ".yaml" && ext != ".yml" {
-		return false
-	}
-	return bytes.Contains(data, []byte(PinAnnotation))
 }
 
 // safeShort returns the first 12 chars of s, or s itself if shorter.

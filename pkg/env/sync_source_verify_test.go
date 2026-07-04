@@ -68,7 +68,8 @@ func sourceVerifyRepo(t *testing.T, extra map[string]string) (bare string, commi
 		if err != nil {
 			t.Fatal(err)
 		}
-		return string(out[:40])
+		// TrimSpace, not [:40]: sha256-object-format repos emit 64-char ids.
+		return strings.TrimSpace(string(out))
 	}
 	return bare, commitB
 }
