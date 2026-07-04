@@ -194,17 +194,14 @@ func ListTreeWithModesDir(dir, commit string) ([]TreeEntry, error) {
 		}
 		path := line[tabIdx+1:]
 		fields := strings.Fields(line[:tabIdx])
-		// ls-tree line shape: "<mode> <type> <oid>\t<path>".
-		mode := "100644"
-		if len(fields) >= 1 {
-			mode = fields[0]
+		// ls-tree line shape: "<mode> <type> <oid>\t<path>". Fail fast on
+		// anything else — silently defaulting would flow empty Type/OID into
+		// source verification, reading as perpetual drift instead of a loud
+		// parse problem.
+		if len(fields) < 3 {
+			return nil, fmt.Errorf("git ls-tree: unexpected line format: %q", line)
 		}
-		entry := TreeEntry{Path: path, Mode: mode}
-		if len(fields) >= 3 {
-			entry.Type = fields[1]
-			entry.OID = fields[2]
-		}
-		entries = append(entries, entry)
+		entries = append(entries, TreeEntry{Path: path, Mode: fields[0], Type: fields[1], OID: fields[2]})
 	}
 	return entries, nil
 }
