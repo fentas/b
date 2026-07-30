@@ -13,6 +13,25 @@ import (
 )
 
 // NewRootCmd creates the new root command with subcommands
+// wantsVersionBanner reports whether THIS invocation asked for b's own version
+// banner. Extracted from PersistentPreRunE so it is directly testable — the
+// caller os.Exit(0)s, which a test cannot survive.
+//
+// `cmd` is whatever subcommand is running (cobra invokes the root's
+// PersistentPreRunE for the whole tree), and a subcommand may legitimately own
+// its own --version: `b env add <ref> --version <tag>` pins a ref. Matching
+// that printed the banner and exited 0, making every pinned env add a silent
+// rc-0 no-op — which is what broke `curl get.lok8s.io | sh` on fresh machines
+// (lo-up always passes the pin). Only the ROOT's persistent BOOL flag counts.
+func wantsVersionBanner(cmd *cobra.Command) bool {
+	// ALWAYS the root's persistent set: that is the only place the banner flag
+	// is declared, and cmd.Flags() is unreliable here — a subcommand's local
+	// same-named flag shadows the persistent one, and on the root itself the
+	// persistent flags are not merged into Flags() until cobra parses.
+	f := cmd.Root().PersistentFlags().Lookup("version")
+	return f != nil && f.Changed && f.Value.Type() == "bool"
+}
+
 func NewRootCmd(binaries []*binary.Binary, io *streams.IO, version, versionPreRelease string) *cobra.Command {
 	shared := NewSharedOptions(io, binaries)
 	shared.bVersion = version
@@ -33,13 +52,7 @@ func NewRootCmd(binaries []*binary.Binary, io *streams.IO, version, versionPreRe
 			// what broke `curl get.lok8s.io | sh` on fresh machines (lo-up always
 			// passes the pin). Only the ROOT's persistent BOOL flag means "print
 			// the version and quit".
-			versionFlag := cmd.Flags().Lookup("version")
-			if cmd.HasParent() {
-				// On a subcommand, consult the root's persistent flag explicitly:
-				// a local same-named flag shadows it in cmd.Flags().
-				versionFlag = cmd.Root().PersistentFlags().Lookup("version")
-			}
-			if versionFlag != nil && versionFlag.Changed && versionFlag.Value.Type() == "bool" {
+			if wantsVersionBanner(cmd) {
 				v := version
 				if versionPreRelease != "" {
 					v = fmt.Sprintf("%s-%s", version, versionPreRelease)

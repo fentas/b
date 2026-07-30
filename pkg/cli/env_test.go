@@ -1272,11 +1272,22 @@ func TestEnvAddVersionFlagIsAPinNotTheRootBanner(t *testing.T) {
 		t.Errorf("root --version type = %q, want bool (the banner)", got)
 	}
 
-	// Setting the pin must NOT mark the root's banner flag as changed.
+	// THE ACTUAL REGRESSION GATE: exercise the decision PersistentPreRunE makes.
+	// Asserting flag types alone is vacuous — it stays green on the reverted
+	// logic, because the bug read env add's LOCAL flag while the root bool was
+	// never marked changed at all.
 	if err := envAdd.Flags().Set("version", "main"); err != nil {
 		t.Fatalf("set pin: %v", err)
 	}
-	if banner.Changed {
-		t.Error("pinning env add --version marked the ROOT banner flag changed — the version banner would print and exit 0")
+	if wantsVersionBanner(envAdd) {
+		t.Error("pinning `env add --version` is treated as a version-banner request — the banner prints and os.Exit(0) fires, so the pin silently registers nothing (the bug that broke `curl get.lok8s.io | sh`)")
+	}
+
+	// ...and the banner itself must still work on the root.
+	if err := root.PersistentFlags().Set("version", "true"); err != nil {
+		t.Fatalf("set banner: %v", err)
+	}
+	if !wantsVersionBanner(root) {
+		t.Error("`b --version` no longer requests the version banner")
 	}
 }
