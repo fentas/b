@@ -70,7 +70,9 @@ func spliceSelectedScope(local, merged []byte, selectors []string, filePath stri
 	}
 }
 
-// topLevelKeysFromSelectors returns the set of top-level YAML keys that are
+// topLevelKeysFromSelectors returns the set of top-level YAML keys named by the
+// selectors. Only SIMPLE dot-paths contribute — see spliceYAML for why a complex
+// expression's key cannot be trusted. Returns the set of top-level YAML keys that are
 // within the selector scope. A selector like "binaries" or ".binaries" maps
 // to {binaries}; a nested selector like "database.host" or ".database.host"
 // maps to {database}.
@@ -273,31 +275,30 @@ func containsConflictMarkers(b []byte) bool {
 func spliceYAML(local, merged []byte, selectors []string) ([]byte, error) {
 	// Scope = the keys the merge actually emitted, plus the keys SIMPLE
 	// selectors name. See the branches below for why the distinction matters.
+	// Keys the merge actually emitted, when it parses at all.
 	scope := topLevelKeysFromMerged(merged)
 	if scope == nil {
-		// `merged` carries git conflict markers and does not parse. Selector
-		// names are all we have.
-		scope = topLevelKeysFromSelectors(selectors)
-	} else {
-		// Add the SIMPLE selectors' keys. For a plain dot-path the name is
-		// authoritative — the consumer's key is in scope whether or not the
-		// merge emitted it, so an upstream removal propagates (see
-		// TestSpliceYAMLStructural_RemovesScopedKeyAbsentInMerge).
-		//
-		// Complex selectors get NO such treatment. Their landing key cannot be
-		// derived from the expression: anything returning a map goes through the
-		// expression's own structure, and the wrapKeyFor fallback guesses
-		// "result". Trusting that guess deletes whatever the consumer happens to
-		// keep under it, and makes a selector that legitimately matches nothing
-		// wipe the block it names. Absent from `merged` therefore means "leave
-		// the local file alone" for complex selectors.
-		for _, sel := range selectors {
-			if !isSimpleDotPath(sel) {
-				continue
-			}
-			for _, k := range selectorTopLevelKeys(sel) {
-				scope[k] = true
-			}
+		// `merged` carries git conflict markers, so there is nothing to read
+		// keys from. Selector names are all we have.
+		scope = make(map[string]bool, len(selectors))
+	}
+	// Plus the keys of SIMPLE selectors. For a plain dot-path the name is
+	// authoritative — the consumer's key is in scope whether or not the merge
+	// emitted it, so an upstream removal propagates (see
+	// TestSpliceYAMLStructural_RemovesScopedKeyAbsentInMerge).
+	//
+	// Complex selectors contribute nothing here, on BOTH paths. Their landing
+	// key is not derivable from the expression: anything returning a map goes
+	// through the expression's own structure, and the wrapKeyFor fallback merely
+	// guesses "result". Trusting that guess deletes whatever the consumer keeps
+	// under that name — including on the conflict path, where it also swallowed
+	// the markers it was supposed to be writing.
+	for _, sel := range selectors {
+		if !isSimpleDotPath(sel) {
+			continue
+		}
+		for _, k := range selectorTopLevelKeys(sel) {
+			scope[k] = true
 		}
 	}
 

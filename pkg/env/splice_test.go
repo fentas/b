@@ -747,3 +747,22 @@ func TestSpliceSelectedScope_ComplexSelectorCannotTouchAnUnrelatedKey(t *testing
 		t.Errorf("a phantom `result` scope key deleted a consumer-owned key:\n%s", out)
 	}
 }
+
+func TestSpliceSelectedScope_ConflictPathLeavesUnrelatedKeysAlone(t *testing.T) {
+	// When `merged` carries git conflict markers there are no keys to read, and
+	// the scope falls back to the selectors. A complex selector's wrapKeyFor
+	// guess ("result") must not reach a consumer-owned `result:` there either —
+	// on that path it both deleted the key and swallowed the markers it was
+	// supposed to write.
+	local := []byte("result: consumer-owned\nbinaries:\n  keep: {}\n")
+	merged := []byte("<<<<<<< local\nbinaries: {}\n=======\nbinaries:\n  up: {}\n>>>>>>> upstream\n")
+	sel := []string{"from_items(items(binaries)[?[1].groups])"}
+
+	out, err := spliceSelectedScope(local, merged, sel, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	if !strings.Contains(string(out), "consumer-owned") {
+		t.Errorf("the conflict path deleted a consumer-owned key via the `result` guess:\n%s", out)
+	}
+}

@@ -24,12 +24,11 @@ import (
 // resolve manually. This is a deliberate scope limit, not a data-loss
 // risk: the caller never writes the partial result.
 func spliceJSON(local, merged []byte, selectors []string) ([]byte, error) {
-	// Reject complex JMESPath selectors. topLevelKeysFromSelectors
-	// is a literal-string operation, so an expression like
-	// `from_items(items(binaries))` would be treated as a key
-	// literally named "from_items(items(binaries))" and the splice
-	// would silently look for it (and skip the file). The JSON
-	// splice only supports simple dot-paths today; the caller
+	// Reject complex JMESPath selectors. The YAML splice handles them by
+	// reading the merged document's own keys; the JSON splice has no such
+	// step, and selectorTopLevelKeys deliberately contributes nothing for a
+	// complex expression, so the scope would come out empty and the file
+	// would be skipped in silence. Simple dot-paths only here — the caller
 	// should drop the select or move the data to YAML.
 	for _, s := range selectors {
 		if !isSimpleDotPath(s) {
