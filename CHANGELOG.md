@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.18.6](https://github.com/fentas/b/compare/v4.18.5...v4.18.6) (2026-07-30)
+
+
+### Bug Fixes
+
+* **cli:** a subcommand's --version is its own flag, not the root banner ([#180](https://github.com/fentas/b/issues/180)) ([dde6b67](https://github.com/fentas/b/commit/dde6b678f9bccb3743fbbe95489acdbd8b3fdd84))
+* **env:** compose per-file selectors across profile includes ([#182](https://github.com/fentas/b/issues/182)) ([0587cc9](https://github.com/fentas/b/commit/0587cc97a9c900945852460a908d6c08ffeebfa1))
+
 ## [4.18.5](https://github.com/fentas/b/compare/v4.18.4...v4.18.5) (2026-07-04)
 
 
