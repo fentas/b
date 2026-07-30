@@ -23,7 +23,9 @@ func ResolveProfileIncludes(profile *EnvEntry, allProfiles EnvList) (*EnvEntry, 
 		return nil, err
 	}
 
-	// Merge in order: earlier profiles are base, later override
+	// Merge in order: earlier profiles are the base. Scalars and Dest are
+	// last-wins; Select and Ignore COMPOSE across the chain (mergeGlobConfig),
+	// because each profile selects its own slice of a shared file.
 	merged := &EnvEntry{
 		Key:         profile.Key,
 		Description: profile.Description, // never inherited

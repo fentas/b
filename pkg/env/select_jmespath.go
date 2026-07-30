@@ -110,11 +110,15 @@ func splitSelectorsByComplexity(selectors []string) (simple, complex []string) {
 // Merge semantics:
 //
 //   - If an expression returns a map[string]interface{}, its entries are
-//     merged into the result (contributions to the same key are unioned for
-//     the same key).
+//     merged into the result. Several expressions contributing to the SAME key
+//     union rather than overwrite: nested maps merge key-by-key, lists union
+//     (deduplicated), and only scalars replace. This is what lets a resolved
+//     profile chain select several slices of one file.
 //
 //   - If an expression returns something else (scalar, array), it is
-//     wrapped under a key chosen by `wrapKeyFor`. The key is selected
+//     wrapped under a key chosen by `wrapKeyFor` — and unioned the same way,
+//     since wrapKeyFor deliberately sends every `binaries[?…]` variant to
+//     `binaries`. The key is selected
 //     by a small fallback chain: a leading identifier followed by
 //     JMESPath grammar (e.g. `binaries[?...]` → `binaries`), the
 //     trailing identifier of a simple dot-path (`database.host` →
