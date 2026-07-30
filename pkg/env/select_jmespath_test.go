@@ -472,3 +472,81 @@ func keysOf(m map[string]interface{}) []string {
 	sort.Strings(out)
 	return out
 }
+
+// The seam that matters is filterContent: it routes selectors to the simple
+// Node path, the JMESPath path, or both, and then merges. Testing the
+// individual filters misses collapses that only the merge introduces.
+func TestFilterContent_SimpleAndComplexSelectorsBothSurvive(t *testing.T) {
+	content := []byte(`binaries:
+  argsh:
+    groups: [core]
+  kustomize:
+    groups: [kustomize]
+  kind:
+    groups: [local]
+`)
+	selectors := []string{
+		"binaries.argsh",
+		"{binaries: from_items(items(binaries)[?[1].groups && contains([1].groups, 'kustomize')])}",
+	}
+
+	out, err := filterContent(content, selectors, "b.yaml")
+	if err != nil {
+		t.Fatalf("filterContent: %v", err)
+	}
+
+	var got struct {
+		Binaries map[string]interface{} `yaml:"binaries"`
+	}
+	if err := yaml.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal %s: %v", out, err)
+	}
+	for _, want := range []string{"argsh", "kustomize"} {
+		if _, ok := got.Binaries[want]; !ok {
+			t.Errorf("binaries.%s missing — got %v (the JMESPath side must not replace the simple side's key)", want, keysOf(got.Binaries))
+		}
+	}
+	if _, ok := got.Binaries["kind"]; ok {
+		t.Error("binaries.kind leaked in — no selector asked for the local group")
+	}
+}
+
+func TestFilterContent_BareFilterSelectorsUnion(t *testing.T) {
+	// Bare filters return LISTS, and wrapKeyFor sends every `binaries[?…]`
+	// variant to the same `binaries` key — so a chain of them used to keep
+	// only the last group.
+	content := []byte(`binaries:
+  - name: argsh
+    groups: [core]
+  - name: kustomize
+    groups: [kustomize]
+  - name: kind
+    groups: [local]
+`)
+	selectors := []string{
+		"binaries[?groups && contains(groups, 'core')]",
+		"binaries[?groups && contains(groups, 'kustomize')]",
+	}
+
+	out, err := filterContent(content, selectors, "b.yaml")
+	if err != nil {
+		t.Fatalf("filterContent: %v", err)
+	}
+
+	var got struct {
+		Binaries []struct {
+			Name string `yaml:"name"`
+		} `yaml:"binaries"`
+	}
+	if err := yaml.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal %s: %v", out, err)
+	}
+	var names []string
+	for _, b := range got.Binaries {
+		names = append(names, b.Name)
+	}
+	sort.Strings(names)
+	if len(names) != 2 || names[0] != "argsh" || names[1] != "kustomize" {
+		t.Errorf("binaries = %v, want both filters' results [argsh kustomize]", names)
+	}
+}

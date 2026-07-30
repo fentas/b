@@ -148,6 +148,16 @@ func mergeYAMLTopLevel(a, b []byte) ([]byte, error) {
 		bKey := bRoot.Content[i]
 		bVal := bRoot.Content[i+1]
 		if idx := findYAMLTopLevelKey(aRoot, bKey.Value); idx >= 0 {
+			// Both sides selected the same top-level key — a simple dot-path
+			// on one side and a JMESPath on the other. Merge them instead of
+			// letting the JMESPath side win: replacing dropped everything the
+			// simple selector asked for, the same collapse that lost base
+			// profiles' binaries in composed profiles. Recursing also keeps
+			// a's comments on the keys b does not touch.
+			if aRoot.Content[idx+1].Kind == yaml.MappingNode && bVal.Kind == yaml.MappingNode {
+				mergeYAMLMappings(aRoot.Content[idx+1], bVal)
+				continue
+			}
 			aRoot.Content[idx] = bKey
 			aRoot.Content[idx+1] = bVal
 			continue

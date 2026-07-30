@@ -77,16 +77,100 @@ func spliceSelectedScope(local, merged []byte, selectors []string, filePath stri
 func topLevelKeysFromSelectors(selectors []string) map[string]bool {
 	keys := make(map[string]bool, len(selectors))
 	for _, sel := range selectors {
-		key := strings.TrimPrefix(sel, ".")
-		if key == "" {
-			continue
+		for _, key := range selectorTopLevelKeys(sel) {
+			keys[key] = true
 		}
-		if i := strings.Index(key, "."); i >= 0 {
-			key = key[:i]
-		}
-		keys[key] = true
 	}
 	return keys
+}
+
+// selectorTopLevelKeys returns the top-level keys a selector contributes to
+// the merged document. It MUST agree with what the JMESPath layer actually
+// emits (runJMESPathSelectors / wrapKeyFor) — a scope key that names nothing
+// in `merged` makes the splice a silent no-op, which is how a complex
+// selector like
+//
+//	{binaries: from_items(items(binaries)[?[1].groups && …])}
+//
+// used to leave the consumer's file untouched: treated as a literal dot-path
+// it yielded the nonsense key `{binaries: from_items(items(binaries)[?[1]`,
+// nothing matched, and every binary the profile selected went missing.
+func selectorTopLevelKeys(sel string) []string {
+	if keys, ok := multiSelectHashKeys(sel); ok {
+		return keys
+	}
+	if !isSimpleDotPath(sel) {
+		// Any other complex expression: the merge wraps its result under
+		// wrapKeyFor, so that is exactly the key in scope.
+		return []string{wrapKeyFor(sel)}
+	}
+	key := strings.TrimPrefix(sel, ".")
+	if key == "" {
+		return nil
+	}
+	if i := strings.Index(key, "."); i >= 0 {
+		key = key[:i]
+	}
+	return []string{key}
+}
+
+// multiSelectHashKeys extracts the keys of a JMESPath multi-select hash —
+// `{a: expr, b: expr}` → [a b]. Those keys ARE the top-level keys of the
+// result. Reports false for anything that is not a well-formed hash so the
+// caller can fall back.
+func multiSelectHashKeys(sel string) ([]string, bool) {
+	body := strings.TrimSpace(sel)
+	if len(body) < 2 || body[0] != '{' || body[len(body)-1] != '}' {
+		return nil, false
+	}
+	var keys []string
+	for _, part := range splitTopLevel(body[1:len(body)-1], ',') {
+		// The key is everything up to the FIRST top-level colon; the value
+		// expression may contain colons of its own.
+		pair := splitTopLevel(part, ':')
+		if len(pair) < 2 {
+			return nil, false
+		}
+		key := strings.Trim(strings.TrimSpace(pair[0]), `"'`)
+		if key == "" {
+			return nil, false
+		}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return nil, false
+	}
+	return keys, true
+}
+
+// splitTopLevel splits on sep, ignoring separators nested inside brackets,
+// braces, parens or quotes.
+func splitTopLevel(s string, sep byte) []string {
+	var (
+		out   []string
+		depth int
+		quote byte
+		start int
+	)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '\'' || c == '"' || c == '`':
+			quote = c
+		case c == '{' || c == '[' || c == '(':
+			depth++
+		case c == '}' || c == ']' || c == ')':
+			depth--
+		case c == sep && depth == 0:
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	return append(out, s[start:])
 }
 
 // usesCRLF reports whether the file should be treated as having

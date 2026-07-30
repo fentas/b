@@ -3,6 +3,7 @@ package env
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/jmespath-community/go-jmespath"
@@ -109,7 +110,7 @@ func splitSelectorsByComplexity(selectors []string) (simple, complex []string) {
 // Merge semantics:
 //
 //   - If an expression returns a map[string]interface{}, its entries are
-//     merged into the result (later expressions override earlier ones for
+//     merged into the result (contributions to the same key are unioned for
 //     the same key).
 //
 //   - If an expression returns something else (scalar, array), it is
@@ -152,34 +153,80 @@ func runJMESPathSelectors(
 			mergeMapInto(merged, m)
 			continue
 		}
-		// Non-map result: wrap under a sensible key.
-		merged[wrapKeyFor(sel)] = val
+		// Non-map result: wrap under a sensible key — through the same
+		// union, since wrapKeyFor deliberately maps every `binaries[?…]`
+		// variant to `binaries`, so a profile chain of bare filters lands
+		// several lists on one key.
+		mergeValueInto(merged, wrapKeyFor(sel), val)
 	}
 	return marshal(merged)
 }
 
-// mergeMapInto deep-merges src into dst. Nested maps merge key-by-key; any
-// other value (scalar, list) is replaced. Several selectors projecting the
-// SAME top-level key is the normal shape when a resolved profile chain selects
-// multiple groups out of one file (`{binaries: <group A>}` plus
-// `{binaries: <group B>}`) — a shallow copy would keep only the last group.
+// mergeMapInto deep-merges src into dst, key by key.
 func mergeMapInto(dst, src map[string]interface{}) {
 	for k, v := range src {
-		srcMap, srcIsMap := v.(map[string]interface{})
-		dstMap, dstIsMap := dst[k].(map[string]interface{})
-		if !srcIsMap || !dstIsMap {
-			dst[k] = v
-			continue
-		}
-		// Copy before descending: dstMap may alias the parsed document, and
-		// mutating it in place would corrupt what later selectors search.
-		clone := make(map[string]interface{}, len(dstMap)+len(srcMap))
-		for ck, cv := range dstMap {
-			clone[ck] = cv
-		}
-		mergeMapInto(clone, srcMap)
-		dst[k] = clone
+		mergeValueInto(dst, k, v)
 	}
+}
+
+// mergeValueInto unions v into dst[k]. Nested maps merge key-by-key, lists
+// union, and anything else is replaced. Several selectors contributing to the
+// SAME key is the normal shape once a profile chain is resolved — each
+// projects a different slice of one file — and a plain assignment kept only
+// the last one, which is how core binaries went missing from every composed
+// profile.
+func mergeValueInto(dst map[string]interface{}, k string, v interface{}) {
+	existing, present := dst[k]
+	if !present {
+		dst[k] = v
+		return
+	}
+	switch src := v.(type) {
+	case []interface{}:
+		if cur, ok := existing.([]interface{}); ok {
+			dst[k] = unionLists(cur, src)
+			return
+		}
+	case map[string]interface{}:
+		if cur, ok := existing.(map[string]interface{}); ok {
+			// Copy before descending: cur may alias the parsed document, and
+			// mutating it in place would corrupt what later selectors search.
+			clone := make(map[string]interface{}, len(cur)+len(src))
+			for ck, cv := range cur {
+				clone[ck] = cv
+			}
+			mergeMapInto(clone, src)
+			dst[k] = clone
+			return
+		}
+	}
+	dst[k] = v
+}
+
+// unionLists appends the elements of b that a does not already hold.
+// Deduplicating matters: an entry matching two selectors is projected twice
+// with the same value, and plain concatenation turned `groups: [local, core]`
+// into `[local, core, local, core]`. The result is always a fresh slice —
+// appending in place could write into the parsed document's backing array.
+func unionLists(a, b []interface{}) []interface{} {
+	out := make([]interface{}, 0, len(a)+len(b))
+	out = append(out, a...)
+	for _, item := range b {
+		if !containsValue(out, item) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// containsValue reports whether list already holds an element deep-equal to v.
+func containsValue(list []interface{}, v interface{}) bool {
+	for _, item := range list {
+		if reflect.DeepEqual(item, v) {
+			return true
+		}
+	}
+	return false
 }
 
 // wrapKeyFor picks a top-level key under which to place a non-map
