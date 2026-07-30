@@ -271,24 +271,34 @@ func containsConflictMarkers(b []byte) bool {
 // preferred whitespace and quoting style — even for keys the splice
 // didn't touch.
 func spliceYAML(local, merged []byte, selectors []string) ([]byte, error) {
-	// Scope is the UNION of what the merge actually emitted and what the
-	// selectors name.
-	//
-	// The merged document's own keys are needed because no amount of parsing a
-	// JMESPath expression reliably predicts the key it lands under — anything
-	// returning a map goes through the expression's own structure, and a scope
-	// key that names nothing in `merged` makes the splice a silent no-op.
-	//
-	// The selector-derived keys are needed because a key the selectors claim but
-	// the merge did not emit means "nothing scoped remains upstream", and that
-	// removal must propagate — see
-	// TestSpliceYAMLStructural_RemovesScopedKeyAbsentInMerge. The sharp edge is
-	// that a selector matching nothing therefore CLEARS the local key rather
-	// than leaving it alone; that is the same signal as an upstream removal and
-	// cannot be distinguished here.
-	scope := topLevelKeysFromSelectors(selectors)
-	for k := range topLevelKeysFromMerged(merged) {
-		scope[k] = true
+	// Scope = the keys the merge actually emitted, plus the keys SIMPLE
+	// selectors name. See the branches below for why the distinction matters.
+	scope := topLevelKeysFromMerged(merged)
+	if scope == nil {
+		// `merged` carries git conflict markers and does not parse. Selector
+		// names are all we have.
+		scope = topLevelKeysFromSelectors(selectors)
+	} else {
+		// Add the SIMPLE selectors' keys. For a plain dot-path the name is
+		// authoritative — the consumer's key is in scope whether or not the
+		// merge emitted it, so an upstream removal propagates (see
+		// TestSpliceYAMLStructural_RemovesScopedKeyAbsentInMerge).
+		//
+		// Complex selectors get NO such treatment. Their landing key cannot be
+		// derived from the expression: anything returning a map goes through the
+		// expression's own structure, and the wrapKeyFor fallback guesses
+		// "result". Trusting that guess deletes whatever the consumer happens to
+		// keep under it, and makes a selector that legitimately matches nothing
+		// wipe the block it names. Absent from `merged` therefore means "leave
+		// the local file alone" for complex selectors.
+		for _, sel := range selectors {
+			if !isSimpleDotPath(sel) {
+				continue
+			}
+			for _, k := range selectorTopLevelKeys(sel) {
+				scope[k] = true
+			}
+		}
 	}
 
 	// Path 1: byte-level splice. Requires valid YAML on both sides

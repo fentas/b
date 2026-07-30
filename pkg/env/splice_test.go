@@ -711,11 +711,12 @@ func TestSpliceSelectedScope_UnbalancedSelectorStillSplices(t *testing.T) {
 	}
 }
 
-func TestSpliceSelectedScope_ComplexSelectorMatchingNothingClearsTheKey(t *testing.T) {
-	// Documents the sharp edge of the union scope: an empty projection is
-	// indistinguishable from an upstream removal, so the local key is cleared.
-	// Pinned so the behaviour is a decision, not an accident.
-	local := []byte("binaries:\n  stale: {}\nprofiles:\n  keep: {}\n")
+func TestSpliceSelectedScope_ComplexSelectorMatchingNothingIsANoOp(t *testing.T) {
+	// A complex selector that matches nothing must LEAVE THE LOCAL FILE ALONE.
+	// Its landing key is not derivable from the expression, so treating
+	// "absent from merged" as "delete it" would wipe a block on a selector that
+	// simply found no matches.
+	local := []byte("binaries:\n  local-only: {}\nprofiles:\n  keep: {}\n")
 	merged := []byte("{}\n")
 	sel := []string{"{binaries: from_items(items(binaries)[?[1].groups && contains([1].groups, 'nosuchgroup')])}"}
 
@@ -723,10 +724,26 @@ func TestSpliceSelectedScope_ComplexSelectorMatchingNothingClearsTheKey(t *testi
 	if err != nil {
 		t.Fatalf("splice: %v", err)
 	}
-	if strings.Contains(string(out), "stale") {
-		t.Errorf("in-scope key survived an empty projection:\n%s", out)
+	if !strings.Contains(string(out), "local-only") {
+		t.Errorf("an empty projection deleted the consumer's binaries block:\n%s", out)
 	}
 	if !strings.Contains(string(out), "profiles") {
 		t.Errorf("out-of-scope profiles was dropped:\n%s", out)
+	}
+}
+
+func TestSpliceSelectedScope_ComplexSelectorCannotTouchAnUnrelatedKey(t *testing.T) {
+	// wrapKeyFor sends function-style selectors to "result". That guess must
+	// never put a consumer-owned `result:` key in scope.
+	local := []byte("result: consumer-owned\nbinaries:\n  keep: {}\n")
+	merged := []byte("{}\n")
+	sel := []string{"from_items(items(binaries)[?[1].groups])"}
+
+	out, err := spliceSelectedScope(local, merged, sel, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	if !strings.Contains(string(out), "consumer-owned") {
+		t.Errorf("a phantom `result` scope key deleted a consumer-owned key:\n%s", out)
 	}
 }
