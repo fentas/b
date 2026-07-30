@@ -1,8 +1,11 @@
 package env
 
 import (
+	"sort"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // --- classifier ---
@@ -418,4 +421,54 @@ func TestWrapKeyFor(t *testing.T) {
 			t.Errorf("wrapKeyFor(%q) = %q, want %q", c.sel, got, c.want)
 		}
 	}
+}
+
+func TestFilterYAMLJMESPath_SameKeyFromTwoSelectorsUnions(t *testing.T) {
+	// A resolved profile chain hands us one selector per group, each projecting
+	// the same top-level `binaries` key. A shallow merge kept only the last
+	// group's map, which is how core tools went missing from every composed
+	// profile.
+	content := []byte(`binaries:
+  argsh:
+    groups: [core]
+  kubectl:
+    groups: [core]
+  kustomize:
+    groups: [kustomize]
+  kind:
+    groups: [local]
+`)
+	selectors := []string{
+		"{binaries: from_items(items(binaries)[?[1].groups && contains([1].groups, 'core')])}",
+		"{binaries: from_items(items(binaries)[?[1].groups && contains([1].groups, 'kustomize')])}",
+	}
+
+	out, err := filterYAMLJMESPath(content, selectors)
+	if err != nil {
+		t.Fatalf("filter: %v", err)
+	}
+
+	var got struct {
+		Binaries map[string]interface{} `yaml:"binaries"`
+	}
+	if err := yaml.Unmarshal(out, &got); err != nil {
+		t.Fatalf("unmarshal %s: %v", out, err)
+	}
+	for _, want := range []string{"argsh", "kubectl", "kustomize"} {
+		if _, ok := got.Binaries[want]; !ok {
+			t.Errorf("binaries.%s missing — got %v (both selectors' results must survive)", want, keysOf(got.Binaries))
+		}
+	}
+	if _, ok := got.Binaries["kind"]; ok {
+		t.Error("binaries.kind leaked in — no selector asked for the local group")
+	}
+}
+
+func keysOf(m map[string]interface{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

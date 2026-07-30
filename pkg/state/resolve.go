@@ -31,9 +31,15 @@ func ResolveProfileIncludes(profile *EnvEntry, allProfiles EnvList) (*EnvEntry, 
 	}
 
 	for _, p := range order {
-		// Merge files (later wins for same glob)
+		// A glob declared by several profiles in the include chain is
+		// COMPOSED, not replaced: each contributes its own selectors. Letting
+		// the last one win silently drops the base profiles' selection — e.g.
+		// lok8s' `kubeone` profile includes `local`, which includes `core` and
+		// `kustomize`, and all four select a DIFFERENT binaries group out of
+		// the same `.bin/b.yaml`. Replacement kept only the kubeone group, so
+		// core tools (argsh, sops, kubectl) were never installed.
 		for glob, gc := range p.Files {
-			merged.Files[glob] = gc
+			merged.Files[glob] = mergeGlobConfig(merged.Files[glob], gc)
 		}
 
 		// Concatenate ignores
@@ -63,6 +69,21 @@ func ResolveProfileIncludes(profile *EnvEntry, allProfiles EnvList) (*EnvEntry, 
 	// Includes are fully resolved
 	merged.Includes = nil
 	return merged, nil
+}
+
+// mergeGlobConfig composes two configs for the SAME glob, base first. Select
+// and Ignore union (order-preserving, so the base profile's keys stay first);
+// Dest is last-non-empty, since one file can only land in one place.
+func mergeGlobConfig(base, override envmatch.GlobConfig) envmatch.GlobConfig {
+	out := envmatch.GlobConfig{
+		Dest:   base.Dest,
+		Ignore: appendUnique(base.Ignore, override.Ignore),
+		Select: appendUnique(base.Select, override.Select),
+	}
+	if override.Dest != "" {
+		out.Dest = override.Dest
+	}
+	return out
 }
 
 // collectIncludes performs a post-order DFS with proper cycle detection.

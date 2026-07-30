@@ -149,15 +149,37 @@ func runJMESPathSelectors(
 			continue
 		}
 		if m, ok := val.(map[string]interface{}); ok {
-			for k, v := range m {
-				merged[k] = v
-			}
+			mergeMapInto(merged, m)
 			continue
 		}
 		// Non-map result: wrap under a sensible key.
 		merged[wrapKeyFor(sel)] = val
 	}
 	return marshal(merged)
+}
+
+// mergeMapInto deep-merges src into dst. Nested maps merge key-by-key; any
+// other value (scalar, list) is replaced. Several selectors projecting the
+// SAME top-level key is the normal shape when a resolved profile chain selects
+// multiple groups out of one file (`{binaries: <group A>}` plus
+// `{binaries: <group B>}`) — a shallow copy would keep only the last group.
+func mergeMapInto(dst, src map[string]interface{}) {
+	for k, v := range src {
+		srcMap, srcIsMap := v.(map[string]interface{})
+		dstMap, dstIsMap := dst[k].(map[string]interface{})
+		if !srcIsMap || !dstIsMap {
+			dst[k] = v
+			continue
+		}
+		// Copy before descending: dstMap may alias the parsed document, and
+		// mutating it in place would corrupt what later selectors search.
+		clone := make(map[string]interface{}, len(dstMap)+len(srcMap))
+		for ck, cv := range dstMap {
+			clone[ck] = cv
+		}
+		mergeMapInto(clone, srcMap)
+		dst[k] = clone
+	}
 }
 
 // wrapKeyFor picks a top-level key under which to place a non-map
