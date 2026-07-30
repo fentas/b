@@ -70,23 +70,137 @@ func spliceSelectedScope(local, merged []byte, selectors []string, filePath stri
 	}
 }
 
-// topLevelKeysFromSelectors returns the set of top-level YAML keys that are
+// topLevelKeysFromSelectors returns the set of top-level YAML keys named by the
+// selectors. Only SIMPLE dot-paths contribute — see spliceYAML for why a complex
+// expression's key cannot be trusted. Returns the set of top-level YAML keys that are
 // within the selector scope. A selector like "binaries" or ".binaries" maps
 // to {binaries}; a nested selector like "database.host" or ".database.host"
 // maps to {database}.
 func topLevelKeysFromSelectors(selectors []string) map[string]bool {
 	keys := make(map[string]bool, len(selectors))
 	for _, sel := range selectors {
-		key := strings.TrimPrefix(sel, ".")
-		if key == "" {
-			continue
+		for _, key := range selectorTopLevelKeys(sel) {
+			keys[key] = true
 		}
-		if i := strings.Index(key, "."); i >= 0 {
-			key = key[:i]
-		}
-		keys[key] = true
 	}
 	return keys
+}
+
+// topLevelKeysFromMerged returns the top-level keys of a merged YAML document,
+// or nil when it does not parse as a mapping (the conflict-marker case).
+func topLevelKeysFromMerged(merged []byte) map[string]bool {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(merged, &doc); err != nil {
+		return nil
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil
+	}
+	root := doc.Content[0]
+	keys := make(map[string]bool, len(root.Content)/2)
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		keys[root.Content[i].Value] = true
+	}
+	return keys
+}
+
+// selectorTopLevelKeys returns the top-level keys a selector contributes to
+// the merged document. It MUST agree with what the JMESPath layer actually
+// emits (runJMESPathSelectors / wrapKeyFor) — a scope key that names nothing
+// in `merged` makes the splice a silent no-op, which is how a complex
+// selector like
+//
+//	{binaries: from_items(items(binaries)[?[1].groups && …])}
+//
+// used to leave the consumer's file untouched: treated as a literal dot-path
+// it yielded the nonsense key `{binaries: from_items(items(binaries)[?[1]`,
+// nothing matched, and every binary the profile selected went missing.
+func selectorTopLevelKeys(sel string) []string {
+	if keys, ok := multiSelectHashKeys(sel); ok {
+		return keys
+	}
+	if !isSimpleDotPath(sel) {
+		// Any other complex expression: the merge wraps its result under
+		// wrapKeyFor, so that is exactly the key in scope.
+		return []string{wrapKeyFor(sel)}
+	}
+	key := strings.TrimPrefix(sel, ".")
+	if key == "" {
+		return nil
+	}
+	if i := strings.Index(key, "."); i >= 0 {
+		key = key[:i]
+	}
+	return []string{key}
+}
+
+// multiSelectHashKeys extracts the keys of a JMESPath multi-select hash —
+// `{a: expr, b: expr}` → [a b]. Those keys ARE the top-level keys of the
+// result. Reports false for anything that is not a well-formed hash so the
+// caller can fall back.
+func multiSelectHashKeys(sel string) ([]string, bool) {
+	body := strings.TrimSpace(sel)
+	if len(body) < 2 || body[0] != '{' || body[len(body)-1] != '}' {
+		return nil, false
+	}
+	parts := splitTopLevel(body[1:len(body)-1], ',')
+	if parts == nil {
+		return nil, false
+	}
+	var keys []string
+	for _, part := range parts {
+		// The key is everything up to the FIRST top-level colon; the value
+		// expression may contain colons of its own.
+		pair := splitTopLevel(part, ':')
+		if len(pair) < 2 {
+			return nil, false
+		}
+		key := strings.Trim(strings.TrimSpace(pair[0]), `"'`)
+		if key == "" {
+			return nil, false
+		}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return nil, false
+	}
+	return keys, true
+}
+
+// splitTopLevel splits on sep, ignoring separators nested inside brackets,
+// braces, parens or quotes.
+func splitTopLevel(s string, sep byte) []string {
+	var (
+		out   []string
+		depth int
+		quote byte
+		start int
+	)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '\'' || c == '"' || c == '`':
+			quote = c
+		case c == '{' || c == '[' || c == '(':
+			depth++
+		case c == '}' || c == ']' || c == ')':
+			depth--
+			if depth < 0 {
+				// Unbalanced — e.g. `{a: b} | {c: d}`, where letting depth go
+				// negative would rebalance and hide the second brace group.
+				// Bail out so the caller falls back instead of splitting wrong.
+				return nil
+			}
+		case c == sep && depth == 0:
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	return append(out, s[start:])
 }
 
 // usesCRLF reports whether the file should be treated as having
@@ -159,7 +273,34 @@ func containsConflictMarkers(b []byte) bool {
 // preferred whitespace and quoting style — even for keys the splice
 // didn't touch.
 func spliceYAML(local, merged []byte, selectors []string) ([]byte, error) {
-	scope := topLevelKeysFromSelectors(selectors)
+	// Scope = the keys the merge actually emitted, plus the keys SIMPLE
+	// selectors name. See the branches below for why the distinction matters.
+	// Keys the merge actually emitted, when it parses at all.
+	scope := topLevelKeysFromMerged(merged)
+	if scope == nil {
+		// `merged` carries git conflict markers, so there is nothing to read
+		// keys from. Selector names are all we have.
+		scope = make(map[string]bool, len(selectors))
+	}
+	// Plus the keys of SIMPLE selectors. For a plain dot-path the name is
+	// authoritative — the consumer's key is in scope whether or not the merge
+	// emitted it, so an upstream removal propagates (see
+	// TestSpliceYAMLStructural_RemovesScopedKeyAbsentInMerge).
+	//
+	// Complex selectors contribute nothing here, on BOTH paths. Their landing
+	// key is not derivable from the expression: anything returning a map goes
+	// through the expression's own structure, and the wrapKeyFor fallback merely
+	// guesses "result". Trusting that guess deletes whatever the consumer keeps
+	// under that name — including on the conflict path, where it also swallowed
+	// the markers it was supposed to be writing.
+	for _, sel := range selectors {
+		if !isSimpleDotPath(sel) {
+			continue
+		}
+		for _, k := range selectorTopLevelKeys(sel) {
+			scope[k] = true
+		}
+	}
 
 	// Path 1: byte-level splice. Requires valid YAML on both sides
 	// (no conflict markers in `merged`) and a parseable

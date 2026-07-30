@@ -251,3 +251,79 @@ func TestResolveProfileIncludes_DescriptionNotInherited(t *testing.T) {
 		t.Errorf("description = %q, want 'Top description'", resolved.Description)
 	}
 }
+
+func TestResolveProfileIncludes_SameGlobSelectsUnion(t *testing.T) {
+	// The lok8s shape: every profile in the chain selects a DIFFERENT binaries
+	// group out of the SAME .bin/b.yaml. Replacing the glob config kept only
+	// the outermost profile's selector, so `kubeone` installed the kubeone
+	// group and none of core's (argsh, sops, kubectl, jq, yq).
+	core := &EnvEntry{
+		Key:   "core",
+		Files: map[string]envmatch.GlobConfig{".bin/b.yaml": {Select: []string{"{binaries: core}"}}},
+	}
+	kustomize := &EnvEntry{
+		Key:   "kustomize",
+		Files: map[string]envmatch.GlobConfig{".bin/b.yaml": {Select: []string{"{binaries: kustomize}"}}},
+	}
+	local := &EnvEntry{
+		Key:      "local",
+		Includes: []string{"core", "kustomize"},
+		Files:    map[string]envmatch.GlobConfig{".bin/b.yaml": {Select: []string{"{binaries: local}"}}},
+	}
+	kubeone := &EnvEntry{
+		Key:      "kubeone",
+		Includes: []string{"local"},
+		Files:    map[string]envmatch.GlobConfig{".bin/b.yaml": {Select: []string{"{binaries: kubeone}"}}},
+	}
+
+	resolved, err := ResolveProfileIncludes(kubeone, EnvList{core, kustomize, local, kubeone})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	got := resolved.Files[".bin/b.yaml"].Select
+	want := []string{
+		"{binaries: core}",
+		"{binaries: kustomize}",
+		"{binaries: local}",
+		"{binaries: kubeone}",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("selectors for .bin/b.yaml = %v, want all four groups %v", got, want)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("selector %d = %q, want %q (base profiles must come first)", i, got[i], w)
+		}
+	}
+}
+
+func TestResolveProfileIncludes_SameGlobDestAndIgnoreMerge(t *testing.T) {
+	base := &EnvEntry{
+		Key: "base",
+		Files: map[string]envmatch.GlobConfig{
+			"x/**": {Dest: "base/", Ignore: []string{"*.tmp"}},
+		},
+	}
+	child := &EnvEntry{
+		Key:      "child",
+		Includes: []string{"base"},
+		Files: map[string]envmatch.GlobConfig{
+			"x/**": {Dest: "child/", Ignore: []string{"*.bak", "*.tmp"}},
+		},
+	}
+
+	resolved, err := ResolveProfileIncludes(child, EnvList{base, child})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	gc := resolved.Files["x/**"]
+	// One file can only land in one place, so Dest stays last-wins.
+	if gc.Dest != "child/" {
+		t.Errorf("Dest = %q, want child/ (override wins)", gc.Dest)
+	}
+	if len(gc.Ignore) != 2 || gc.Ignore[0] != "*.tmp" || gc.Ignore[1] != "*.bak" {
+		t.Errorf("Ignore = %v, want [*.tmp *.bak] unioned without duplicates", gc.Ignore)
+	}
+}

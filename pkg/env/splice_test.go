@@ -649,3 +649,120 @@ func TestSpliceSelectedScope_NoSelectors(t *testing.T) {
 		t.Errorf("no-selectors splice should equal merged, got %q", out)
 	}
 }
+
+// The splice is where a wrong scope key becomes invisible: it silently writes
+// nothing. These tests sit at spliceSelectedScope, the seam the sync actually
+// calls, with the selector shapes real profiles use.
+
+func TestSpliceSelectedScope_MapReturningComplexSelector(t *testing.T) {
+	// A complex selector whose result is a MAP does not go through wrapKeyFor,
+	// so its scope key cannot be predicted from the expression text — it has to
+	// come from the merged document.
+	local := []byte("binaries: {}\nprofiles:\n  keep: {}\n")
+	merged := []byte("binaries:\n  argsh: {}\n")
+	sel := []string{"from_items(items(binaries)[?[1].groups])"}
+
+	out, err := spliceSelectedScope(local, merged, sel, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	if !strings.Contains(string(out), "argsh") {
+		t.Errorf("merged content was not spliced in — the splice was a silent no-op:\n%s", out)
+	}
+	if !strings.Contains(string(out), "profiles") {
+		t.Errorf("out-of-scope profiles was dropped:\n%s", out)
+	}
+}
+
+func TestSpliceSelectedScope_MultiSelectHashSelector(t *testing.T) {
+	local := []byte("binaries: {}\nprofiles:\n  keep: {}\n")
+	merged := []byte("binaries:\n  argsh: {}\n")
+	sel := []string{"{binaries: from_items(items(binaries)[?[1].groups && contains([1].groups, 'core')])}"}
+
+	out, err := spliceSelectedScope(local, merged, sel, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	if !strings.Contains(string(out), "argsh") {
+		t.Errorf("hash-wrapped selector spliced nothing:\n%s", out)
+	}
+	if !strings.Contains(string(out), "profiles") {
+		t.Errorf("out-of-scope profiles was dropped:\n%s", out)
+	}
+}
+
+func TestSpliceSelectedScope_UnbalancedSelectorStillSplices(t *testing.T) {
+	// `{a: b} | {c: d}` is not a plain hash. Key extraction must refuse it
+	// rather than confidently returning the wrong key; the merged document then
+	// supplies the real scope.
+	local := []byte("binaries: {}\nprofiles:\n  keep: {}\n")
+	merged := []byte("result:\n  x: 1\n")
+	sel := []string{"{a: binaries} | {result: @}"}
+
+	out, err := spliceSelectedScope(local, merged, sel, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	if !strings.Contains(string(out), "result") {
+		t.Errorf("merged key `result` was not spliced in:\n%s", out)
+	}
+	if !strings.Contains(string(out), "profiles") {
+		t.Errorf("out-of-scope profiles was dropped:\n%s", out)
+	}
+}
+
+func TestSpliceSelectedScope_ComplexSelectorMatchingNothingIsANoOp(t *testing.T) {
+	// A complex selector that matches nothing must LEAVE THE LOCAL FILE ALONE.
+	// Its landing key is not derivable from the expression, so treating
+	// "absent from merged" as "delete it" would wipe a block on a selector that
+	// simply found no matches.
+	local := []byte("binaries:\n  local-only: {}\nprofiles:\n  keep: {}\n")
+	merged := []byte("{}\n")
+	sel := []string{"{binaries: from_items(items(binaries)[?[1].groups && contains([1].groups, 'nosuchgroup')])}"}
+
+	out, err := spliceSelectedScope(local, merged, sel, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	if !strings.Contains(string(out), "local-only") {
+		t.Errorf("an empty projection deleted the consumer's binaries block:\n%s", out)
+	}
+	if !strings.Contains(string(out), "profiles") {
+		t.Errorf("out-of-scope profiles was dropped:\n%s", out)
+	}
+}
+
+func TestSpliceSelectedScope_ComplexSelectorCannotTouchAnUnrelatedKey(t *testing.T) {
+	// wrapKeyFor sends function-style selectors to "result". That guess must
+	// never put a consumer-owned `result:` key in scope.
+	local := []byte("result: consumer-owned\nbinaries:\n  keep: {}\n")
+	merged := []byte("{}\n")
+	sel := []string{"from_items(items(binaries)[?[1].groups])"}
+
+	out, err := spliceSelectedScope(local, merged, sel, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	if !strings.Contains(string(out), "consumer-owned") {
+		t.Errorf("a phantom `result` scope key deleted a consumer-owned key:\n%s", out)
+	}
+}
+
+func TestSpliceSelectedScope_ConflictPathLeavesUnrelatedKeysAlone(t *testing.T) {
+	// When `merged` carries git conflict markers there are no keys to read, and
+	// the scope falls back to the selectors. A complex selector's wrapKeyFor
+	// guess ("result") must not reach a consumer-owned `result:` there either —
+	// on that path it both deleted the key and swallowed the markers it was
+	// supposed to write.
+	local := []byte("result: consumer-owned\nbinaries:\n  keep: {}\n")
+	merged := []byte("<<<<<<< local\nbinaries: {}\n=======\nbinaries:\n  up: {}\n>>>>>>> upstream\n")
+	sel := []string{"from_items(items(binaries)[?[1].groups])"}
+
+	out, err := spliceSelectedScope(local, merged, sel, "b.yaml")
+	if err != nil {
+		t.Fatalf("splice: %v", err)
+	}
+	if !strings.Contains(string(out), "consumer-owned") {
+		t.Errorf("the conflict path deleted a consumer-owned key via the `result` guess:\n%s", out)
+	}
+}
