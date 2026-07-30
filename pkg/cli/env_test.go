@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/fentas/b/pkg/env"
 	"github.com/fentas/b/pkg/envmatch"
 	"github.com/fentas/b/pkg/lock"
@@ -1224,3 +1226,57 @@ func TestEnvAdd_EmptyFilesAfterResolve(t *testing.T) {
 }
 
 var _ = envmatch.GlobConfig{}
+
+// A subcommand's own --version must PIN, not print the root banner and exit.
+//
+// Regression: the root PersistentPreRunE ran `cmd.Flags().Changed("version")`
+// for every subcommand, so `b env add <ref> --version <tag>` matched the pin
+// flag, printed the version and os.Exit(0)'d — a silent rc-0 no-op that
+// registered nothing. lo-up always passes the pin, so `curl get.lok8s.io | sh`
+// died on every fresh machine with "no b.yaml configuration found".
+func TestEnvAddVersionFlagIsAPinNotTheRootBanner(t *testing.T) {
+	root := NewRootCmd(mkBinaries(), mkIO(), "dev", "")
+
+	var envAdd *cobra.Command
+	for _, c := range root.Commands() {
+		if c.Name() != "env" {
+			continue
+		}
+		for _, sub := range c.Commands() {
+			if sub.Name() == "add" {
+				envAdd = sub
+			}
+		}
+	}
+	if envAdd == nil {
+		t.Fatal("env add command not found")
+	}
+
+	// The pin flag must be a STRING local to `env add`...
+	pin := envAdd.Flags().Lookup("version")
+	if pin == nil {
+		t.Fatal("env add has no --version pin flag")
+	}
+	if got := pin.Value.Type(); got != "string" {
+		t.Errorf("env add --version type = %q, want string (the pin)", got)
+	}
+
+	// ...while the root's banner flag stays a persistent BOOL. The
+	// PersistentPreRunE keys off exactly that distinction, so if either type
+	// ever flips, the silent-exit bug is back.
+	banner := root.PersistentFlags().Lookup("version")
+	if banner == nil {
+		t.Fatal("root has no persistent --version flag")
+	}
+	if got := banner.Value.Type(); got != "bool" {
+		t.Errorf("root --version type = %q, want bool (the banner)", got)
+	}
+
+	// Setting the pin must NOT mark the root's banner flag as changed.
+	if err := envAdd.Flags().Set("version", "main"); err != nil {
+		t.Fatalf("set pin: %v", err)
+	}
+	if banner.Changed {
+		t.Error("pinning env add --version marked the ROOT banner flag changed — the version banner would print and exit 0")
+	}
+}

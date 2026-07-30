@@ -22,8 +22,24 @@ func NewRootCmd(binaries []*binary.Binary, io *streams.IO, version, versionPreRe
 		Short: "Manage all binaries",
 		Long:  "A tool to manage binary installations and updates 🧙",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			// Handle version flag at root level
-			if cmd.Flags().Changed("version") {
+			// Handle version flag at root level.
+			//
+			// `cmd` here is whatever SUBCOMMAND is running (cobra invokes the
+			// root's PersistentPreRunE for the whole tree), and a subcommand may
+			// legitimately own its own --version: `b env add <ref> --version
+			// <tag>` pins a ref. A bare Flags().Changed("version") matched THAT
+			// too, printed the banner and os.Exit(0)'d — so every pinned
+			// `env add` was a silent success that registered nothing, which is
+			// what broke `curl get.lok8s.io | sh` on fresh machines (lo-up always
+			// passes the pin). Only the ROOT's persistent BOOL flag means "print
+			// the version and quit".
+			versionFlag := cmd.Flags().Lookup("version")
+			if cmd.HasParent() {
+				// On a subcommand, consult the root's persistent flag explicitly:
+				// a local same-named flag shadows it in cmd.Flags().
+				versionFlag = cmd.Root().PersistentFlags().Lookup("version")
+			}
+			if versionFlag != nil && versionFlag.Changed && versionFlag.Value.Type() == "bool" {
 				v := version
 				if versionPreRelease != "" {
 					v = fmt.Sprintf("%s-%s", version, versionPreRelease)
