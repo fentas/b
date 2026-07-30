@@ -84,6 +84,24 @@ func topLevelKeysFromSelectors(selectors []string) map[string]bool {
 	return keys
 }
 
+// topLevelKeysFromMerged returns the top-level keys of a merged YAML document,
+// or nil when it does not parse as a mapping (the conflict-marker case).
+func topLevelKeysFromMerged(merged []byte) map[string]bool {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(merged, &doc); err != nil {
+		return nil
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil
+	}
+	root := doc.Content[0]
+	keys := make(map[string]bool, len(root.Content)/2)
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		keys[root.Content[i].Value] = true
+	}
+	return keys
+}
+
 // selectorTopLevelKeys returns the top-level keys a selector contributes to
 // the merged document. It MUST agree with what the JMESPath layer actually
 // emits (runJMESPathSelectors / wrapKeyFor) — a scope key that names nothing
@@ -123,8 +141,12 @@ func multiSelectHashKeys(sel string) ([]string, bool) {
 	if len(body) < 2 || body[0] != '{' || body[len(body)-1] != '}' {
 		return nil, false
 	}
+	parts := splitTopLevel(body[1:len(body)-1], ',')
+	if parts == nil {
+		return nil, false
+	}
 	var keys []string
-	for _, part := range splitTopLevel(body[1:len(body)-1], ',') {
+	for _, part := range parts {
 		// The key is everything up to the FIRST top-level colon; the value
 		// expression may contain colons of its own.
 		pair := splitTopLevel(part, ':')
@@ -165,6 +187,12 @@ func splitTopLevel(s string, sep byte) []string {
 			depth++
 		case c == '}' || c == ']' || c == ')':
 			depth--
+			if depth < 0 {
+				// Unbalanced — e.g. `{a: b} | {c: d}`, where letting depth go
+				// negative would rebalance and hide the second brace group.
+				// Bail out so the caller falls back instead of splitting wrong.
+				return nil
+			}
 		case c == sep && depth == 0:
 			out = append(out, s[start:i])
 			start = i + 1
@@ -243,7 +271,25 @@ func containsConflictMarkers(b []byte) bool {
 // preferred whitespace and quoting style — even for keys the splice
 // didn't touch.
 func spliceYAML(local, merged []byte, selectors []string) ([]byte, error) {
+	// Scope is the UNION of what the merge actually emitted and what the
+	// selectors name.
+	//
+	// The merged document's own keys are needed because no amount of parsing a
+	// JMESPath expression reliably predicts the key it lands under — anything
+	// returning a map goes through the expression's own structure, and a scope
+	// key that names nothing in `merged` makes the splice a silent no-op.
+	//
+	// The selector-derived keys are needed because a key the selectors claim but
+	// the merge did not emit means "nothing scoped remains upstream", and that
+	// removal must propagate — see
+	// TestSpliceYAMLStructural_RemovesScopedKeyAbsentInMerge. The sharp edge is
+	// that a selector matching nothing therefore CLEARS the local key rather
+	// than leaving it alone; that is the same signal as an upstream removal and
+	// cannot be distinguished here.
 	scope := topLevelKeysFromSelectors(selectors)
+	for k := range topLevelKeysFromMerged(merged) {
+		scope[k] = true
+	}
 
 	// Path 1: byte-level splice. Requires valid YAML on both sides
 	// (no conflict markers in `merged`) and a parseable

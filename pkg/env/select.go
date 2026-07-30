@@ -453,6 +453,10 @@ func mergeYAMLMappings(dst, src *yaml.Node) {
 				found = true
 				if dst.Content[j+1].Kind == yaml.MappingNode && srcVal.Kind == yaml.MappingNode {
 					mergeYAMLMappings(dst.Content[j+1], srcVal)
+				} else {
+					// Not both mappings — there is nothing to compose, so the
+					// documented precedence applies: the JMESPath result wins.
+					dst.Content[j+1] = srcVal
 				}
 				break
 			}
