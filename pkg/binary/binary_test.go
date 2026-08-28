@@ -783,3 +783,146 @@ func TestBinary_DownloadBinary_Switch(t *testing.T) {
 		t.Errorf("%v", err)
 	}
 }
+
+// --- download trust: 401/403 and 0-byte downloads (#161, #163) ---
+
+func TestDownloadPreset_HTTP403RateLimitHeader(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+	}))
+	defer srv.Close()
+	tmp := t.TempDir()
+	b := &Binary{Name: "x", File: filepath.Join(tmp, "x"), URL: srv.URL, Version: "v1"}
+	err := b.downloadPreset()
+	if err == nil {
+		t.Fatal("expected error for 403, got nil")
+	}
+	if !strings.Contains(err.Error(), "GITHUB_TOKEN") {
+		t.Errorf("403 rate-limit error should hint GITHUB_TOKEN, got: %v", err)
+	}
+	if _, statErr := os.Stat(b.File); statErr == nil {
+		t.Error("no file should be written on a 403 response")
+	}
+}
+
+func TestDownloadPreset_HTTP403RateLimitBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"API rate limit exceeded for 1.2.3.4"}`))
+	}))
+	defer srv.Close()
+	tmp := t.TempDir()
+	b := &Binary{Name: "x", File: filepath.Join(tmp, "x"), URL: srv.URL, Version: "v1"}
+	err := b.downloadPreset()
+	if err == nil {
+		t.Fatal("expected error for 403, got nil")
+	}
+	if !strings.Contains(err.Error(), "GITHUB_TOKEN") {
+		t.Errorf("403 rate-limit error should hint GITHUB_TOKEN, got: %v", err)
+	}
+}
+
+func TestDownloadPreset_HTTP403Plain(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("no access"))
+	}))
+	defer srv.Close()
+	tmp := t.TempDir()
+	b := &Binary{Name: "x", File: filepath.Join(tmp, "x"), URL: srv.URL, Version: "v1"}
+	err := b.downloadPreset()
+	if err == nil {
+		t.Fatal("expected error for 403, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Errorf("error should name the status, got: %v", err)
+	}
+}
+
+func TestDownloadPreset_HTTP401(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	tmp := t.TempDir()
+	b := &Binary{Name: "x", File: filepath.Join(tmp, "x"), URL: srv.URL, Version: "v1"}
+	err := b.downloadPreset()
+	if err == nil {
+		t.Fatal("expected error for 401, got nil")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("error should name the status, got: %v", err)
+	}
+}
+
+func TestDownloadPreset_EmptyBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 200 OK with an empty body: must NOT be reported as success.
+	}))
+	defer srv.Close()
+	tmp := t.TempDir()
+	b := &Binary{Name: "x", File: filepath.Join(tmp, "x"), URL: srv.URL, Version: "v1"}
+	err := b.downloadPreset()
+	if err == nil {
+		t.Fatal("expected error for 0-byte download, got nil")
+	}
+	if !strings.Contains(err.Error(), "0 bytes") || !strings.Contains(err.Error(), b.File) {
+		t.Errorf("error should name the file and the 0-byte size, got: %v", err)
+	}
+}
+
+func TestDownloadPreset_ContentLengthMatch(t *testing.T) {
+	content := []byte("#!/bin/sh\necho real binary\n")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
+		_, _ = w.Write(content)
+	}))
+	defer srv.Close()
+	tmp := t.TempDir()
+	b := &Binary{Name: "x", File: filepath.Join(tmp, "x"), URL: srv.URL, Version: "v1"}
+	if err := b.downloadPreset(); err != nil {
+		t.Fatalf("downloadPreset: %v", err)
+	}
+	got, err := os.ReadFile(b.File)
+	if err != nil {
+		t.Fatalf("reading downloaded file: %v", err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Errorf("file content mismatch: got %d bytes, want %d", len(got), len(content))
+	}
+}
+
+func TestDownloadAsset_HTTP403RateLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+	tmp := t.TempDir()
+	b := &Binary{Name: "x", File: filepath.Join(tmp, "x")}
+	err := b.downloadAsset(&provider.Asset{URL: srv.URL + "/file.bin", Name: "file.bin"})
+	if err == nil {
+		t.Fatal("expected error for 403, got nil")
+	}
+	if !strings.Contains(err.Error(), "GITHUB_TOKEN") {
+		t.Errorf("403 rate-limit error should hint GITHUB_TOKEN, got: %v", err)
+	}
+}
+
+func TestDownloadAsset_EmptyBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 200 OK, empty body
+	}))
+	defer srv.Close()
+	tmp := t.TempDir()
+	b := &Binary{Name: "x", File: filepath.Join(tmp, "x")}
+	err := b.downloadAsset(&provider.Asset{URL: srv.URL + "/file.bin", Name: "file.bin"})
+	if err == nil {
+		t.Fatal("expected error for 0-byte download, got nil")
+	}
+	if !strings.Contains(err.Error(), "0 bytes") {
+		t.Errorf("error should name the 0-byte size, got: %v", err)
+	}
+}
