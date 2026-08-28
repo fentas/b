@@ -18,6 +18,38 @@ import (
 	"github.com/ulikunitz/xz"
 )
 
+// rateLimitShaped reports whether a 401/403 response looks like a GitHub
+// rate-limit rejection: X-RateLimit-Remaining is 0, or the body mentions
+// "rate limit". It consumes (part of) the response body, so call it only on
+// a response that is already being rejected.
+func rateLimitShaped(resp *http.Response) bool {
+	if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+		return true
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	return strings.Contains(strings.ToLower(string(body)), "rate limit")
+}
+
+// accessDeniedError builds the error for a 401/403 download response.
+func accessDeniedError(resp *http.Response, url string) error {
+	if rateLimitShaped(resp) {
+		return fmt.Errorf("HTTP %d for %s: rate limit exhausted; set GITHUB_TOKEN to authenticate", resp.StatusCode, url)
+	}
+	return fmt.Errorf("HTTP %d for %s: access denied; check credentials (for GitHub, set GITHUB_TOKEN)", resp.StatusCode, url)
+}
+
+// verifyWritten confirms a download landed on disk: at least one byte was
+// written, and the byte count matches Content-Length when the server sent one.
+func verifyWritten(file string, written, contentLength int64) error {
+	if written == 0 {
+		return fmt.Errorf("download of %s wrote 0 bytes: the server sent an empty body; retry the download", file)
+	}
+	if contentLength >= 0 && written != contentLength {
+		return fmt.Errorf("download of %s is incomplete: wrote %d bytes, Content-Length is %d; retry the download", file, written, contentLength)
+	}
+	return nil
+}
+
 func (b *Binary) githubURL() (string, error) {
 	var err error
 	file := b.GitHubFile
@@ -240,6 +272,9 @@ func (b *Binary) downloadAsset(asset *provider.Asset) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized {
+			return accessDeniedError(resp, asset.URL)
+		}
 		return fmt.Errorf("HTTP %d downloading %s", resp.StatusCode, asset.Name)
 	}
 
@@ -264,13 +299,16 @@ func (b *Binary) downloadAsset(asset *provider.Asset) error {
 		if err != nil {
 			return err
 		}
-		_, copyErr := io.Copy(file, reader)
+		written, copyErr := io.Copy(file, reader)
 		closeErr := file.Close()
 		if copyErr != nil {
 			return copyErr
 		}
 		if closeErr != nil {
 			return closeErr
+		}
+		if err := verifyWritten(b.File, written, resp.ContentLength); err != nil {
+			return err
 		}
 		return os.Chmod(b.File, 0755)
 	}
@@ -490,11 +528,10 @@ func (b *Binary) downloadPreset() error {
 				return fmt.Errorf("%s %s not found (latest: %s)", b.Name, b.Version, latest)
 			}
 			return fmt.Errorf("%s %s not found for %s/%s", b.Name, b.Version, runtime.GOOS, runtime.GOARCH)
-		case http.StatusForbidden:
-		case http.StatusUnauthorized:
-			return fmt.Errorf("Unauthorized")
+		case http.StatusForbidden, http.StatusUnauthorized:
+			return accessDeniedError(resp, url)
 		case http.StatusTooManyRequests:
-			return fmt.Errorf("Rate limited")
+			return fmt.Errorf("HTTP 429 for %s: rate limited; wait and retry, or set GITHUB_TOKEN to authenticate", url)
 		default:
 			return fmt.Errorf("HTTP error %d", resp.StatusCode)
 		}
@@ -539,13 +576,16 @@ func (b *Binary) downloadPreset() error {
 	if err != nil {
 		return err
 	}
-	_, copyErr := io.Copy(file, reader)
+	written, copyErr := io.Copy(file, reader)
 	closeErr := file.Close()
 	if copyErr != nil {
 		return copyErr
 	}
 	if closeErr != nil {
 		return closeErr
+	}
+	if err := verifyWritten(b.File, written, resp.ContentLength); err != nil {
+		return err
 	}
 
 	return os.Chmod(b.File, 0755)
