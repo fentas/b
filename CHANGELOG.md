@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.18.7](https://github.com/fentas/b/compare/v4.18.6...v4.18.7) (2026-08-28)
+
+
+### Bug Fixes
+
+* **download:** 403/401 and 0-byte downloads are errors, not success ([#186](https://github.com/fentas/b/issues/186)) ([782f5ed](https://github.com/fentas/b/commit/782f5ed5b87a1a259cf1b80f5aee4837d1752c45))
+
 ## [4.18.6](https://github.com/fentas/b/compare/v4.18.5...v4.18.6) (2026-07-30)
 
 
