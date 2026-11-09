@@ -1,12 +1,16 @@
 package binary
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/fentas/b/pkg/fetch"
+	"github.com/fentas/b/pkg/provider"
 )
 
 const (
@@ -23,21 +27,31 @@ func GithubLatest(b *Binary) (string, error) {
 	if b.GitHubRepo == "" {
 		return b.Version, fmt.Errorf("GitHubRepo is not set")
 	}
-	resp, err := http.Get(fmt.Sprintf(GithubLatestURL, b.GitHubRepo))
+	latestURL := fmt.Sprintf(GithubLatestURL, b.GitHubRepo)
+	resp, err := fetch.Get(b.ctx(), latestURL)
 	if err != nil {
 		return b.Version, err
 	}
 	resp.Body.Close()
-	final := strings.Split(resp.Request.URL.String(), "/")
-	return final[len(final)-1], nil
+	if resp.StatusCode != http.StatusOK {
+		return b.Version, fmt.Errorf("HTTP %d for %s", resp.StatusCode, latestURL)
+	}
+	tag, err := provider.GitHubReleaseTag(resp.Request.URL)
+	if err != nil {
+		return b.Version, err
+	}
+	return tag, nil
 }
 
 func GetBody(url string) (string, error) {
-	resp, err := http.Get(url)
+	resp, err := fetch.Get(context.Background(), url)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return "", fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err

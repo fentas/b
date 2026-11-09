@@ -188,6 +188,8 @@ Set environment variables to authenticate with providers for higher rate limits 
 | `GITLAB_TOKEN` | GitLab |
 | `GITEA_TOKEN` | Gitea / Forgejo (Codeberg) |
 
+Downloads retry network errors, HTTP 429 and HTTP 5xx. A download that receives no data for 60 seconds is retried; set `B_DOWNLOAD_IDLE_TIMEOUT` (for example `5m`) to change that time. See [Troubleshooting](https://binary.help/troubleshooting).
+
 For `oci://` the daemonless client reuses your local registry auth from `~/.docker/config.json` (or the `DOCKER_CONFIG` override) — the same credentials `docker login` writes.
 
 &nbsp;

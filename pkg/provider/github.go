@@ -1,12 +1,15 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
+	"net/url"
 	"strings"
+
+	"github.com/fentas/b/pkg/fetch"
 )
 
 func init() {
@@ -37,7 +40,7 @@ func (g *GitHub) LatestVersion(ref string) (string, error) {
 	owner, repo := githubOwnerRepo(ref)
 	// Use redirect-based approach (faster, no API rate limit).
 	url := fmt.Sprintf("https://github.com/%s/%s/releases/latest", owner, repo)
-	resp, err := http.Get(url)
+	resp, err := fetch.Get(context.Background(), url)
 	if err != nil {
 		return "", err
 	}
@@ -45,8 +48,24 @@ func (g *GitHub) LatestVersion(ref string) (string, error) {
 	if resp.StatusCode == http.StatusNotFound {
 		return "", fmt.Errorf("no releases found for %s/%s", owner, repo)
 	}
-	final := resp.Request.URL.Path
-	parts := strings.Split(final, "/")
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
+	}
+	return GitHubReleaseTag(resp.Request.URL)
+}
+
+// GitHubReleaseTag returns the tag of a release-tag URL,
+// /<owner>/<repo>/releases/tag/<tag>, which is where /releases/latest
+// redirects to. For a tag with a slash (kustomize/v5.8.3), it returns the
+// last segment (v5.8.3). Any other URL is an error: without this check, a
+// 200 without a redirect gives the version "latest", and a redirect to the
+// login page gives "login".
+func GitHubReleaseTag(u *url.URL) (string, error) {
+	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+	if len(parts) < 5 || parts[0] == "" || parts[1] == "" ||
+		parts[2] != "releases" || parts[3] != "tag" || parts[len(parts)-1] == "" {
+		return "", fmt.Errorf("latest release: %s is not a release tag URL", u.Redacted())
+	}
 	return parts[len(parts)-1], nil
 }
 
@@ -66,11 +85,9 @@ func (g *GitHub) FetchRelease(ref, version string) (*Release, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
 
-	resp, err := http.DefaultClient.Do(req)
+	// fetch.Do adds GITHUB_TOKEN and retries transient failures.
+	resp, err := fetch.Do(req)
 	if err != nil {
 		return nil, err
 	}

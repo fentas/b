@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/fentas/b/pkg/fetch"
 )
 
 // Known Gitea/Forgejo instances.
@@ -44,7 +46,7 @@ func (g *Gitea) LatestVersion(ref string) (string, error) {
 	}
 	giteaSetAuth(req)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := fetch.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -84,7 +86,7 @@ func (g *Gitea) FetchRelease(ref, version string) (*Release, error) {
 	}
 	giteaSetAuth(req)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := fetch.Do(req)
 	if err != nil {
 		return nil, err
 	}

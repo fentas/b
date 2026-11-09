@@ -14,10 +14,25 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/fentas/b/pkg/fetch"
 	"github.com/fentas/b/pkg/provider"
 )
+
+func TestMain(m *testing.M) {
+	// Short retry waits: some tests serve 5xx or dial a closed port. The
+	// retry policy itself is tested in pkg/fetch.
+	fetch.DefaultPolicy = fetch.Policy{
+		Attempts:  3,
+		BaseDelay: time.Millisecond,
+		MaxDelay:  10 * time.Millisecond,
+		MaxWait:   time.Second,
+	}
+	os.Exit(m.Run())
+}
 
 // --- test helpers ---
 
@@ -924,5 +939,214 @@ func TestDownloadAsset_EmptyBody(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "0 bytes") {
 		t.Errorf("error should name the 0-byte size, got: %v", err)
+	}
+}
+
+// --- transient failures are retried (fetch) ---
+
+// flakyServer answers 504 to the first request and body to the next ones.
+func flakyServer(t *testing.T, body []byte) (*httptest.Server, *int32) {
+	t.Helper()
+	var n int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&n, 1) == 1 {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &n
+}
+
+func TestDownloadPreset_RetriesGatewayTimeout(t *testing.T) {
+	content := []byte("#!/bin/sh\necho retried\n")
+	srv, n := flakyServer(t, content)
+	tmp := t.TempDir()
+	b := &Binary{Name: "x", File: filepath.Join(tmp, "x"), URL: srv.URL, Version: "v1"}
+	if err := b.downloadPreset(); err != nil {
+		t.Fatalf("downloadPreset after one 504: %v", err)
+	}
+	got, err := os.ReadFile(b.File)
+	if err != nil {
+		t.Fatalf("reading downloaded file: %v", err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Errorf("file content = %q, want %q", got, content)
+	}
+	if c := atomic.LoadInt32(n); c != 2 {
+		t.Errorf("server got %d requests, want 2", c)
+	}
+}
+
+func TestDownloadAsset_RetriesGatewayTimeout(t *testing.T) {
+	buf := makeTarGz(t, tarEntry{name: "foo", mode: 0755, content: []byte("bin")})
+	srv, n := flakyServer(t, buf.Bytes())
+	tmp := t.TempDir()
+	b := &Binary{Name: "foo", File: filepath.Join(tmp, "foo")}
+	if err := b.downloadAsset(&provider.Asset{URL: srv.URL + "/foo.tar.gz", Name: "foo.tar.gz"}); err != nil {
+		t.Fatalf("downloadAsset after one 504: %v", err)
+	}
+	got, err := os.ReadFile(b.File)
+	if err != nil {
+		t.Fatalf("reading extracted file: %v", err)
+	}
+	if string(got) != "bin" {
+		t.Errorf("file content = %q, want %q", got, "bin")
+	}
+	if c := atomic.LoadInt32(n); c != 2 {
+		t.Errorf("server got %d requests, want 2", c)
+	}
+}
+
+func TestDownloadAsset_RetriesExhausted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	tmp := t.TempDir()
+	b := &Binary{Name: "x", File: filepath.Join(tmp, "x")}
+	err := b.downloadAsset(&provider.Asset{URL: srv.URL + "/file.bin", Name: "file.bin"})
+	if err == nil {
+		t.Fatal("expected an error after the retries, got nil")
+	}
+	if !strings.Contains(err.Error(), "/file.bin") || !strings.Contains(err.Error(), "503") {
+		t.Errorf("error should name the URL and the last status, got: %v", err)
+	}
+	if _, statErr := os.Stat(b.File); statErr == nil {
+		t.Error("no file should be written when every try fails")
+	}
+}
+
+// rewriteTransport sends every request to one test server, whatever its host.
+type rewriteTransport struct{ target string }
+
+func (rt rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	out := req.Clone(req.Context())
+	out.URL.Scheme = "http"
+	out.URL.Host = rt.target
+	out.Host = rt.target
+	return http.DefaultTransport.RoundTrip(out)
+}
+
+// withFakeGitHub routes the requests of http.DefaultClient to handler.
+func withFakeGitHub(t *testing.T, handler http.Handler) {
+	t.Helper()
+	srv := httptest.NewServer(handler)
+	old := http.DefaultClient
+	http.DefaultClient = &http.Client{Transport: rewriteTransport{target: srv.Listener.Addr().String()}}
+	t.Cleanup(func() {
+		http.DefaultClient = old
+		srv.Close()
+	})
+}
+
+func TestGithubLatest_RetriesGatewayTimeout(t *testing.T) {
+	var n int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&n, 1) == 1 {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return
+		}
+		http.Redirect(w, r, "/o/r/releases/tag/v1.2.3", http.StatusFound)
+	})
+	mux.HandleFunc("/o/r/releases/tag/v1.2.3", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	})
+	withFakeGitHub(t, mux)
+	v, err := GithubLatest(&Binary{GitHubRepo: "o/r"})
+	if err != nil {
+		t.Fatalf("GithubLatest after one 504: %v", err)
+	}
+	if v != "v1.2.3" {
+		t.Errorf("version = %q, want v1.2.3", v)
+	}
+}
+
+// A response that does not redirect must not give the version "latest".
+func TestGithubLatest_NoRedirectIsError(t *testing.T) {
+	withFakeGitHub(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	if v, err := GithubLatest(&Binary{GitHubRepo: "o/r"}); err == nil {
+		t.Errorf("expected an error, got version %q", v)
+	}
+}
+
+// An error page must not become the body (for kubectl, the version).
+func TestGetBody_HTTPErrorIsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("<html>not found</html>"))
+	}))
+	defer srv.Close()
+	if body, err := GetBody(srv.URL); err == nil {
+		t.Errorf("expected an error, got body %q", body)
+	}
+}
+
+// A 200 at /releases/latest (no redirect) and a redirect to the login page
+// must not give the version "latest" or "login".
+func TestGithubLatest_RejectsNonTagURL(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{"200 without a redirect", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("<html>releases</html>"))
+		}},
+		{"redirect to the login page", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/login?return_to=%2Fo%2Fr%2Freleases%2Flatest", http.StatusFound)
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/o/r/releases/latest", tt.handler)
+			mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("<html>sign in</html>"))
+			})
+			withFakeGitHub(t, mux)
+			if v, err := GithubLatest(&Binary{GitHubRepo: "o/r"}); err == nil {
+				t.Errorf("expected an error, got version %q", v)
+			}
+		})
+	}
+}
+
+// Any 2xx is a body, not only 200.
+func TestGetBody_Accepts2xx(t *testing.T) {
+	for _, tt := range []struct {
+		status int
+		body   string
+	}{
+		{http.StatusOK, "v1.31.0"},
+		{http.StatusCreated, "v1.31.0"},
+		{http.StatusNoContent, ""},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(tt.status)
+			_, _ = w.Write([]byte(tt.body))
+		}))
+		got, err := GetBody(srv.URL)
+		srv.Close()
+		if err != nil || got != tt.body {
+			t.Errorf("HTTP %d: GetBody = %q, %v; want %q, nil", tt.status, got, err, tt.body)
+		}
+	}
+}
+
+// A redirect to the tag page counts only when that page answers 200.
+func TestGithubLatest_TagPageErrorIsError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/o/r/releases/tag/v1", http.StatusFound)
+	})
+	mux.HandleFunc("/o/r/releases/tag/v1", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	})
+	withFakeGitHub(t, mux)
+	if v, err := GithubLatest(&Binary{GitHubRepo: "o/r"}); err == nil {
+		t.Errorf("expected an error, got version %q", v)
 	}
 }
