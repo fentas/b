@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.18.8](https://github.com/fentas/b/compare/v4.18.7...v4.18.8) (2026-11-09)
+
+
+### Bug Fixes
+
+* **deps:** bump klauspost/compress to v1.20.2 and ulikunitz/xz to v0.5.15 ([#194](https://github.com/fentas/b/issues/194)) ([ca190da](https://github.com/fentas/b/commit/ca190daff67c4597ad623064b273d5b886db17dd))
+* **download:** retry transient failures, send GITHUB_TOKEN only to GitHub ([#192](https://github.com/fentas/b/issues/192)) ([6dfd1e4](https://github.com/fentas/b/commit/6dfd1e4b04f16d2a28d10411bc25ab09971d1e71))
+
 ## [4.18.7](https://github.com/fentas/b/compare/v4.18.6...v4.18.7) (2026-08-28)
 
 
