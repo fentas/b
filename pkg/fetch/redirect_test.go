@@ -71,9 +71,22 @@ type recordingRouter struct {
 
 func (r *recordingRouter) RoundTrip(req *http.Request) (*http.Response, error) {
 	r.mu.Lock()
-	r.hops = append(r.hops, hop{req.URL.String(), req.Header.Get("Authorization"), req.Header.Get("Private-Token")})
+	r.hops = append(r.hops, hop{req.URL.String(), foldGet(req.Header, "Authorization"), foldGet(req.Header, "Private-Token")})
 	r.mu.Unlock()
 	return r.hosts.RoundTrip(req)
+}
+
+// foldGet returns the values of every key that matches name without regard
+// to case. Header.Get finds only the canonical key, but the transport sends
+// every key that is in the map.
+func foldGet(h http.Header, name string) string {
+	var vals []string
+	for key, v := range h {
+		if strings.EqualFold(key, name) {
+			vals = append(vals, v...)
+		}
+	}
+	return strings.Join(vals, ",")
 }
 
 // redirectServer redirects /start?to=<url> to <url> and answers "ok" to
@@ -224,5 +237,63 @@ func TestRedirect_DefaultLimit(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&n); got != 10 {
 		t.Errorf("server got %d requests, want 10", got)
+	}
+}
+
+// A CheckRedirect of the caller can put a credential back under a key that
+// is not canonical, which Header.Del does not remove. Every spelling must
+// be removed on a redirect off the origin.
+func TestRedirect_RawCredentialKeysAreRemoved(t *testing.T) {
+	for _, tt := range []struct {
+		name, from string
+		keys       []string
+	}{
+		{"GitHub, lower-case authorization", "https://github.com/start", []string{"authorization"}},
+		{"GitHub, upper-case AUTHORIZATION", "https://github.com/start", []string{"AUTHORIZATION"}},
+		{"GitLab, upper-case PRIVATE-TOKEN", "https://gitlab.com/start", []string{"PRIVATE-TOKEN"}},
+		{"GitLab, lower-case private-token", "https://gitlab.com/start", []string{"private-token"}},
+		{"all spellings at once", "https://gitlab.com/start", []string{"authorization", "AUTHORIZATION", "PRIVATE-TOKEN", "private-token"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			withTestPolicy(t)
+			t.Setenv("GITHUB_TOKEN", fakeToken)
+			srv := redirectServer(t)
+			from, _ := url.Parse(tt.from)
+			rec := &recordingRouter{hosts: hostRouter{from.Hostname(): srv, "example.test": srv}}
+			client := &http.Client{
+				Transport: rec,
+				CheckRedirect: func(req *http.Request, via []*http.Request) error {
+					for _, k := range tt.keys {
+						req.Header[k] = []string{"restored-test-credential"}
+					}
+					return nil
+				},
+			}
+			old := http.DefaultClient
+			http.DefaultClient = client
+			t.Cleanup(func() { http.DefaultClient = old })
+
+			req, err := http.NewRequest(http.MethodGet, tt.from+"?to="+url.QueryEscape("https://example.test/end"), nil)
+			if err != nil {
+				t.Fatalf("NewRequest: %v", err)
+			}
+			if from.Hostname() == "gitlab.com" {
+				req.Header.Set("PRIVATE-TOKEN", "gitlab-test-token")
+			}
+			resp, err := Do(req)
+			if err != nil {
+				t.Fatalf("Do: %v", err)
+			}
+			resp.Body.Close()
+
+			rec.mu.Lock()
+			defer rec.mu.Unlock()
+			if len(rec.hops) != 2 {
+				t.Fatalf("hops = %+v, want 2", rec.hops)
+			}
+			if h := rec.hops[1]; h.auth != "" || h.privateToken != "" {
+				t.Errorf("second hop %s carries a credential: %+v", h.url, h)
+			}
+		})
 	}
 }

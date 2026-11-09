@@ -89,6 +89,16 @@ comes after the last try. Other 4xx statuses fail at once. A try that gets no
 response headers in 30 seconds, or no data for 60 seconds, is also retried. A
 slow download that continues to receive data is not stopped.
 
+If a server or proxy often pauses a download for more than 60 seconds, set
+`B_DOWNLOAD_IDLE_TIMEOUT` to a longer time. The value is a duration (`90s`,
+`5m`) or a number of seconds (`120`). An invalid value, zero or a negative
+value gives the default of 60 seconds. The maximum is 24 hours.
+
+```bash
+export B_DOWNLOAD_IDLE_TIMEOUT=5m
+b install
+```
+
 **Solutions**:
 ```bash
 # Check your internet connection

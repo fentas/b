@@ -42,14 +42,42 @@ type Policy struct {
 
 // DefaultPolicy is the policy of Do, Get and Download: five tries, with
 // waits of at most 5s, 10s, 20s and 40s, and 150s in total. A try ends
-// after 30s without response headers or 60s without body data.
+// after 30s without response headers or after IdleTimeout (60s, or
+// B_DOWNLOAD_IDLE_TIMEOUT) without body data.
 var DefaultPolicy = Policy{
 	Attempts:      5,
 	BaseDelay:     5 * time.Second,
 	MaxDelay:      60 * time.Second,
 	MaxWait:       150 * time.Second,
 	HeaderTimeout: 30 * time.Second,
-	IdleTimeout:   60 * time.Second,
+	IdleTimeout:   idleTimeoutFromEnv(),
+}
+
+// idleTimeoutEnv names the environment variable that sets the IdleTimeout
+// of DefaultPolicy: a Go duration ("90s", "5m") or a number of seconds.
+const idleTimeoutEnv = "B_DOWNLOAD_IDLE_TIMEOUT"
+
+// defaultIdleTimeout applies when idleTimeoutEnv is not set, is not
+// valid, or is not positive.
+const defaultIdleTimeout = 60 * time.Second
+
+// maxIdleTimeout caps idleTimeoutEnv.
+const maxIdleTimeout = 24 * time.Hour
+
+func idleTimeoutFromEnv() time.Duration {
+	v := strings.TrimSpace(os.Getenv(idleTimeoutEnv))
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		s, serr := strconv.ParseInt(v, 10, 64)
+		if serr != nil {
+			return defaultIdleTimeout
+		}
+		d = time.Duration(min(s, int64(maxIdleTimeout/time.Second))) * time.Second
+	}
+	if d <= 0 {
+		return defaultIdleTimeout
+	}
+	return min(d, maxIdleTimeout)
 }
 
 // githubHosts receive GITHUB_TOKEN. A release download on github.com
@@ -228,31 +256,44 @@ func (p Policy) try(client *http.Client, req *http.Request) (*http.Response, err
 			cancel(&timeoutError{fmt.Sprintf("no response headers after %v", p.HeaderTimeout)})
 		})
 	}
-	// When a timer ends the try, the transport returns its cause (a
-	// timeoutError, which is retried) from Do and from body reads.
 	resp, err := client.Do(r)
 	if headers != nil {
 		headers.Stop()
 	}
 	if err != nil {
+		err = timeoutCause(ctx, err)
 		cancel(nil)
 		return nil, err
 	}
-	resp.Body = watchBody(resp.Body, p.IdleTimeout, cancel)
+	resp.Body = watchBody(ctx, resp.Body, p.IdleTimeout, cancel)
 	return resp, nil
+}
+
+// timeoutCause returns the timeout that ended a try in place of err. The
+// HTTP/1.1 transport returns that cause itself, but the HTTP/2 transport
+// returns ctx.Err() (context.Canceled), which is not retried. When the
+// caller's context ended the try, the cause is not a timeoutError and err
+// stays as it is, so a cancel by the caller is not retried.
+func timeoutCause(ctx context.Context, err error) error {
+	var te *timeoutError
+	if errors.As(err, &te) || !errors.As(context.Cause(ctx), &te) {
+		return err
+	}
+	return fmt.Errorf("%w (%v)", te, err)
 }
 
 // watchedBody is the body of one try. It ends the try when no byte comes
 // for idle, and when it is closed.
 type watchedBody struct {
 	io.ReadCloser
+	ctx    context.Context
 	idle   time.Duration
 	timer  *time.Timer
 	cancel context.CancelCauseFunc
 }
 
-func watchBody(body io.ReadCloser, idle time.Duration, cancel context.CancelCauseFunc) *watchedBody {
-	w := &watchedBody{ReadCloser: body, idle: idle, cancel: cancel}
+func watchBody(ctx context.Context, body io.ReadCloser, idle time.Duration, cancel context.CancelCauseFunc) *watchedBody {
+	w := &watchedBody{ReadCloser: body, ctx: ctx, idle: idle, cancel: cancel}
 	if idle > 0 {
 		w.timer = time.AfterFunc(idle, func() {
 			cancel(&timeoutError{fmt.Sprintf("no body data for %v", idle)})
@@ -265,6 +306,9 @@ func (w *watchedBody) Read(p []byte) (int, error) {
 	n, err := w.ReadCloser.Read(p)
 	if n > 0 && w.timer != nil {
 		w.timer.Reset(w.idle)
+	}
+	if err != nil && err != io.EOF {
+		err = timeoutCause(w.ctx, err)
 	}
 	return n, err
 }
@@ -413,11 +457,22 @@ func checkRedirect(next func(*http.Request, []*http.Request) error) func(*http.R
 			err = errors.New("stopped after 10 redirects")
 		}
 		if !keepCredentials(via[0].URL, req.URL) {
-			for _, h := range credentialHeaders {
-				req.Header.Del(h)
-			}
+			removeCredentials(req.Header)
 		}
 		return err
+	}
+}
+
+// removeCredentials removes the credential headers under every spelling of
+// their keys. Header.Del removes only the canonical key, but a caller can
+// set a key in the map directly ("authorization", "PRIVATE-TOKEN").
+func removeCredentials(h http.Header) {
+	for key := range h {
+		for _, name := range credentialHeaders {
+			if strings.EqualFold(key, name) {
+				delete(h, key)
+			}
+		}
 	}
 }
 
