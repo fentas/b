@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/fentas/b/pkg/fetch"
@@ -47,12 +48,24 @@ func (g *GitHub) LatestVersion(ref string) (string, error) {
 	if resp.StatusCode == http.StatusNotFound {
 		return "", fmt.Errorf("no releases found for %s/%s", owner, repo)
 	}
-	// Without this check, a response that did not redirect gives "latest".
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
 	}
-	final := resp.Request.URL.Path
-	parts := strings.Split(final, "/")
+	return GitHubReleaseTag(resp.Request.URL)
+}
+
+// GitHubReleaseTag returns the tag of a release-tag URL,
+// /<owner>/<repo>/releases/tag/<tag>, which is where /releases/latest
+// redirects to. For a tag with a slash (kustomize/v5.8.3), it returns the
+// last segment (v5.8.3). Any other URL is an error: without this check, a
+// 200 without a redirect gives the version "latest", and a redirect to the
+// login page gives "login".
+func GitHubReleaseTag(u *url.URL) (string, error) {
+	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
+	if len(parts) < 5 || parts[0] == "" || parts[1] == "" ||
+		parts[2] != "releases" || parts[3] != "tag" || parts[len(parts)-1] == "" {
+		return "", fmt.Errorf("latest release: %s is not a release tag URL", u.Redacted())
+	}
 	return parts[len(parts)-1], nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/fentas/b/pkg/fetch"
+	"github.com/fentas/b/pkg/provider"
 )
 
 const (
@@ -32,12 +33,14 @@ func GithubLatest(b *Binary) (string, error) {
 		return b.Version, err
 	}
 	resp.Body.Close()
-	// Without this check, a response that did not redirect gives "latest".
 	if resp.StatusCode != http.StatusOK {
 		return b.Version, fmt.Errorf("HTTP %d for %s", resp.StatusCode, latestURL)
 	}
-	final := strings.Split(resp.Request.URL.String(), "/")
-	return final[len(final)-1], nil
+	tag, err := provider.GitHubReleaseTag(resp.Request.URL)
+	if err != nil {
+		return b.Version, err
+	}
+	return tag, nil
 }
 
 func GetBody(url string) (string, error) {
@@ -46,7 +49,7 @@ func GetBody(url string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return "", fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
 	}
 	body, err := io.ReadAll(resp.Body)

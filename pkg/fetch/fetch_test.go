@@ -17,10 +17,12 @@ import (
 
 // testPolicy keeps the waits short; the tests record them through sleep.
 var testPolicy = Policy{
-	Attempts:  5,
-	BaseDelay: time.Millisecond,
-	MaxDelay:  10 * time.Second,
-	MaxWait:   30 * time.Second,
+	Attempts:      5,
+	BaseDelay:     time.Millisecond,
+	MaxDelay:      10 * time.Second,
+	MaxWait:       30 * time.Second,
+	HeaderTimeout: 5 * time.Second,
+	IdleTimeout:   5 * time.Second,
 }
 
 // fakeToken is not a real credential.
@@ -414,6 +416,13 @@ func TestRetryAfter(t *testing.T) {
 		{"soon", 0},
 		{now.Add(90 * time.Second).Format(http.TimeFormat), 90 * time.Second},
 		{now.Add(-time.Minute).Format(http.TimeFormat), 0},
+		// Large values are capped before they become a Duration, so they
+		// cannot overflow to a negative wait.
+		{"99999999999999", maxRetryAfter},
+		{"9223372036854775807", maxRetryAfter},
+		{"99999999999999999999", maxRetryAfter},
+		{"-99999999999999999999", 0},
+		{now.Add(1000 * time.Hour).Format(http.TimeFormat), maxRetryAfter},
 	}
 	for _, tt := range tests {
 		if got := retryAfter(tt.in, now); got != tt.want {

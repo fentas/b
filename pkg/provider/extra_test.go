@@ -500,3 +500,71 @@ func TestDocker_Install_NoRuntime(t *testing.T) {
 		t.Error("expected no-runtime error")
 	}
 }
+
+func TestGitHubReleaseTag(t *testing.T) {
+	tests := []struct {
+		path    string
+		want    string
+		wantErr bool
+	}{
+		{"/o/r/releases/tag/v1.2.3", "v1.2.3", false},
+		{"/kubernetes-sigs/kustomize/releases/tag/kustomize/v5.8.3", "v5.8.3", false},
+		{"/o/r/releases/latest", "", true},
+		{"/login", "", true},
+		{"/o/r/releases/tag/", "", true},
+		{"/o/r/releases/tag", "", true},
+		{"/o/r/tags/v1", "", true},
+		{"//r/releases/tag/v1", "", true},
+	}
+	for _, tt := range tests {
+		got, err := GitHubReleaseTag(&url.URL{Scheme: "https", Host: "github.com", Path: tt.path})
+		if (err != nil) != tt.wantErr || got != tt.want {
+			t.Errorf("GitHubReleaseTag(%q) = %q, %v; want %q, error %v", tt.path, got, err, tt.want, tt.wantErr)
+		}
+	}
+}
+
+// A 200 at /releases/latest (no redirect) and a redirect to the login page
+// must not give the version "latest" or "login".
+func TestGitHub_LatestVersion_RejectsNonTagURL(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{"200 without a redirect", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("<html>releases</html>"))
+		}},
+		{"redirect to the login page", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/login?return_to=%2Fx%2Fy%2Freleases%2Flatest", http.StatusFound)
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/x/y/releases/latest", tt.handler)
+			mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("<html>sign in</html>"))
+			})
+			cleanup := withFakeAPI(t, mux)
+			defer cleanup()
+			if v, err := (&GitHub{}).LatestVersion("github.com/x/y"); err == nil {
+				t.Errorf("expected an error, got version %q", v)
+			}
+		})
+	}
+}
+
+// A redirect to the tag page counts only when that page answers 200.
+func TestGitHub_LatestVersion_TagPageErrorIsError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/x/y/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/x/y/releases/tag/v1", http.StatusFound)
+	})
+	mux.HandleFunc("/x/y/releases/tag/v1", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	})
+	cleanup := withFakeAPI(t, mux)
+	defer cleanup()
+	if v, err := (&GitHub{}).LatestVersion("github.com/x/y"); err == nil {
+		t.Errorf("expected an error, got version %q", v)
+	}
+}

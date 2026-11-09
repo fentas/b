@@ -1085,3 +1085,68 @@ func TestGetBody_HTTPErrorIsError(t *testing.T) {
 		t.Errorf("expected an error, got body %q", body)
 	}
 }
+
+// A 200 at /releases/latest (no redirect) and a redirect to the login page
+// must not give the version "latest" or "login".
+func TestGithubLatest_RejectsNonTagURL(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		handler http.HandlerFunc
+	}{
+		{"200 without a redirect", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("<html>releases</html>"))
+		}},
+		{"redirect to the login page", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/login?return_to=%2Fo%2Fr%2Freleases%2Flatest", http.StatusFound)
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/o/r/releases/latest", tt.handler)
+			mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte("<html>sign in</html>"))
+			})
+			withFakeGitHub(t, mux)
+			if v, err := GithubLatest(&Binary{GitHubRepo: "o/r"}); err == nil {
+				t.Errorf("expected an error, got version %q", v)
+			}
+		})
+	}
+}
+
+// Any 2xx is a body, not only 200.
+func TestGetBody_Accepts2xx(t *testing.T) {
+	for _, tt := range []struct {
+		status int
+		body   string
+	}{
+		{http.StatusOK, "v1.31.0"},
+		{http.StatusCreated, "v1.31.0"},
+		{http.StatusNoContent, ""},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(tt.status)
+			_, _ = w.Write([]byte(tt.body))
+		}))
+		got, err := GetBody(srv.URL)
+		srv.Close()
+		if err != nil || got != tt.body {
+			t.Errorf("HTTP %d: GetBody = %q, %v; want %q, nil", tt.status, got, err, tt.body)
+		}
+	}
+}
+
+// A redirect to the tag page counts only when that page answers 200.
+func TestGithubLatest_TagPageErrorIsError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/o/r/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/o/r/releases/tag/v1", http.StatusFound)
+	})
+	mux.HandleFunc("/o/r/releases/tag/v1", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	})
+	withFakeGitHub(t, mux)
+	if v, err := GithubLatest(&Binary{GitHubRepo: "o/r"}); err == nil {
+		t.Errorf("expected an error, got version %q", v)
+	}
+}

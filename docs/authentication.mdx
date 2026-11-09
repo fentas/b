@@ -27,9 +27,9 @@ b install owner/private-repo
 
 A GitHub token increases the API rate limit from 60 to 5,000 requests per hour and allows access to private repositories.
 
-`b` sends the token only over HTTPS and only to `github.com` and `api.github.com`, for API requests and release downloads.
-GitHub redirects a release download to a storage host. The token does not go to that host: the Go HTTP client
-removes the `Authorization` header on a redirect to a different domain.
+`b` sends the token only over HTTPS, only on the default port, and only to `github.com` and `api.github.com`, for API requests and release downloads.
+GitHub redirects a release download to a storage host. The token does not go to that host: on each redirect, `b` removes
+the token unless the next URL is also HTTPS on `github.com` or `api.github.com`.
 
 ```bash
 export GITHUB_TOKEN="ghp_..."

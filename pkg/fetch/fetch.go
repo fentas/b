@@ -17,9 +17,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
-// Policy bounds the retry loop.
+// Policy bounds the retry loop and each try.
 type Policy struct {
 	// Attempts is the total number of tries, the first one included.
 	Attempts int
@@ -31,15 +32,24 @@ type Policy struct {
 	// MaxWait caps the sum of all waits. A try whose wait would go past it
 	// is not made.
 	MaxWait time.Duration
+	// HeaderTimeout ends a try that gets no response headers in this time,
+	// redirects included. Zero disables it.
+	HeaderTimeout time.Duration
+	// IdleTimeout ends a try whose body sends no byte for this time. A slow
+	// body that keeps sending is not cut. Zero disables it.
+	IdleTimeout time.Duration
 }
 
 // DefaultPolicy is the policy of Do, Get and Download: five tries, with
-// waits of at most 5s, 10s, 20s and 40s, and 150s in total.
+// waits of at most 5s, 10s, 20s and 40s, and 150s in total. A try ends
+// after 30s without response headers or 60s without body data.
 var DefaultPolicy = Policy{
-	Attempts:  5,
-	BaseDelay: 5 * time.Second,
-	MaxDelay:  60 * time.Second,
-	MaxWait:   150 * time.Second,
+	Attempts:      5,
+	BaseDelay:     5 * time.Second,
+	MaxDelay:      60 * time.Second,
+	MaxWait:       150 * time.Second,
+	HeaderTimeout: 30 * time.Second,
+	IdleTimeout:   60 * time.Second,
 }
 
 // githubHosts receive GITHUB_TOKEN. A release download on github.com
@@ -48,6 +58,17 @@ var githubHosts = map[string]bool{
 	"github.com":     true,
 	"api.github.com": true,
 }
+
+// credentialHeaders are removed from a redirect that keepCredentials
+// rejects: GitHub and Gitea use Authorization, GitLab uses PRIVATE-TOKEN.
+var credentialHeaders = []string{"Authorization", "Private-Token"}
+
+// maxRetryAfter caps a Retry-After value before it becomes a Duration.
+const maxRetryAfter = 24 * time.Hour
+
+// drainTimeout caps the read of an error body before a retry. Tests
+// replace it.
+var drainTimeout = 2 * time.Second
 
 // sleep waits for d, or until ctx is done. Tests replace it.
 var sleep = func(ctx context.Context, d time.Duration) error {
@@ -81,15 +102,27 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.Err }
 
-// Do sends req with DefaultPolicy. It retries a network error, HTTP 429 and
-// HTTP 5xx other than 501. It returns any other response at once, 4xx
-// included, and the caller then owns its body. When the tries run out, the
-// error is an *Error that names the URL and the last status or error.
+// timeoutError ends a try that took too long. It is a net.Error with
+// Timeout true, so the try is retried.
+type timeoutError struct{ msg string }
+
+func (e *timeoutError) Error() string   { return e.msg }
+func (e *timeoutError) Timeout() bool   { return true }
+func (e *timeoutError) Temporary() bool { return true }
+
+// Do sends req with DefaultPolicy. For GET and HEAD without a body, it
+// retries a network error, a timeout, HTTP 429 and HTTP 5xx other than 501.
+// It returns any other response at once, 4xx included, and the caller then
+// owns its body; the caller must read it with no pause of IdleTimeout or
+// more. When the tries run out, the error is an *Error that names the URL
+// and the last status or error. Any other request gets one try.
 //
 // For an https request to a GitHub host, Do sends GITHUB_TOKEN (if set) as a
-// Bearer token. The http.Client drops the header when a redirect goes to
-// another domain, so the token does not reach the storage host that GitHub
-// redirects release downloads to.
+// Bearer token. On each redirect, Do keeps the Authorization and
+// PRIVATE-TOKEN headers only if the next URL is an https GitHub host (for a
+// request to GitHub) or the same origin (for any other request). So the
+// token does not reach the storage host that GitHub redirects release
+// downloads to, a subdomain, or an http URL.
 func Do(req *http.Request) (*http.Response, error) {
 	return DefaultPolicy.do(req, false, nil)
 }
@@ -104,10 +137,10 @@ func Get(ctx context.Context, rawURL string) (*http.Response, error) {
 }
 
 // Download is Get for a release asset. It reads a 200 body to the end into a
-// temp file before it returns, so a body that the network cuts short is
-// retried from byte zero, and a partial body never reaches the caller. The
-// Body of the returned 200 response reads that file, and Close removes it;
-// ContentLength is the file size.
+// temp file before it returns, so a body that the network cuts short or
+// stops is retried from byte zero, and a partial body never reaches the
+// caller. The Body of the returned 200 response reads that file, and Close
+// removes it; ContentLength is the file size.
 //
 // wrap, if not nil, is called for each try that gets a 200 and returns the
 // reader to copy the body from (for example, to show progress).
@@ -120,12 +153,19 @@ func Download(ctx context.Context, rawURL string, wrap func(*http.Response) io.R
 }
 
 func (p Policy) do(req *http.Request, spoolBody bool, wrap func(*http.Response) io.Reader) (*http.Response, error) {
+	// A copy, so that the redirect check also wraps a CheckRedirect of the
+	// caller and runs after it.
+	client := *http.DefaultClient
+	client.CheckRedirect = checkRedirect(client.CheckRedirect)
+
+	if !replayable(req) {
+		return p.try(&client, req)
+	}
+
 	ctx := req.Context()
 	var waited time.Duration
 	for attempt := 1; ; attempt++ {
-		r := req.Clone(ctx)
-		setGitHubAuth(r)
-		resp, err := http.DefaultClient.Do(r)
+		resp, err := p.try(&client, req)
 
 		status := 0
 		var after time.Duration
@@ -137,9 +177,7 @@ func (p Policy) do(req *http.Request, spoolBody bool, wrap func(*http.Response) 
 		case retryableStatus(resp.StatusCode):
 			status = resp.StatusCode
 			after = retryAfter(resp.Header.Get("Retry-After"), time.Now())
-			// Read a little of the body so the connection can be reused.
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
-			resp.Body.Close()
+			discard(resp.Body)
 		case spoolBody && resp.StatusCode == http.StatusOK:
 			if err = spool(resp, wrap); err == nil {
 				return resp, nil
@@ -164,6 +202,91 @@ func (p Policy) do(req *http.Request, spoolBody bool, wrap func(*http.Response) 
 		}
 		waited += delay
 	}
+}
+
+// replayable reports whether req can be sent again: a GET or HEAD without
+// a body.
+func replayable(req *http.Request) bool {
+	switch req.Method {
+	case "", http.MethodGet, http.MethodHead:
+		return req.Body == nil || req.Body == http.NoBody
+	}
+	return false
+}
+
+// try sends req once. The try has its own context: it ends when no
+// response headers come in HeaderTimeout, when the body sends no byte for
+// IdleTimeout, and when the body is closed.
+func (p Policy) try(client *http.Client, req *http.Request) (*http.Response, error) {
+	ctx, cancel := context.WithCancelCause(req.Context())
+	r := req.Clone(ctx)
+	setGitHubAuth(r)
+
+	var headers *time.Timer
+	if p.HeaderTimeout > 0 {
+		headers = time.AfterFunc(p.HeaderTimeout, func() {
+			cancel(&timeoutError{fmt.Sprintf("no response headers after %v", p.HeaderTimeout)})
+		})
+	}
+	// When a timer ends the try, the transport returns its cause (a
+	// timeoutError, which is retried) from Do and from body reads.
+	resp, err := client.Do(r)
+	if headers != nil {
+		headers.Stop()
+	}
+	if err != nil {
+		cancel(nil)
+		return nil, err
+	}
+	resp.Body = watchBody(resp.Body, p.IdleTimeout, cancel)
+	return resp, nil
+}
+
+// watchedBody is the body of one try. It ends the try when no byte comes
+// for idle, and when it is closed.
+type watchedBody struct {
+	io.ReadCloser
+	idle   time.Duration
+	timer  *time.Timer
+	cancel context.CancelCauseFunc
+}
+
+func watchBody(body io.ReadCloser, idle time.Duration, cancel context.CancelCauseFunc) *watchedBody {
+	w := &watchedBody{ReadCloser: body, idle: idle, cancel: cancel}
+	if idle > 0 {
+		w.timer = time.AfterFunc(idle, func() {
+			cancel(&timeoutError{fmt.Sprintf("no body data for %v", idle)})
+		})
+	}
+	return w
+}
+
+func (w *watchedBody) Read(p []byte) (int, error) {
+	n, err := w.ReadCloser.Read(p)
+	if n > 0 && w.timer != nil {
+		w.timer.Reset(w.idle)
+	}
+	return n, err
+}
+
+func (w *watchedBody) Close() error {
+	if w.timer != nil {
+		w.timer.Stop()
+	}
+	err := w.ReadCloser.Close()
+	w.cancel(nil)
+	return err
+}
+
+// discard reads up to 64 KiB of an error body, for at most drainTimeout,
+// so the connection can be reused, and closes the body.
+func discard(body io.ReadCloser) {
+	if w, ok := body.(*watchedBody); ok {
+		t := time.AfterFunc(drainTimeout, func() { w.cancel(errors.New("drain time is over")) })
+		defer t.Stop()
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, 64<<10))
+	body.Close()
 }
 
 // delay returns the wait after try number attempt: the backoff with jitter,
@@ -195,8 +318,9 @@ func retryableStatus(code int) bool {
 		code >= 500 && code <= 599 && code != http.StatusNotImplemented
 }
 
-// retryableError reports whether err is a network failure that a new try
-// can fix. A host that does not resolve and a bad certificate are not.
+// retryableError reports whether err is a network failure or a timeout
+// that a new try can fix. A host that does not resolve and a bad
+// certificate are not.
 func retryableError(err error) bool {
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
@@ -218,18 +342,23 @@ func retryableError(err error) bool {
 }
 
 // retryAfter parses a Retry-After value: delay seconds or an HTTP date.
+// It caps the value at maxRetryAfter.
 func retryAfter(v string, now time.Time) time.Duration {
 	if v == "" {
 		return 0
 	}
-	if s, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
-		if s < 0 {
+	if s, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil || errors.Is(err, strconv.ErrRange) {
+		// On ErrRange, s is the largest or smallest int64.
+		switch {
+		case s < 0:
 			return 0
+		case s > int64(maxRetryAfter/time.Second):
+			return maxRetryAfter
 		}
 		return time.Duration(s) * time.Second
 	}
 	if t, err := http.ParseTime(v); err == nil && t.After(now) {
-		return t.Sub(now)
+		return min(t.Sub(now), maxRetryAfter)
 	}
 	return 0
 }
@@ -272,11 +401,89 @@ func (f tempFile) Close() error {
 	return err
 }
 
-func isGitHub(u *url.URL) bool {
-	return u.Scheme == "https" && githubHosts[strings.ToLower(u.Hostname())]
+// checkRedirect runs next (or the default limit of 10 redirects), then
+// removes the credential headers from the next request if keepCredentials
+// rejects it. It runs last, so next cannot put a credential back.
+func checkRedirect(next func(*http.Request, []*http.Request) error) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		var err error
+		if next != nil {
+			err = next(req, via)
+		} else if len(via) >= 10 {
+			err = errors.New("stopped after 10 redirects")
+		}
+		if !keepCredentials(via[0].URL, req.URL) {
+			for _, h := range credentialHeaders {
+				req.Header.Del(h)
+			}
+		}
+		return err
+	}
 }
 
-// setGitHubAuth adds GITHUB_TOKEN to an https request for a GitHub host,
+// keepCredentials reports whether a redirect to next may carry the
+// credentials of a request to first: for a GitHub request, only to a
+// GitHub host over https; for any other request, only to its own origin.
+func keepCredentials(first, next *url.URL) bool {
+	if isGitHub(first) {
+		return isGitHub(next)
+	}
+	return sameOrigin(first, next)
+}
+
+// isGitHub reports whether u is an https URL for a host in githubHosts, on
+// the default port, without user info. The host must be ASCII: the
+// transport converts a non-ASCII host with IDNA to a different domain,
+// even when Unicode case folding makes it look like a GitHub host (U+0130
+// lowercases to "i").
+func isGitHub(u *url.URL) bool {
+	if u.Scheme != "https" || u.User != nil {
+		return false
+	}
+	if port := u.Port(); port != "" && port != "443" {
+		return false
+	}
+	host, ok := asciiHost(u)
+	return ok && githubHosts[host]
+}
+
+// sameOrigin reports whether a and b have the same scheme, ASCII host and
+// port.
+func sameOrigin(a, b *url.URL) bool {
+	ah, aok := asciiHost(a)
+	bh, bok := asciiHost(b)
+	return aok && bok && a.Scheme == b.Scheme && ah == bh && portOf(a) == portOf(b)
+}
+
+// asciiHost returns the host of u in ASCII lowercase, without one trailing
+// dot. It reports false for a host with a byte outside ASCII.
+func asciiHost(u *url.URL) (string, bool) {
+	host := []byte(u.Hostname())
+	for i, c := range host {
+		if c >= utf8.RuneSelf {
+			return "", false
+		}
+		if 'A' <= c && c <= 'Z' {
+			host[i] = c + ('a' - 'A')
+		}
+	}
+	return strings.TrimSuffix(string(host), "."), true
+}
+
+func portOf(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	switch u.Scheme {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	}
+	return ""
+}
+
+// setGitHubAuth adds GITHUB_TOKEN to a request for which isGitHub is true,
 // unless the request already has an Authorization header.
 func setGitHubAuth(req *http.Request) {
 	if !isGitHub(req.URL) || req.Header.Get("Authorization") != "" {
