@@ -1,6 +1,13 @@
 // Package fetch sends the HTTP GET requests b makes to release hosts. It
 // retries transient failures with a bounded backoff, and it sends
 // GITHUB_TOKEN to GitHub hosts.
+//
+// On a redirect, the credential headers go only where keepCredentials
+// accepts the next URL. Cookie, Proxy-Authorization and Referer go only to
+// the origin of the first request and of the previous request. This
+// applies also after a CheckRedirect of the caller puts a header back. The
+// cookies of a client Jar are not removed: the client adds them after
+// CheckRedirect, to each URL that the cookie scope of the Jar accepts.
 package fetch
 
 import (
@@ -68,8 +75,10 @@ func idleTimeoutFromEnv() time.Duration {
 	v := strings.TrimSpace(os.Getenv(idleTimeoutEnv))
 	d, err := time.ParseDuration(v)
 	if err != nil {
+		// Check the number before the multiplication: a large negative
+		// value overflows to a small positive Duration.
 		s, serr := strconv.ParseInt(v, 10, 64)
-		if serr != nil {
+		if serr != nil || s <= 0 {
 			return defaultIdleTimeout
 		}
 		d = time.Duration(min(s, int64(maxIdleTimeout/time.Second))) * time.Second
@@ -90,6 +99,13 @@ var githubHosts = map[string]bool{
 // credentialHeaders are removed from a redirect that keepCredentials
 // rejects: GitHub and Gitea use Authorization, GitLab uses PRIVATE-TOKEN.
 var credentialHeaders = []string{"Authorization", "Private-Token"}
+
+// originHeaders are removed from a redirect that leaves the origin of the
+// first request or of the previous request. Go keeps Cookie and
+// Proxy-Authorization on a redirect to a subdomain, or to another port or
+// scheme on the same host. Referer holds the previous URL, and its query
+// can hold a token (a signed download URL).
+var originHeaders = []string{"Cookie", "Proxy-Authorization", "Referer"}
 
 // maxRetryAfter caps a Retry-After value before it becomes a Duration.
 const maxRetryAfter = 24 * time.Hour
@@ -447,7 +463,9 @@ func (f tempFile) Close() error {
 
 // checkRedirect runs next (or the default limit of 10 redirects), then
 // removes the credential headers from the next request if keepCredentials
-// rejects it. It runs last, so next cannot put a credential back.
+// rejects it, and the originHeaders if the next request leaves the origin
+// of the first or of the previous request. It runs last, so next cannot
+// put a header back.
 func checkRedirect(next func(*http.Request, []*http.Request) error) func(*http.Request, []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		var err error
@@ -457,18 +475,21 @@ func checkRedirect(next func(*http.Request, []*http.Request) error) func(*http.R
 			err = errors.New("stopped after 10 redirects")
 		}
 		if !keepCredentials(via[0].URL, req.URL) {
-			removeCredentials(req.Header)
+			removeHeaders(req.Header, credentialHeaders)
+		}
+		if !sameOrigin(via[0].URL, req.URL) || !sameOrigin(via[len(via)-1].URL, req.URL) {
+			removeHeaders(req.Header, originHeaders)
 		}
 		return err
 	}
 }
 
-// removeCredentials removes the credential headers under every spelling of
-// their keys. Header.Del removes only the canonical key, but a caller can
-// set a key in the map directly ("authorization", "PRIVATE-TOKEN").
-func removeCredentials(h http.Header) {
+// removeHeaders removes the named headers under every spelling of their
+// keys. Header.Del removes only the canonical key, but a caller can set a
+// key in the map directly ("authorization", "PRIVATE-TOKEN").
+func removeHeaders(h http.Header, names []string) {
 	for key := range h {
-		for _, name := range credentialHeaders {
+		for _, name := range names {
 			if strings.EqualFold(key, name) {
 				delete(h, key)
 			}

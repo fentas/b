@@ -59,6 +59,7 @@ func TestGitHubTokenHostMatch(t *testing.T) {
 // hop is one request as the client sent it.
 type hop struct {
 	url, auth, privateToken string
+	header                  http.Header
 }
 
 // recordingRouter is a hostRouter that records each request it sends, with
@@ -71,7 +72,12 @@ type recordingRouter struct {
 
 func (r *recordingRouter) RoundTrip(req *http.Request) (*http.Response, error) {
 	r.mu.Lock()
-	r.hops = append(r.hops, hop{req.URL.String(), foldGet(req.Header, "Authorization"), foldGet(req.Header, "Private-Token")})
+	r.hops = append(r.hops, hop{
+		url:          req.URL.String(),
+		auth:         foldGet(req.Header, "Authorization"),
+		privateToken: foldGet(req.Header, "Private-Token"),
+		header:       req.Header.Clone(),
+	})
 	r.mu.Unlock()
 	return r.hosts.RoundTrip(req)
 }
@@ -293,6 +299,144 @@ func TestRedirect_RawCredentialKeysAreRemoved(t *testing.T) {
 			}
 			if h := rec.hops[1]; h.auth != "" || h.privateToken != "" {
 				t.Errorf("second hop %s carries a credential: %+v", h.url, h)
+			}
+		})
+	}
+}
+
+// follow sends a GET for first through a recordingRouter that sends every
+// host to one redirectServer, with an optional CheckRedirect of the caller.
+// setup changes the first request. It returns the hops after the first one.
+func follow(t *testing.T, first string, setup func(*http.Request), restore func(*http.Request)) []hop {
+	t.Helper()
+	withTestPolicy(t)
+	t.Setenv("GITHUB_TOKEN", "")
+	srv := redirectServer(t)
+	rec := &recordingRouter{hosts: hostRouter{}}
+	for _, h := range []string{"example.test", "sub.example.test", "other.test", "github.com", "api.github.com"} {
+		rec.hosts[h] = srv
+	}
+	client := &http.Client{Transport: rec}
+	if restore != nil {
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			restore(req)
+			return nil
+		}
+	}
+	old := http.DefaultClient
+	http.DefaultClient = client
+	t.Cleanup(func() { http.DefaultClient = old })
+
+	req, err := http.NewRequest(http.MethodGet, first, nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if setup != nil {
+		setup(req)
+	}
+	resp, err := Do(req)
+	if err != nil {
+		t.Fatalf("Do: %v", err)
+	}
+	resp.Body.Close()
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.hops) < 2 {
+		t.Fatalf("hops = %+v, want a redirect", rec.hops)
+	}
+	return rec.hops[1:]
+}
+
+// redirectTo returns from with a query that makes redirectServer redirect
+// to to.
+func redirectTo(from, to string) string {
+	return from + "?to=" + url.QueryEscape(to)
+}
+
+// Go sets Referer on a redirect to the previous URL, query included. The
+// query of a signed download URL holds a token, so Referer must not go to
+// another origin.
+func TestRedirect_RefererStaysOnTheOrigin(t *testing.T) {
+	const secret = "signed-test-value"
+	signed := func(from, to string) string {
+		return from + "?token=" + secret + "&to=" + url.QueryEscape(to)
+	}
+	for _, tt := range []struct {
+		name  string
+		first string
+		want  []bool // per hop after the first: Referer is sent
+	}{
+		{"same origin", signed("https://example.test/start", "https://example.test/end"), []bool{true}},
+		{"to another host", signed("https://example.test/start", "https://other.test/end"), []bool{false}},
+		{"to another port", signed("https://example.test/start", "https://example.test:8443/end"), []bool{false}},
+		{"to a subdomain", signed("https://example.test/start", "https://sub.example.test/end"), []bool{false}},
+		{"GitHub to api.github.com", signed("https://github.com/start", "https://api.github.com/end"), []bool{false}},
+		{"back to the first origin", signed("https://example.test/start", signed("https://other.test/start", "https://example.test/end")), []bool{false, false}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			hops := follow(t, tt.first, nil, nil)
+			if len(hops) != len(tt.want) {
+				t.Fatalf("hops = %+v, want %d after the first", hops, len(tt.want))
+			}
+			for i, h := range hops {
+				ref := foldGet(h.header, "Referer")
+				if tt.want[i] && !strings.Contains(ref, secret) {
+					t.Errorf("hop %s: Referer = %q, want the previous URL", h.url, ref)
+				}
+				if !tt.want[i] && ref != "" {
+					t.Errorf("hop %s: Referer = %q, want none", h.url, ref)
+				}
+			}
+		})
+	}
+}
+
+// Go keeps Cookie and Proxy-Authorization on a redirect to a subdomain or
+// to another port on the same host, and a CheckRedirect of the caller can
+// put them back under any spelling. They must stay on the origin.
+func TestRedirect_CookieAndProxyAuthStayOnTheOrigin(t *testing.T) {
+	headers := []string{"Cookie", "Proxy-Authorization"}
+	for _, tt := range []struct {
+		name  string
+		first string
+		keys  []string // raw keys a CheckRedirect of the caller sets on each hop
+		want  []bool   // per hop after the first: the headers are sent
+	}{
+		{"same origin", redirectTo("https://example.test/start", "https://example.test/end"), nil, []bool{true}},
+		{"to a subdomain", redirectTo("https://example.test/start", "https://sub.example.test/end"), nil, []bool{false}},
+		{"to another port", redirectTo("https://example.test/start", "https://example.test:8443/end"), nil, []bool{false}},
+		{"to a subdomain, then on the subdomain", redirectTo("https://example.test/start", redirectTo("https://sub.example.test/start", "https://sub.example.test/end")), nil, []bool{false, false}},
+		{"raw cookie keys put back", redirectTo("https://example.test/start", "https://other.test/end"), []string{"cookie", "COOKIE"}, []bool{false}},
+		{"raw proxy-authorization keys put back", redirectTo("https://example.test/start", "https://other.test/end"), []string{"proxy-authorization", "PROXY-AUTHORIZATION"}, []bool{false}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			setup := func(req *http.Request) {
+				req.Header.Set("Cookie", "session=test-cookie")
+				req.Header.Set("Proxy-Authorization", "Basic test-proxy-credential")
+			}
+			var restore func(*http.Request)
+			if tt.keys != nil {
+				restore = func(req *http.Request) {
+					for _, k := range tt.keys {
+						req.Header[k] = []string{"restored-test-value"}
+					}
+				}
+			}
+			hops := follow(t, tt.first, setup, restore)
+			if len(hops) != len(tt.want) {
+				t.Fatalf("hops = %+v, want %d after the first", hops, len(tt.want))
+			}
+			for i, h := range hops {
+				for _, name := range headers {
+					got := foldGet(h.header, name)
+					if tt.want[i] && got == "" {
+						t.Errorf("hop %s: no %s, want it kept on the origin", h.url, name)
+					}
+					if !tt.want[i] && got != "" {
+						t.Errorf("hop %s: %s = %q, want none", h.url, name, got)
+					}
+				}
 			}
 		})
 	}

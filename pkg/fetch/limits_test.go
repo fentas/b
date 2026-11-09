@@ -380,6 +380,12 @@ func TestIdleTimeoutFromEnv(t *testing.T) {
 		{"0s", defaultIdleTimeout},
 		{"-5s", defaultIdleTimeout},
 		{"-30", defaultIdleTimeout},
+		// A negative number of seconds must not overflow in the
+		// multiplication to a small positive time.
+		{"-9223372036854775807", defaultIdleTimeout},
+		{"-9223372036854775808", defaultIdleTimeout},
+		{"86400", maxIdleTimeout},
+		{"86401", maxIdleTimeout},
 	} {
 		t.Setenv(idleTimeoutEnv, tt.value)
 		if got := idleTimeoutFromEnv(); got != tt.want {
