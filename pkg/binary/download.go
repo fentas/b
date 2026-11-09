@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/fentas/b/pkg/fetch"
 	"github.com/fentas/b/pkg/provider"
 	"github.com/fentas/goodies/progress"
 	"github.com/ulikunitz/xz"
@@ -48,6 +50,30 @@ func verifyWritten(file string, written, contentLength int64) error {
 		return fmt.Errorf("download of %s is incomplete: wrote %d bytes, Content-Length is %d; retry the download", file, written, contentLength)
 	}
 	return nil
+}
+
+// ctx returns the context of b, or context.Background if it has none.
+func (b *Binary) ctx() context.Context {
+	if b.Context != nil {
+		return b.Context
+	}
+	return context.Background()
+}
+
+// download GETs url with fetch.Download: transient failures are retried,
+// and a 200 body is complete before extraction starts. label names the
+// download in the progress tracker.
+func (b *Binary) download(url, label string) (*http.Response, error) {
+	return fetch.Download(b.ctx(), url, func(resp *http.Response) io.Reader {
+		if b.Tracker == nil {
+			return resp.Body
+		}
+		// A retry starts the count again.
+		b.Tracker.UpdateMessage(fmt.Sprintf("Downloading %s", label))
+		b.Tracker.UpdateTotal(resp.ContentLength)
+		b.Tracker.SetValue(0)
+		return progress.NewReader(resp.Body, b.Tracker)
+	})
 }
 
 func (b *Binary) githubURL() (string, error) {
@@ -265,7 +291,7 @@ func (b *Binary) downloadViaProvider() error {
 
 // downloadAsset downloads a release asset and extracts the binary if archived.
 func (b *Binary) downloadAsset(asset *provider.Asset) error {
-	resp, err := http.Get(asset.URL)
+	resp, err := b.download(asset.URL, asset.Name)
 	if err != nil {
 		return err
 	}
@@ -278,28 +304,21 @@ func (b *Binary) downloadAsset(asset *provider.Asset) error {
 		return fmt.Errorf("HTTP %d downloading %s", resp.StatusCode, asset.Name)
 	}
 
-	var reader io.ReadCloser = resp.Body
-	if b.Tracker != nil {
-		b.Tracker.UpdateMessage(fmt.Sprintf("Downloading %s", asset.Name))
-		b.Tracker.UpdateTotal(resp.ContentLength)
-		reader = io.NopCloser(progress.NewReader(resp.Body, b.Tracker))
-	}
-
 	archiveType := provider.DetectArchiveType(asset.Name)
 	switch archiveType {
 	case "tar.gz":
-		return b.extractFromTarAuto(reader, "gz")
+		return b.extractFromTarAuto(resp.Body, "gz")
 	case "tar.xz":
-		return b.extractFromTarAuto(reader, "xz")
+		return b.extractFromTarAuto(resp.Body, "xz")
 	case "zip":
-		return b.extractFromZipAuto(reader)
+		return b.extractFromZipAuto(resp.Body)
 	default:
 		// Raw binary (no archive)
 		file, err := os.OpenFile(b.File, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
 		if err != nil {
 			return err
 		}
-		written, copyErr := io.Copy(file, reader)
+		written, copyErr := io.Copy(file, resp.Body)
 		closeErr := file.Close()
 		if copyErr != nil {
 			return copyErr
@@ -506,13 +525,13 @@ func (b *Binary) downloadPreset() error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.Get(url)
+	resp, err := b.download(url, b.Name)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	// Check HTTP status code
+	// Check HTTP status code. fetch.Download has retried 429 and 5xx.
 	if resp.StatusCode != http.StatusOK {
 		switch resp.StatusCode {
 		case http.StatusNotFound:
@@ -530,18 +549,9 @@ func (b *Binary) downloadPreset() error {
 			return fmt.Errorf("%s %s not found for %s/%s", b.Name, b.Version, runtime.GOOS, runtime.GOARCH)
 		case http.StatusForbidden, http.StatusUnauthorized:
 			return accessDeniedError(resp, url)
-		case http.StatusTooManyRequests:
-			return fmt.Errorf("HTTP 429 for %s: rate limited; wait and retry, or set GITHUB_TOKEN to authenticate", url)
 		default:
 			return fmt.Errorf("HTTP error %d", resp.StatusCode)
 		}
-	}
-
-	reader := resp.Body
-	if b.Tracker != nil {
-		b.Tracker.UpdateMessage(fmt.Sprintf("Downloading %s", b.Name))
-		b.Tracker.UpdateTotal(resp.ContentLength)
-		reader = progress.NewReader(resp.Body, b.Tracker)
 	}
 
 	// Checks file extension
@@ -563,20 +573,20 @@ func (b *Binary) downloadPreset() error {
 	}
 
 	if b.IsTarGz {
-		return b.extractSingleFileFromTar(reader, "gz")
+		return b.extractSingleFileFromTar(resp.Body, "gz")
 	}
 	if b.IsTarXz {
-		return b.extractSingleFileFromTar(reader, "xz")
+		return b.extractSingleFileFromTar(resp.Body, "xz")
 	}
 	if b.IsZip {
-		return b.extractSingleFileFromZip(reader)
+		return b.extractSingleFileFromZip(resp.Body)
 	}
 
 	file, err := os.OpenFile(b.File, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
 	if err != nil {
 		return err
 	}
-	written, copyErr := io.Copy(file, reader)
+	written, copyErr := io.Copy(file, resp.Body)
 	closeErr := file.Close()
 	if copyErr != nil {
 		return copyErr

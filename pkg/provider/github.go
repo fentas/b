@@ -1,12 +1,14 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
+
+	"github.com/fentas/b/pkg/fetch"
 )
 
 func init() {
@@ -37,13 +39,17 @@ func (g *GitHub) LatestVersion(ref string) (string, error) {
 	owner, repo := githubOwnerRepo(ref)
 	// Use redirect-based approach (faster, no API rate limit).
 	url := fmt.Sprintf("https://github.com/%s/%s/releases/latest", owner, repo)
-	resp, err := http.Get(url)
+	resp, err := fetch.Get(context.Background(), url)
 	if err != nil {
 		return "", err
 	}
 	resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
 		return "", fmt.Errorf("no releases found for %s/%s", owner, repo)
+	}
+	// Without this check, a response that did not redirect gives "latest".
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
 	}
 	final := resp.Request.URL.Path
 	parts := strings.Split(final, "/")
@@ -66,11 +72,9 @@ func (g *GitHub) FetchRelease(ref, version string) (*Release, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
 
-	resp, err := http.DefaultClient.Do(req)
+	// fetch.Do adds GITHUB_TOKEN and retries transient failures.
+	resp, err := fetch.Do(req)
 	if err != nil {
 		return nil, err
 	}

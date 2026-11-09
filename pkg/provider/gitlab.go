@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/fentas/b/pkg/fetch"
 )
 
 func init() {
@@ -57,7 +59,7 @@ func (g *GitLab) FetchRelease(ref, version string) (*Release, error) {
 		req.Header.Set("PRIVATE-TOKEN", token)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := fetch.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +116,7 @@ func gitlabGetReleases(projectPath string, perPage int) ([]gitlabReleaseSummary,
 		req.Header.Set("PRIVATE-TOKEN", token)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := fetch.Do(req)
 	if err != nil {
 		return nil, err
 	}

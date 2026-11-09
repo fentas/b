@@ -8,7 +8,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/fentas/b/pkg/fetch"
 )
 
 func TestIsReleaseProvider(t *testing.T) {
@@ -268,6 +272,53 @@ func TestGitHub_LatestVersion_Mocked(t *testing.T) {
 	}
 	if v != "v9.9.9" {
 		t.Errorf("v=%q", v)
+	}
+}
+
+// withFastRetry makes the fetch retry waits short for one test.
+func withFastRetry(t *testing.T) {
+	t.Helper()
+	old := fetch.DefaultPolicy
+	fetch.DefaultPolicy = fetch.Policy{Attempts: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond, MaxWait: time.Second}
+	t.Cleanup(func() { fetch.DefaultPolicy = old })
+}
+
+func TestGitHub_LatestVersion_RetriesGatewayTimeout(t *testing.T) {
+	withFastRetry(t)
+	var n int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/fentas/b/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&n, 1) == 1 {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return
+		}
+		http.Redirect(w, r, "/fentas/b/releases/tag/v9.9.9", http.StatusFound)
+	})
+	mux.HandleFunc("/fentas/b/releases/tag/v9.9.9", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	})
+	cleanup := withFakeAPI(t, mux)
+	defer cleanup()
+	v, err := (&GitHub{}).LatestVersion("github.com/fentas/b")
+	if err != nil {
+		t.Fatalf("LatestVersion after one 504: %v", err)
+	}
+	if v != "v9.9.9" {
+		t.Errorf("v=%q, want v9.9.9", v)
+	}
+}
+
+// A response that does not redirect must not give the version "latest".
+func TestGitHub_LatestVersion_NoRedirectIsError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/x/y/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	})
+	cleanup := withFakeAPI(t, mux)
+	defer cleanup()
+	v, err := (&GitHub{}).LatestVersion("github.com/x/y")
+	if err == nil {
+		t.Fatalf("expected an error, got version %q", v)
 	}
 }
 

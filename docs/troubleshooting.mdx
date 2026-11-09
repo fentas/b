@@ -82,6 +82,11 @@ binaries:
 
 **Problem**: Failed to download binary from GitHub releases
 
+`b` retries a download that fails with a network error, HTTP 429 or HTTP 5xx
+(other than 501). It makes up to 5 tries, waits up to 150 seconds in total, and
+obeys a `Retry-After` header. An error that names the URL and the last status
+comes after the last try. Other 4xx statuses fail at once.
+
 **Solutions**:
 ```bash
 # Check your internet connection
