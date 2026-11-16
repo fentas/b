@@ -44,6 +44,45 @@ type InstallOptions struct {
 	specifiedBinaries []*binary.Binary // Binaries specified on command line
 	envInstalls       []envInstall     // SCP-style env installs
 	configEnvRefs     []string         // env refs to sync from config
+
+	// Set by installBinaries for updateLock: what the install did to each
+	// binary's file, and which downloads failed.
+	plans    map[*binary.Binary]installPlan
+	failedMu sync.Mutex
+	failed   map[*binary.Binary]bool
+}
+
+// installPlan is what an install does to one binary's file, decided before
+// any download.
+type installPlan struct {
+	download    bool   // download the binary: it is missing, --force, or another version is asked for
+	keptVersion string // the version of a present file that is kept, from b.lock; "" when unknown
+}
+
+// planInstall decides whether an install replaces a present binary or keeps
+// it. prev is the binary's b.lock entry, nil when there is none. A present
+// file is kept when no version is asked for, or when b.lock says that file
+// (by its sha256) is the version asked for. When another version is asked
+// for, or b.lock does not describe the file, the binary is downloaded: a
+// kept file must never be recorded under a version it is not.
+func planInstall(b *binary.Binary, prev *lock.BinEntry, force bool) installPlan {
+	if force || !b.BinaryExists() {
+		return installPlan{download: true}
+	}
+	known := ""
+	if prev != nil && prev.SHA256 != "" {
+		if hash, err := lock.SHA256File(b.BinaryPath()); err == nil && hash == prev.SHA256 {
+			known = prev.Version
+		}
+	}
+	requested := b.Version
+	if requested == "latest" {
+		requested = ""
+	}
+	if requested != "" && requested != known {
+		return installPlan{download: true}
+	}
+	return installPlan{keptVersion: known}
 }
 
 // NewInstallCmd creates the install subcommand
@@ -215,21 +254,28 @@ func (o *InstallOptions) Run() error {
 
 // installBinaries installs the specified binaries with progress tracking
 func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
-	// Pre-resolve ambiguous assets before starting progress bars.
-	// In force mode, all binaries will download. In non-force mode,
-	// only resolve for missing binaries (the ones EnsureBinary will download).
-	if o.Force {
-		resolveAmbiguousAssets(binaries, o.Quiet, o.IO)
-	} else {
-		var missing []*binary.Binary
-		for _, b := range binaries {
-			if !b.BinaryExists() {
-				missing = append(missing, b)
-			}
+	// Decide per binary whether to download it or keep the present file
+	// (planInstall). A b.lock that cannot be read describes no file, so a
+	// requested version is downloaded.
+	lk, err := lock.ReadLock(o.LockDir())
+	if err != nil {
+		lk = &lock.Lock{}
+	}
+	o.plans = make(map[*binary.Binary]installPlan, len(binaries))
+	o.failed = make(map[*binary.Binary]bool)
+	var toDownload []*binary.Binary
+	for _, b := range binaries {
+		plan := planInstall(b, lk.FindBinary(b.Name), o.Force)
+		o.plans[b] = plan
+		if plan.download {
+			toDownload = append(toDownload, b)
 		}
-		if len(missing) > 0 {
-			resolveAmbiguousAssets(missing, o.Quiet, o.IO)
-		}
+	}
+
+	// Pre-resolve ambiguous assets before starting progress bars, for the
+	// binaries that will download.
+	if len(toDownload) > 0 {
+		resolveAmbiguousAssets(toDownload, o.Quiet, o.IO)
 	}
 
 	// Wire fallback selector for any remaining ambiguous cases
@@ -256,17 +302,18 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 			b.Tracker = tracker
 			b.Writer = pw
 
-			// Track whether a download actually happened so we only run
-			// the onPost hook when the binary changed — not on a no-op
-			// "already exists" skip from EnsureBinary(false).
-			wasMissing := !b.BinaryExists()
+			// Download or keep the file, as planned. The onPost hook runs
+			// only when a download happened, not when the file was kept.
 			var err error
-			if o.Force {
+			if o.plans[b].download {
 				err = b.DownloadBinary()
-			} else {
-				err = b.EnsureBinary(false) // Don't update, just ensure
+				if err != nil {
+					o.failedMu.Lock()
+					o.failed[b] = true
+					o.failedMu.Unlock()
+				}
 			}
-			downloaded := err == nil && (o.Force || wasMissing)
+			downloaded := err == nil && o.plans[b].download
 
 			// Run onPost hook only when a download actually happened.
 			if downloaded && b.OnPost != "" {
@@ -368,6 +415,11 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 
 	for _, b := range binaries {
 		if b.File == "" {
+			continue
+		}
+		// A failed download leaves the entry as it is: the file on disk is
+		// still the one the entry describes, or none.
+		if o.failed[b] {
 			continue
 		}
 		hash, err := lock.SHA256File(b.File)
