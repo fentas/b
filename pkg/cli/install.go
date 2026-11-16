@@ -186,7 +186,10 @@ func (o *InstallOptions) Complete(args []string) error {
 			b.Version = version
 		}
 
-		b.Alias = o.Alias
+		// --alias overrides; without it, the alias of the b.yaml entry stays
+		if o.Alias != "" {
+			b.Alias = o.Alias
+		}
 		if o.Asset != "" {
 			b.AssetFilter = o.Asset
 		}
@@ -417,8 +420,9 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		if b.File == "" {
 			continue
 		}
-		// A failed download leaves the entry as it is: the file on disk is
-		// still the one the entry describes, or none.
+		// A failed download leaves the entry as it is. The download writes the
+		// file in place, so a partial file can stay; its hash then differs
+		// from the entry, and the next run downloads a pinned binary again.
 		if o.failed[b] {
 			continue
 		}

@@ -60,3 +60,30 @@ func TestGetBinary_ConfigEntryOverPreset(t *testing.T) {
 		}
 	}
 }
+
+// TestComplete_KeepsTheConfigAlias: `b install <name>` for a b.yaml entry
+// that is an alias of a preset installs under the entry's name, as the
+// no-argument install does. Only --alias replaces it.
+func TestComplete_KeepsTheConfigAlias(t *testing.T) {
+	t.Setenv("PATH_BIN", t.TempDir())
+	presets := []*binary.Binary{{Name: "rtool", Context: context.Background()}}
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, presets)
+	shared.Config = &state.State{Binaries: state.BinaryList{
+		&binary.LocalBinary{Name: "tool", Alias: "rtool"},
+	}}
+
+	for _, tc := range []struct{ flag, want string }{
+		{"", "tool"},
+		{"mytool", "mytool"},
+	} {
+		o := &InstallOptions{SharedOptions: shared, Alias: tc.flag}
+		if err := o.Complete([]string{"tool"}); err != nil {
+			t.Fatalf("Complete(tool) with --alias %q: %v", tc.flag, err)
+		}
+		b := o.specifiedBinaries[0]
+		if b.Name != "rtool" || b.Alias != tc.want {
+			t.Errorf("b install tool, --alias %q: name %q, alias %q; want rtool, %q", tc.flag, b.Name, b.Alias, tc.want)
+		}
+	}
+}
