@@ -173,3 +173,59 @@ func TestInstall_FailedDownloadKeepsTheLockEntry(t *testing.T) {
 		t.Errorf("b.lock says %s and describes the file on disk = %v, want the old entry v1.0.0", e.Version, describes)
 	}
 }
+
+// TestInstall_KeptBinaryKeepsItsLockVersion: an install that keeps the
+// present file records the version b.lock gives that file, not "". A bare
+// `b install tool` over a locked v1.0.0 downloads nothing and leaves b.lock
+// byte for byte. A file that b.lock does not describe is kept with an empty
+// version (b cannot tell which version it is), never with a guessed one.
+func TestInstall_KeptBinaryKeepsItsLockVersion(t *testing.T) {
+	f := newPinsFixture(t)
+	f.present(t, "v1.0.0", true)
+	before, err := os.ReadFile(filepath.Join(f.binDir, "b.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.install(t, false, "tool")
+	if n := f.hits.Load(); n != 0 {
+		t.Errorf("%d downloads, want 0", n)
+	}
+	if e, describes := f.entry(t); e.Version != "v1.0.0" || !describes {
+		t.Errorf("b.lock says %q and describes the file on disk = %v, want v1.0.0 and true", e.Version, describes)
+	}
+	if after, _ := os.ReadFile(filepath.Join(f.binDir, "b.lock")); string(after) != string(before) {
+		t.Errorf("b.lock changed on an install that changed nothing:\n%s\nwas:\n%s", after, before)
+	}
+
+	g := newPinsFixture(t)
+	g.present(t, "v1.0.0", false)
+	g.install(t, false, "tool")
+	lk, err := lock.ReadLock(g.binDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := lk.FindBinary("tool"); e == nil || e.Version != "" {
+		t.Errorf("a kept file that b.lock does not describe: entry %+v, want version \"\"", e)
+	}
+}
+
+// TestInstall_ConfigVersionIsTheRequestedVersion: with a version pinned in
+// b.yaml, `b install tool` asks for that version: a present file of it is
+// kept, a present file of another version is replaced.
+func TestInstall_ConfigVersionIsTheRequestedVersion(t *testing.T) {
+	for _, tc := range []struct{ pinned, present, want string }{
+		{"v1.0.0", "v1.0.0", "tool v1.0.0\n"},
+		{"v3.0.0", "v1.0.0", "tool v3.0.0\n"},
+	} {
+		f := newPinsFixture(t)
+		mustWrite(t, f.config, []byte("binaries:\n  tool:\n    version: "+tc.pinned+"\n"))
+		f.present(t, tc.present, true)
+		f.install(t, false, "tool")
+		if got := f.file(t); got != tc.want {
+			t.Errorf("pinned %s over %s: .bin/tool is %q, want %q", tc.pinned, tc.present, got, tc.want)
+		}
+		if e, describes := f.entry(t); e.Version != tc.pinned || !describes {
+			t.Errorf("pinned %s over %s: b.lock says %q and describes the file on disk = %v", tc.pinned, tc.present, e.Version, describes)
+		}
+	}
+}

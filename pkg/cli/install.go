@@ -426,9 +426,15 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		if err != nil {
 			continue
 		}
+		// A kept file keeps the version that b.lock gives it ("" when b.lock
+		// does not describe it), not the version of the command line.
+		version := b.Version
+		if plan, ok := o.plans[b]; ok && !plan.download {
+			version = plan.keptVersion
+		}
 		entry := lock.BinEntry{
 			Name:    b.Name,
-			Version: b.Version,
+			Version: version,
 			SHA256:  hash,
 		}
 		if b.AutoDetect {
