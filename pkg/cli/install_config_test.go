@@ -312,3 +312,61 @@ func TestGetBinary_ProviderRefAliasIsNotAPreset(t *testing.T) {
 		}
 	}
 }
+
+// TestComplete_AliasTakesTheFileOfItsEntry: a preset installed under --alias
+// is the binary of the b.yaml entry of that name, which --add writes. It
+// installs at that entry's file, or at its own file when there is no such
+// entry, and the written b.yaml resolves to the installed file.
+func TestComplete_AliasTakesTheFileOfItsEntry(t *testing.T) {
+	for _, tc := range []struct {
+		name, arg, flag, entry string
+		file                   string // "" = the default file, PATH_BIN/<alias>
+	}{
+		{"its own name", "plain@v2.0.0", "plain", "plain", "/opt/plain"},
+		{"an alias entry with a file", "plain@v2.0.0", "x", "x", "/opt/x"},
+		{"a new name", "plain@v2.0.0", "p", "p", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			t.Setenv("PATH_BIN", binDir)
+			configPath := filepath.Join(t.TempDir(), ".bin", "b.yaml")
+			presets := []*binary.Binary{{Name: "plain", Context: context.Background()}}
+			io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+			shared := NewSharedOptions(io, presets)
+			shared.ConfigPath = configPath
+			shared.Config = &state.State{Binaries: state.BinaryList{
+				&binary.LocalBinary{Name: "plain", Version: "v1.0.0", File: "/opt/plain"},
+				&binary.LocalBinary{Name: "x", Alias: "plain", Version: "v1.0.0", File: "/opt/x"},
+			}}
+
+			o := &InstallOptions{SharedOptions: shared, Add: true, Alias: tc.flag}
+			if err := o.Complete([]string{tc.arg}); err != nil {
+				t.Fatalf("Complete(%s): %v", tc.arg, err)
+			}
+			want := tc.file
+			if want == "" {
+				want = filepath.Join(binDir, tc.flag)
+			}
+			installed := o.specifiedBinaries[0].BinaryPath()
+			if installed != want {
+				t.Errorf("b install %s --alias %s installs %q, want %q", tc.arg, tc.flag, installed, want)
+			}
+			if err := o.addToConfig(o.specifiedBinaries); err != nil {
+				t.Fatalf("addToConfig: %v", err)
+			}
+			cfg, err := state.LoadConfigFromPath(configPath)
+			if err != nil {
+				t.Fatalf("LoadConfigFromPath: %v", err)
+			}
+			reread := NewSharedOptions(io, presets)
+			reread.Config = cfg
+			b, ok := reread.GetBinary(tc.entry)
+			if !ok {
+				t.Fatalf("the written b.yaml has no entry %q", tc.entry)
+			}
+			if got := b.BinaryPath(); got != installed {
+				t.Errorf("entry %q resolves to %q, but the binary was installed at %q", tc.entry, got, installed)
+			}
+		})
+	}
+}

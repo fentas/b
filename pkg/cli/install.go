@@ -187,12 +187,13 @@ func (o *InstallOptions) Complete(args []string) error {
 		}
 
 		// --alias overrides; without it, the alias of the b.yaml entry stays.
-		// The file of a b.yaml entry is that entry's binary: a preset
-		// installed under another name gets its own file (a provider ref
-		// keeps its one entry, file included)
+		// A preset installed under --alias is the binary of the entry of
+		// that name (the one --add writes): it takes that entry's file, or
+		// its own file when there is none. A provider ref keeps its one
+		// entry, file included.
 		if o.Alias != "" {
-			if o.Alias != b.Alias && !(b.AutoDetect && b.ProviderRef != "") {
-				b.File = ""
+			if !(b.AutoDetect && b.ProviderRef != "") {
+				b.File = o.configFile(o.Alias)
 			}
 			b.Alias = o.Alias
 		}
@@ -206,6 +207,20 @@ func (o *InstallOptions) Complete(args []string) error {
 	}
 
 	return nil
+}
+
+// configFile is the file of the b.yaml entry of that name, "" when there is
+// no such entry or it names no file.
+func (o *InstallOptions) configFile(name string) string {
+	if o.Config == nil {
+		return ""
+	}
+	for _, lb := range o.Config.Binaries {
+		if lb.Name == name {
+			return lb.File
+		}
+	}
+	return ""
 }
 
 // Validate checks if the install operation is valid
