@@ -3,6 +3,7 @@
 package lock
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -83,9 +84,21 @@ func ReadLock(dir string) (*Lock, error) {
 	return &lock, nil
 }
 
-// WriteLock writes the lockfile to the given directory.
+// WriteLock writes the lockfile to the given directory. When the file on
+// disk already holds the same entries, WriteLock leaves it as it is: the
+// timestamp and the tool version change only together with an entry, so a
+// run that changes nothing leaves b.lock unchanged (and `git diff` clean).
 func WriteLock(dir string, lock *Lock, toolVersion string) error {
 	lock.Version = 1
+	path := filepath.Join(dir, lockFileName)
+	if data, err := os.ReadFile(path); err == nil {
+		var prev Lock
+		if json.Unmarshal(data, &prev) == nil && prev.Version == lock.Version && sameEntries(&prev, lock) {
+			lock.Tool = prev.Tool
+			lock.Timestamp = prev.Timestamp
+			return nil
+		}
+	}
 	lock.Tool = ToolInfo{B: toolVersion}
 	lock.Timestamp = time.Now().UTC().Format(time.RFC3339)
 
@@ -94,7 +107,19 @@ func WriteLock(dir string, lock *Lock, toolVersion string) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(filepath.Join(dir, lockFileName), data, 0644)
+	return os.WriteFile(path, data, 0644)
+}
+
+// sameEntries reports whether two locks hold the same binary and env
+// entries. A nil and an empty list are the same.
+func sameEntries(a, b *Lock) bool {
+	type entries struct {
+		Binaries []BinEntry `json:"binaries,omitempty"`
+		Envs     []EnvEntry `json:"envs,omitempty"`
+	}
+	ja, errA := json.Marshal(entries{a.Binaries, a.Envs})
+	jb, errB := json.Marshal(entries{b.Binaries, b.Envs})
+	return errA == nil && errB == nil && bytes.Equal(ja, jb)
 }
 
 // FindBinary returns the lock entry for a named binary, or nil.

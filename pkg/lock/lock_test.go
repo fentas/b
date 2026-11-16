@@ -279,3 +279,56 @@ func TestSHA256File(t *testing.T) {
 		t.Errorf("SHA256File = %q, want %q", hash, want)
 	}
 }
+
+// TestWriteLock_UnchangedEntriesKeepTheFile: a write with the entries that
+// are already on disk leaves b.lock byte for byte, so `git diff --exit-code
+// b.lock` stays clean after a run that changed nothing. The timestamp and the
+// tool version change only together with an entry.
+func TestWriteLock_UnchangedEntriesKeepTheFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "b.lock")
+	onDisk := `{
+  "version": 1,
+  "tool": {"b": "v1.0.0"},
+  "timestamp": "2020-01-01T00:00:00Z",
+  "binaries": [{"name": "fzf", "version": "v0.61.1", "sha256": "abc123", "source": "github.com/junegunn/fzf"}],
+  "envs": []
+}
+`
+	if err := os.WriteFile(path, []byte(onDisk), 0644); err != nil {
+		t.Fatal(err)
+	}
+	lk, err := ReadLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lk.Envs = nil // an empty list and no list are the same
+	if err := WriteLock(dir, lk, "v2.0.0"); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != onDisk {
+		t.Fatalf("an unchanged lock was rewritten:\n%s", got)
+	}
+
+	// A changed entry writes the file, with a new timestamp and tool version.
+	lk.Binaries[0].Version = "v0.62.0"
+	if err := WriteLock(dir, lk, "v2.0.0"); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+	lk2, err := ReadLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lk2.Binaries[0].Version != "v0.62.0" || lk2.Timestamp == "2020-01-01T00:00:00Z" || lk2.Tool.B != "v2.0.0" {
+		t.Errorf("after a changed entry: version %q, timestamp %q, tool %q", lk2.Binaries[0].Version, lk2.Timestamp, lk2.Tool.B)
+	}
+
+	// A missing file is written, also with no entries.
+	empty := t.TempDir()
+	if err := WriteLock(empty, &Lock{}, "v2.0.0"); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(empty, "b.lock")); err != nil {
+		t.Errorf("no b.lock written for a new project: %v", err)
+	}
+}
