@@ -364,22 +364,27 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 			configName = b.ProviderRef
 		}
 
-		// Check if already exists: an aliased binary has its entry under
-		// the alias (as a new entry below gets it), and a provider ref
-		// under the ref with the alias as its name
+		// Check if already exists: a provider ref has one entry, under the
+		// ref, with the binary's name as its alias; an alias of a preset has
+		// its own entry under the alias (as a new entry below gets it)
+		isRef := b.AutoDetect && b.ProviderRef != ""
 		key := configName
-		if b.Alias != "" {
+		if b.Alias != "" && !isRef {
 			key = b.Alias
 		}
 		found := false
 		for i, existing := range config.Binaries {
-			if existing.Name == key || (b.Alias != "" && existing.Name == configName && existing.Alias == b.Alias) {
+			if existing.Name == key {
 				// Update version only if we have a specific version
 				if b.Version != "" && b.Version != "latest" {
 					config.Binaries[i].Version = b.Version
 					if o.Fix {
 						config.Binaries[i].Enforced = b.Version
 					}
+				}
+				// --alias renames the binary of a provider ref
+				if isRef && o.Alias != "" {
+					config.Binaries[i].Alias = o.Alias
 				}
 				found = true
 				break
@@ -398,8 +403,12 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 				}
 			}
 			if b.Alias != "" {
-				entry.Name = b.Alias
-				entry.Alias = configName
+				if isRef {
+					entry.Alias = b.Alias
+				} else {
+					entry.Name = b.Alias
+					entry.Alias = configName
+				}
 			}
 			if b.AssetFilter != "" {
 				entry.Asset = b.AssetFilter

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/fentas/b/pkg/binary"
@@ -138,15 +139,18 @@ func TestAddToConfig_UpdatesTheAliasEntry(t *testing.T) {
 // TestAddToConfig_UpdatesTheProviderRefEntry: a provider-ref entry is stored
 // under the ref, with the binary's name as its alias. `b install <ref>@<v>
 // --add` and `b install --add` update that entry and add no entry under the
-// alias.
+// alias; --alias renames the binary in that entry.
 func TestAddToConfig_UpdatesTheProviderRefEntry(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		args    []string
+		flag    string
 		version string
+		alias   string
 	}{
-		{"named with a version", []string{"github.com/org/tool@v2.0.0"}, "v2.0.0"},
-		{"no argument", nil, "v1.0.0"},
+		{"named with a version", []string{"github.com/org/tool@v2.0.0"}, "", "v2.0.0", "t"},
+		{"no argument", nil, "", "v1.0.0", "t"},
+		{"named with --alias", []string{"github.com/org/tool"}, "p", "v1.0.0", "p"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("PATH_BIN", t.TempDir())
@@ -155,10 +159,10 @@ func TestAddToConfig_UpdatesTheProviderRefEntry(t *testing.T) {
 			shared := NewSharedOptions(io, nil)
 			shared.ConfigPath = configPath
 			shared.Config = &state.State{Binaries: state.BinaryList{
-				&binary.LocalBinary{Name: "github.com/org/tool", Alias: "t", Version: "v1.0.0", IsProviderRef: true},
+				&binary.LocalBinary{Name: "github.com/org/tool", Alias: "t", Version: "v1.0.0", File: "/opt/x/tool", IsProviderRef: true},
 			}}
 
-			o := &InstallOptions{SharedOptions: shared, Add: true}
+			o := &InstallOptions{SharedOptions: shared, Add: true, Alias: tc.flag}
 			if err := o.Complete(tc.args); err != nil {
 				t.Fatalf("Complete(%v): %v", tc.args, err)
 			}
@@ -181,8 +185,85 @@ func TestAddToConfig_UpdatesTheProviderRefEntry(t *testing.T) {
 				t.Fatalf("b.yaml has %d entries, want 1: %+v", len(cfg.Binaries), cfg.Binaries)
 			}
 			e := cfg.Binaries[0]
-			if e.Name != "github.com/org/tool" || e.Alias != "t" || e.Version != tc.version {
-				t.Errorf("the entry: name %q, alias %q, version %q; want github.com/org/tool, t, %s", e.Name, e.Alias, e.Version, tc.version)
+			if e.Name != "github.com/org/tool" || e.Alias != tc.alias || e.Version != tc.version || e.File != "/opt/x/tool" {
+				t.Errorf("the entry: name %q, alias %q, version %q, file %q; want github.com/org/tool, %s, %s, /opt/x/tool (updated in place)", e.Name, e.Alias, e.Version, e.File, tc.alias, tc.version)
+			}
+		})
+	}
+}
+
+// TestAddToConfig_NewEntriesResolve: a new entry that --add writes resolves
+// to the binary it installed. A provider ref gets an entry under the ref; an
+// alias of a preset gets its own entry, and an entry of the preset's name
+// stays as it was.
+func TestAddToConfig_NewEntriesResolve(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		start state.BinaryList
+		arg   string
+		flag  string
+		want  map[string]string // entry name -> its alias
+		files []string
+	}{
+		{"a provider ref with --alias", nil, "github.com/org/new", "t",
+			map[string]string{"github.com/org/new": "t"}, []string{"t"}},
+		{"a preset with --alias beside its plain entry",
+			state.BinaryList{&binary.LocalBinary{Name: "plain", Version: "v1.0.0"}}, "plain@v2.0.0", "p",
+			map[string]string{"plain": "", "p": "plain"}, []string{"plain", "p"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			t.Setenv("PATH_BIN", binDir)
+			configPath := filepath.Join(t.TempDir(), ".bin", "b.yaml")
+			presets := []*binary.Binary{{Name: "plain", Context: context.Background()}}
+			io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+			shared := NewSharedOptions(io, presets)
+			shared.ConfigPath = configPath
+			shared.Config = &state.State{Binaries: tc.start}
+
+			o := &InstallOptions{SharedOptions: shared, Add: true, Alias: tc.flag}
+			if err := o.Complete([]string{tc.arg}); err != nil {
+				t.Fatalf("Complete(%s): %v", tc.arg, err)
+			}
+			if err := o.addToConfig(o.specifiedBinaries); err != nil {
+				t.Fatalf("addToConfig: %v", err)
+			}
+			cfg, err := state.LoadConfigFromPath(configPath)
+			if err != nil {
+				t.Fatalf("LoadConfigFromPath: %v", err)
+			}
+			got := map[string]string{}
+			for _, e := range cfg.Binaries {
+				got[e.Name] = e.Alias
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("b.yaml entries %v, want %v", got, tc.want)
+			}
+			for n, a := range tc.want {
+				if ga, ok := got[n]; !ok || ga != a {
+					t.Errorf("entry %q: alias %q (present %v), want %q", n, ga, ok, a)
+				}
+			}
+			for _, e := range cfg.Binaries {
+				if e.Name == "plain" && e.Version != "v1.0.0" {
+					t.Errorf("the plain entry: version %q, want v1.0.0 (unchanged)", e.Version)
+				}
+			}
+
+			// The no-argument install of the written b.yaml installs each
+			// binary at its own file.
+			reread := NewSharedOptions(io, presets)
+			reread.Config = cfg
+			all := reread.GetBinariesFromConfig()
+			var files []string
+			for _, b := range all {
+				files = append(files, filepath.Base(b.BinaryPath()))
+			}
+			slices.Sort(files)
+			want := slices.Clone(tc.files)
+			slices.Sort(want)
+			if !slices.Equal(files, want) {
+				t.Errorf("the b.yaml installs %v, want %v", files, want)
 			}
 		})
 	}
