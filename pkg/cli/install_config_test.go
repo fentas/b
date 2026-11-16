@@ -174,6 +174,10 @@ func TestAddToConfig_UpdatesTheProviderRefEntry(t *testing.T) {
 			if len(bins) != 1 {
 				t.Fatalf("%d binaries to add, want 1", len(bins))
 			}
+			// The entry's file stays the binary's file, --alias or not
+			if got := bins[0].BinaryPath(); got != "/opt/x/tool" {
+				t.Errorf("the binary installs at %q, want the entry's file /opt/x/tool", got)
+			}
 			if err := o.addToConfig(bins); err != nil {
 				t.Fatalf("addToConfig: %v", err)
 			}
@@ -198,18 +202,20 @@ func TestAddToConfig_UpdatesTheProviderRefEntry(t *testing.T) {
 // stays as it was.
 func TestAddToConfig_NewEntriesResolve(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		start state.BinaryList
-		arg   string
-		flag  string
-		want  map[string]string // entry name -> its alias
-		files []string
+		name      string
+		start     state.BinaryList
+		arg       string
+		flag      string
+		want      map[string]string // entry name -> its alias
+		versions  map[string]string // entry name -> its version
+		installed string            // the file of the installed binary
+		files     []string
 	}{
 		{"a provider ref with --alias", nil, "github.com/org/new", "t",
-			map[string]string{"github.com/org/new": "t"}, []string{"t"}},
+			map[string]string{"github.com/org/new": "t"}, map[string]string{"github.com/org/new": ""}, "t", []string{"t"}},
 		{"a preset with --alias beside its plain entry",
-			state.BinaryList{&binary.LocalBinary{Name: "plain", Version: "v1.0.0"}}, "plain@v2.0.0", "p",
-			map[string]string{"plain": "", "p": "plain"}, []string{"plain", "p"}},
+			state.BinaryList{&binary.LocalBinary{Name: "plain", Version: "v1.0.0", File: "/opt/plain"}}, "plain@v2.0.0", "p",
+			map[string]string{"plain": "", "p": "plain"}, map[string]string{"plain": "v1.0.0", "p": "v2.0.0"}, "p", []string{"plain", "p"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			binDir := t.TempDir()
@@ -224,6 +230,9 @@ func TestAddToConfig_NewEntriesResolve(t *testing.T) {
 			o := &InstallOptions{SharedOptions: shared, Add: true, Alias: tc.flag}
 			if err := o.Complete([]string{tc.arg}); err != nil {
 				t.Fatalf("Complete(%s): %v", tc.arg, err)
+			}
+			if got, want := o.specifiedBinaries[0].BinaryPath(), filepath.Join(binDir, tc.installed); got != want {
+				t.Errorf("b install %s --alias %s installs %q, want %q", tc.arg, tc.flag, got, want)
 			}
 			if err := o.addToConfig(o.specifiedBinaries); err != nil {
 				t.Fatalf("addToConfig: %v", err)
@@ -245,8 +254,11 @@ func TestAddToConfig_NewEntriesResolve(t *testing.T) {
 				}
 			}
 			for _, e := range cfg.Binaries {
-				if e.Name == "plain" && e.Version != "v1.0.0" {
-					t.Errorf("the plain entry: version %q, want v1.0.0 (unchanged)", e.Version)
+				if v := tc.versions[e.Name]; e.Version != v {
+					t.Errorf("entry %q: version %q, want %q", e.Name, e.Version, v)
+				}
+				if e.Name == "plain" && e.File != "/opt/plain" {
+					t.Errorf("the plain entry: file %q, want /opt/plain (unchanged)", e.File)
 				}
 			}
 

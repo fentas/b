@@ -186,8 +186,14 @@ func (o *InstallOptions) Complete(args []string) error {
 			b.Version = version
 		}
 
-		// --alias overrides; without it, the alias of the b.yaml entry stays
+		// --alias overrides; without it, the alias of the b.yaml entry stays.
+		// The file of a b.yaml entry is that entry's binary: a preset
+		// installed under another name gets its own file (a provider ref
+		// keeps its one entry, file included)
 		if o.Alias != "" {
+			if o.Alias != b.Alias && !(b.AutoDetect && b.ProviderRef != "") {
+				b.File = ""
+			}
 			b.Alias = o.Alias
 		}
 		if o.Asset != "" {
