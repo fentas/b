@@ -130,7 +130,92 @@ func TestAddToConfig_UpdatesTheAliasEntry(t *testing.T) {
 		t.Fatalf("b.yaml has %d entries, want 1: %+v", len(cfg.Binaries), cfg.Binaries)
 	}
 	e := cfg.Binaries[0]
-	if e.Name != "tool" || e.Alias != "rtool" || e.Enforced != "v1.0.0" || e.File != "/opt/x/tool" {
-		t.Errorf("the entry: name %q, alias %q, enforced %q, file %q; want tool, rtool, v1.0.0, /opt/x/tool", e.Name, e.Alias, e.Enforced, e.File)
+	if e.Name != "tool" || e.Alias != "rtool" || e.Version != "v2.0.0" || e.Enforced != "v1.0.0" || e.File != "/opt/x/tool" {
+		t.Errorf("the entry: name %q, alias %q, version %q, enforced %q, file %q; want tool, rtool, v2.0.0, v1.0.0, /opt/x/tool", e.Name, e.Alias, e.Version, e.Enforced, e.File)
+	}
+}
+
+// TestAddToConfig_UpdatesTheProviderRefEntry: a provider-ref entry is stored
+// under the ref, with the binary's name as its alias. `b install <ref>@<v>
+// --add` and `b install --add` update that entry and add no entry under the
+// alias.
+func TestAddToConfig_UpdatesTheProviderRefEntry(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		version string
+	}{
+		{"named with a version", []string{"github.com/org/tool@v2.0.0"}, "v2.0.0"},
+		{"no argument", nil, "v1.0.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PATH_BIN", t.TempDir())
+			configPath := filepath.Join(t.TempDir(), ".bin", "b.yaml")
+			io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+			shared := NewSharedOptions(io, nil)
+			shared.ConfigPath = configPath
+			shared.Config = &state.State{Binaries: state.BinaryList{
+				&binary.LocalBinary{Name: "github.com/org/tool", Alias: "t", Version: "v1.0.0", IsProviderRef: true},
+			}}
+
+			o := &InstallOptions{SharedOptions: shared, Add: true}
+			if err := o.Complete(tc.args); err != nil {
+				t.Fatalf("Complete(%v): %v", tc.args, err)
+			}
+			// As Run does: no argument installs (and adds) the b.yaml set
+			bins := o.specifiedBinaries
+			if len(tc.args) == 0 {
+				bins = o.GetBinariesFromConfig()
+			}
+			if len(bins) != 1 {
+				t.Fatalf("%d binaries to add, want 1", len(bins))
+			}
+			if err := o.addToConfig(bins); err != nil {
+				t.Fatalf("addToConfig: %v", err)
+			}
+			cfg, err := state.LoadConfigFromPath(configPath)
+			if err != nil {
+				t.Fatalf("LoadConfigFromPath: %v", err)
+			}
+			if len(cfg.Binaries) != 1 {
+				t.Fatalf("b.yaml has %d entries, want 1: %+v", len(cfg.Binaries), cfg.Binaries)
+			}
+			e := cfg.Binaries[0]
+			if e.Name != "github.com/org/tool" || e.Alias != "t" || e.Version != tc.version {
+				t.Errorf("the entry: name %q, alias %q, version %q; want github.com/org/tool, t, %s", e.Name, e.Alias, e.Version, tc.version)
+			}
+		})
+	}
+}
+
+// TestGetBinary_ProviderRefAliasIsNotAPreset: the alias of a provider-ref
+// entry names the binary. A preset of that name does not replace the ref,
+// and the named and the no-argument install give the same binary.
+func TestGetBinary_ProviderRefAliasIsNotAPreset(t *testing.T) {
+	binDir := t.TempDir()
+	t.Setenv("PATH_BIN", binDir)
+	presets := []*binary.Binary{{Name: "rtool", Context: context.Background()}}
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, presets)
+	shared.Config = &state.State{Binaries: state.BinaryList{
+		&binary.LocalBinary{Name: "github.com/org/rtool", Alias: "rtool", IsProviderRef: true},
+	}}
+
+	o := &InstallOptions{SharedOptions: shared}
+	if err := o.Complete([]string{"github.com/org/rtool"}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	named := o.specifiedBinaries[0]
+	all := shared.GetBinariesFromConfig()
+	if len(all) != 1 {
+		t.Fatalf("GetBinariesFromConfig: %d binaries, want 1", len(all))
+	}
+	for _, b := range []*binary.Binary{named, all[0]} {
+		if b.ProviderRef != "github.com/org/rtool" || !b.AutoDetect {
+			t.Errorf("binary %q: provider ref %q, auto-detect %v; want the ref, not the preset", b.Name, b.ProviderRef, b.AutoDetect)
+		}
+		if got, want := b.BinaryPath(), filepath.Join(binDir, "rtool"); got != want {
+			t.Errorf("binary %q: file %q, want %q", b.Name, got, want)
+		}
 	}
 }

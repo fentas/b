@@ -119,13 +119,16 @@ func (o *SharedOptions) resolveBinary(lb *binary.LocalBinary) (*binary.Binary, b
 // `b install` install the same binary.
 func (o *SharedOptions) GetBinary(name string) (*binary.Binary, bool) {
 	// First the config entry of that name: a preset with its overrides, or a
-	// reference alias
+	// reference alias. A provider ref is resolved below; its alias is the
+	// binary's name, not a preset.
 	var configEntry *binary.LocalBinary
 	if o.Config != nil {
 		for _, lb := range o.Config.Binaries {
 			if lb.Name == name {
-				if b, ok := o.resolveBinary(lb); ok {
-					return b, true
+				if !lb.IsProviderRef {
+					if b, ok := o.resolveBinary(lb); ok {
+						return b, true
+					}
 				}
 				configEntry = lb
 				break
