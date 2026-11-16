@@ -166,6 +166,9 @@ func (o *SharedOptions) GetBinary(name string) (*binary.Binary, bool) {
 			if configEntry.File != "" {
 				b.File = configEntry.File
 			}
+			if configEntry.Alias != "" {
+				b.Alias = configEntry.Alias
+			}
 			if configEntry.Asset != "" {
 				b.AssetFilter = configEntry.Asset
 			}

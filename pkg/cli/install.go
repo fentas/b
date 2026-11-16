@@ -364,10 +364,15 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 			configName = b.ProviderRef
 		}
 
-		// Check if already exists
+		// Check if already exists: an aliased binary has its entry under
+		// the alias (as a new entry below gets it)
+		key := configName
+		if b.Alias != "" {
+			key = b.Alias
+		}
 		found := false
 		for i, existing := range config.Binaries {
-			if existing.Name == configName {
+			if existing.Name == key {
 				// Update version only if we have a specific version
 				if b.Version != "" && b.Version != "latest" {
 					config.Binaries[i].Version = b.Version

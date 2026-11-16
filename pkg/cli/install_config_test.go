@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/fentas/b/pkg/binary"
@@ -65,25 +66,71 @@ func TestGetBinary_ConfigEntryOverPreset(t *testing.T) {
 // that is an alias of a preset installs under the entry's name, as the
 // no-argument install does. Only --alias replaces it.
 func TestComplete_KeepsTheConfigAlias(t *testing.T) {
-	t.Setenv("PATH_BIN", t.TempDir())
-	presets := []*binary.Binary{{Name: "rtool", Context: context.Background()}}
+	binDir := t.TempDir()
+	t.Setenv("PATH_BIN", binDir)
+	presets := []*binary.Binary{
+		{Name: "rtool", Context: context.Background()},
+		{Name: "plain", Context: context.Background()},
+	}
 	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
 	shared := NewSharedOptions(io, presets)
 	shared.Config = &state.State{Binaries: state.BinaryList{
 		&binary.LocalBinary{Name: "tool", Alias: "rtool"},
+		&binary.LocalBinary{Name: "plain", Version: "v1.0.0"},
+		&binary.LocalBinary{Name: "github.com/org/tool", Alias: "t", IsProviderRef: true},
 	}}
 
-	for _, tc := range []struct{ flag, want string }{
-		{"", "tool"},
-		{"mytool", "mytool"},
+	for _, tc := range []struct{ arg, flag, name, alias, file string }{
+		{"tool", "", "rtool", "tool", "tool"},
+		{"tool", "mytool", "rtool", "mytool", "mytool"},
+		{"plain", "", "plain", "", "plain"},
+		{"github.com/org/tool", "", "tool", "t", "t"},
 	} {
 		o := &InstallOptions{SharedOptions: shared, Alias: tc.flag}
-		if err := o.Complete([]string{"tool"}); err != nil {
-			t.Fatalf("Complete(tool) with --alias %q: %v", tc.flag, err)
+		if err := o.Complete([]string{tc.arg}); err != nil {
+			t.Fatalf("Complete(%s) with --alias %q: %v", tc.arg, tc.flag, err)
 		}
 		b := o.specifiedBinaries[0]
-		if b.Name != "rtool" || b.Alias != tc.want {
-			t.Errorf("b install tool, --alias %q: name %q, alias %q; want rtool, %q", tc.flag, b.Name, b.Alias, tc.want)
+		if b.Name != tc.name || b.Alias != tc.alias {
+			t.Errorf("b install %s, --alias %q: name %q, alias %q; want %q, %q", tc.arg, tc.flag, b.Name, b.Alias, tc.name, tc.alias)
 		}
+		if got, want := b.BinaryPath(), filepath.Join(binDir, tc.file); got != want {
+			t.Errorf("b install %s, --alias %q: file %q, want %q", tc.arg, tc.flag, got, want)
+		}
+	}
+}
+
+// TestAddToConfig_UpdatesTheAliasEntry: `b install <name>@<version> --add`
+// for a b.yaml entry that is an alias of a preset updates that entry. It
+// does not add a second entry of the same name, which would replace the
+// first and lose its enforced version and its file.
+func TestAddToConfig_UpdatesTheAliasEntry(t *testing.T) {
+	t.Setenv("PATH_BIN", t.TempDir())
+	configPath := filepath.Join(t.TempDir(), ".bin", "b.yaml")
+	presets := []*binary.Binary{{Name: "rtool", Context: context.Background()}}
+	io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
+	shared := NewSharedOptions(io, presets)
+	shared.ConfigPath = configPath
+	shared.Config = &state.State{Binaries: state.BinaryList{
+		&binary.LocalBinary{Name: "tool", Alias: "rtool", Enforced: "v1.0.0", File: "/opt/x/tool"},
+	}}
+
+	o := &InstallOptions{SharedOptions: shared, Add: true}
+	if err := o.Complete([]string{"tool@v2.0.0"}); err != nil {
+		t.Fatalf("Complete(tool@v2.0.0): %v", err)
+	}
+	if err := o.addToConfig(o.specifiedBinaries); err != nil {
+		t.Fatalf("addToConfig: %v", err)
+	}
+	cfg, err := state.LoadConfigFromPath(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromPath: %v", err)
+	}
+	if len(cfg.Binaries) != 1 {
+		t.Fatalf("b.yaml has %d entries, want 1: %+v", len(cfg.Binaries), cfg.Binaries)
+	}
+	e := cfg.Binaries[0]
+	if e.Name != "tool" || e.Alias != "rtool" || e.Enforced != "v1.0.0" || e.File != "/opt/x/tool" {
+		t.Errorf("the entry: name %q, alias %q, enforced %q, file %q; want tool, rtool, v1.0.0, /opt/x/tool", e.Name, e.Alias, e.Enforced, e.File)
 	}
 }
