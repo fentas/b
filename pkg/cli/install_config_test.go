@@ -644,6 +644,32 @@ func TestCheckPin(t *testing.T) {
 	}
 }
 
+// TestCheckPin_LeadingV: a version with or without a leading "v" is the
+// version of the pin, in both directions. Another version is still refused.
+func TestCheckPin_LeadingV(t *testing.T) {
+	for _, tc := range []struct {
+		pin, version string
+		refused      bool
+	}{
+		{"v3.0.0", "3.0.0", false},
+		{"3.0.0", "v3.0.0", false},
+		{"v3.0.0", "v3.0.0", false},
+		{"3.0.0", "3.0.0", false},
+		{"v3.0.0", "3.0.1", true},
+		{"3.0.0", "v3.0.1", true},
+	} {
+		shared := NewSharedOptions(&streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, nil)
+		shared.Config = &state.State{Binaries: state.BinaryList{
+			&binary.LocalBinary{Name: "plain", Enforced: tc.pin},
+		}}
+		o := &InstallOptions{SharedOptions: shared}
+		err := o.checkPin(&binary.Binary{Name: "plain", Version: tc.version})
+		if (err != nil) != tc.refused {
+			t.Errorf("pin %s, version %s: error %v, want refused %v", tc.pin, tc.version, err, tc.refused)
+		}
+	}
+}
+
 // TestAddToConfig_KeepsTheEnforcedPin: --add does not set the version of a
 // b.yaml entry to a value its enforced pin contradicts. Without a version
 // on the command line the entry's pin is the version; another version is

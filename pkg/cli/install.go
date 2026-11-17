@@ -299,16 +299,23 @@ func configKey(b *binary.Binary) string {
 
 // checkPin refuses an --add that would set the version of a b.yaml entry
 // to a value its enforced pin contradicts. The pin wins at every later
-// install, so the entry would name a version that b never installs.
+// install, so the entry would name a version that b never installs. A
+// version with or without a leading "v" is the same version.
 func (o *InstallOptions) checkPin(b *binary.Binary) error {
 	if b.Version == "" || b.Version == "latest" {
 		return nil
 	}
 	e := o.configEntry(configKey(b))
-	if e == nil || e.Enforced == "" || e.Enforced == b.Version {
+	if e == nil || e.Enforced == "" || sameVersion(e.Enforced, b.Version) {
 		return nil
 	}
 	return fmt.Errorf("--add: the b.yaml entry %s is pinned to %s (enforced), not %s\n  Hint: add --fix to move the pin, or install without --add", e.Name, e.Enforced, b.Version)
+}
+
+// sameVersion reports whether two versions are the same, with or without a
+// leading "v": 3.0.0 and v3.0.0 are the same.
+func sameVersion(a, b string) bool {
+	return strings.TrimPrefix(a, "v") == strings.TrimPrefix(b, "v")
 }
 
 // aliasOwner is the b.yaml entry of another binary that the name --alias
