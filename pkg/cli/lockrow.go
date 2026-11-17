@@ -1,11 +1,16 @@
 package cli
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/lock"
@@ -77,14 +82,96 @@ func realDir(dir string) string {
 	}
 }
 
-// lockRowFile is the file of the b.lock row of that name (fileName) in the
-// binary directory binDir.
-func lockRowFile(binDir, name string) string {
-	file := filepath.FromSlash(name)
-	if filepath.IsAbs(file) {
-		return file
+// lockFiles finds the files of b.lock rows. The name of a row is the path
+// of its file relative to the binary directory (fileName). b reads a file
+// of a row only inside the roots: the project, the directory of b.yaml and
+// the binary directory. A crafted name can make b read no other file.
+type lockFiles struct {
+	binDir string   // the binary directory, its symlinks resolved
+	roots  []string // their symlinks resolved
+}
+
+// lockFiles is the lockFiles of this project.
+func (o *SharedOptions) lockFiles() lockFiles {
+	binDir := path.GetBinaryPath()
+	l := lockFiles{binDir: realDir(binDir)}
+	for _, root := range []string{binDir, o.LockDir(), o.ProjectRoot()} {
+		if root != "" {
+			l.roots = append(l.roots, realDir(root))
+		}
 	}
-	return filepath.Join(realDir(binDir), file)
+	return l
+}
+
+// rowFileState is what lockFiles.find finds at the file of a row.
+type rowFileState int
+
+const (
+	rowFileMissing rowFileState = iota // no file, also a dangling symlink
+	rowFileOutside                     // outside the roots: b does not read it
+	rowFileThere                       // a file inside the roots, of any type
+)
+
+// find is the file of the b.lock row of that name, and its state. It
+// follows symlinks, as b verify reads a file: a symlink to a file inside
+// the roots is that file, a symlink to a file outside them is outside, and
+// a dangling symlink is no file. It does not open the file.
+func (l lockFiles) find(name string) (string, rowFileState) {
+	file := filepath.FromSlash(name)
+	if !filepath.IsAbs(file) {
+		file = filepath.Join(l.binDir, file)
+	}
+	if !l.inside(file) {
+		return file, rowFileOutside
+	}
+	resolved, err := filepath.EvalSymlinks(file)
+	switch {
+	case os.IsNotExist(err):
+		return file, rowFileMissing
+	case err != nil:
+		return file, rowFileThere // there, but b cannot follow it
+	case !l.inside(resolved):
+		return file, rowFileOutside
+	}
+	return resolved, rowFileThere
+}
+
+// inside reports whether file is in one of the roots.
+func (l lockFiles) inside(file string) bool {
+	for _, root := range l.roots {
+		rel, err := filepath.Rel(root, file)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// errNotRegular is the error of regularFileSHA256 for a file that is not a
+// regular file.
+var errNotRegular = errors.New("not a regular file")
+
+// regularFileSHA256 is the sha256 of the regular file at file. It opens the
+// file without blocking (a FIFO does not block it) and reads it only when
+// it is a regular file; else it returns errNotRegular.
+func regularFileSHA256(file string) (string, error) {
+	f, err := os.OpenFile(file, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !fi.Mode().IsRegular() {
+		return "", errNotRegular
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // entryFileName is the name of the file that a b.yaml entry installs, the
@@ -238,14 +325,16 @@ func lockFileNames(cfg *state.State, binaries []*binary.Binary) map[string]bool 
 
 // describesNoFile reports whether the b.lock row of that name describes no
 // file: keep (the files that b.yaml installs) has no file of that name, and
-// the file of the row (lockRowFile) is not there. A row of a file that is
-// there can describe it, also without a b.yaml entry.
-func describesNoFile(name string, keep map[string]bool, binDir string) bool {
+// no file is at the path of the row (find: missing, also a dangling
+// symlink). A row of a file that is there can describe it, also without a
+// b.yaml entry; so can a row whose file b does not read (outside the
+// roots).
+func (l lockFiles) describesNoFile(name string, keep map[string]bool) bool {
 	if name == "" || keep[name] {
 		return false
 	}
-	_, err := os.Lstat(lockRowFile(binDir, name))
-	return os.IsNotExist(err)
+	_, state := l.find(name)
+	return state == rowFileMissing
 }
 
 // moveOldLockRows moves each row that an older b wrote for one of the
@@ -254,7 +343,7 @@ func describesNoFile(name string, keep map[string]bool, binDir string) bool {
 // old name stays when it can also describe another file: a b.yaml entry or
 // a binary of this run installs a file of that name (stay), or the file is
 // there (describesNoFile). It reports whether it changed lk.
-func moveOldLockRows(lk *lock.Lock, binaries []*binary.Binary, stay map[string]bool, binDir string) bool {
+func moveOldLockRows(lk *lock.Lock, binaries []*binary.Binary, stay map[string]bool, files lockFiles) bool {
 	old := map[string]bool{}
 	for _, b := range binaries {
 		e, rowName := findLockRow(lk, b)
@@ -270,7 +359,7 @@ func moveOldLockRows(lk *lock.Lock, binaries []*binary.Binary, stay map[string]b
 	// Remove the old rows after all moves: one old row can be the row of
 	// two files with the same content.
 	for name := range old {
-		if describesNoFile(name, stay, binDir) {
+		if files.describesNoFile(name, stay) {
 			lk.RemoveBinary(name)
 		}
 	}
@@ -283,7 +372,7 @@ func moveOldLockRows(lk *lock.Lock, binaries []*binary.Binary, stay map[string]b
 // the files are the ones that the rows describe, and before any prune: a
 // row under an old name describes no file, and a prune would remove it.
 func (o *SharedOptions) moveOldRows(lk *lock.Lock, binaries []*binary.Binary) {
-	if !moveOldLockRows(lk, binaries, lockFileNames(o.Config, binaries), path.GetBinaryPath()) {
+	if !moveOldLockRows(lk, binaries, lockFileNames(o.Config, binaries), o.lockFiles()) {
 		return
 	}
 	if err := lock.WriteLock(o.LockDir(), lk, o.bVersion); err != nil {
@@ -313,10 +402,11 @@ func (o *SharedOptions) pruneLock() ([]string, error) {
 		return nil, err
 	}
 	installed := lockFileNames(o.Config, nil)
+	files := o.lockFiles()
 	var removed []string
 	kept := lk.Binaries[:0]
 	for _, e := range lk.Binaries {
-		if describesNoFile(e.Name, installed, binDir) {
+		if files.describesNoFile(e.Name, installed) {
 			removed = append(removed, e.Name)
 			continue
 		}

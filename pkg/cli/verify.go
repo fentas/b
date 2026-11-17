@@ -55,7 +55,10 @@ func (o *VerifyOptions) Run() error {
 
 	failures := 0
 
-	// Verify binaries
+	// Verify binaries. b reads only the regular file of a row inside the
+	// project, the directory of b.yaml or the binary directory (lockFiles).
+	// A dangling symlink is a missing file.
+	files := o.lockFiles()
 	for _, entry := range lk.Binaries {
 		binPath := path.GetBinaryPath()
 		if binPath == "" {
@@ -63,13 +66,18 @@ func (o *VerifyOptions) Run() error {
 			failures++
 			continue
 		}
-		filePath := lockRowFile(binPath, entry.Name)
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		filePath, state := files.find(entry.Name)
+		switch state {
+		case rowFileMissing:
 			fmt.Fprintf(o.IO.Out, "  %-40s ✗ missing\n", entry.Name)
 			failures++
 			continue
+		case rowFileOutside:
+			fmt.Fprintf(o.IO.Out, "  %-40s ✗ outside the project and the binary directory (not read)\n", entry.Name)
+			failures++
+			continue
 		}
-		hash, err := lock.SHA256File(filePath)
+		hash, err := regularFileSHA256(filePath)
 		if err != nil {
 			fmt.Fprintf(o.IO.Out, "  %-40s ✗ %v\n", entry.Name, err)
 			failures++

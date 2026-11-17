@@ -58,7 +58,7 @@ steps:
 
 For each entry in `b.lock`:
 
-- **Binaries**: Computes SHA-256 of the installed binary file and compares against the lock checksum
+- **Binaries**: Computes SHA-256 of the installed binary file and compares against the lock checksum. The name of the row is the path of the file relative to `.bin`. b reads only a regular file inside the project, the directory of b.yaml or `.bin`: it reports a row outside them as `outside the project and the binary directory (not read)`, and a directory or a FIFO as `not a regular file`. It follows a symlink; a dangling symlink is a missing file.
 - **Env files**: Computes SHA-256 of each synced file at its destination path and compares against the lock checksum
 
 A mismatch means the file on disk differs from what was last synced — either due to local edits, corruption, or a missing file.
