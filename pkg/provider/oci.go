@@ -105,8 +105,9 @@ func (o *OCI) ResolveDigest(ref, version string) (string, error) {
 }
 
 // Install pulls a platform-matching image manifest and extracts a single
-// binary file without invoking any container runtime.
-func (o *OCI) Install(ref, version, destDir string) (string, error) {
+// binary file to the file dest without invoking any container runtime. The
+// caller picks dest: the file that the b.yaml entry names.
+func (o *OCI) Install(ref, version, dest string) error {
 	rest := strings.TrimPrefix(ref, "oci://")
 	image, refTag, inContainerPath := ParseImageRef(rest)
 
@@ -121,7 +122,7 @@ func (o *OCI) Install(ref, version, destDir string) (string, error) {
 
 	nameRef, err := name.ParseReference(image + ":" + tag)
 	if err != nil {
-		return "", fmt.Errorf("parsing image ref %s:%s: %w", image, tag, err)
+		return fmt.Errorf("parsing image ref %s:%s: %w", image, tag, err)
 	}
 
 	// remote.Image handles manifest-list/index resolution internally using the
@@ -135,7 +136,7 @@ func (o *OCI) Install(ref, version, destDir string) (string, error) {
 		}),
 	)
 	if err != nil {
-		return "", fmt.Errorf("fetching image %s: %w", nameRef, err)
+		return fmt.Errorf("fetching image %s: %w", nameRef, err)
 	}
 
 	// Determine which paths to try inside the image.
@@ -151,14 +152,13 @@ func (o *OCI) Install(ref, version, destDir string) (string, error) {
 		}
 	}
 
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return "", err
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return err
 	}
-	dest := filepath.Join(destDir, binName)
 
 	layers, err := img.Layers()
 	if err != nil {
-		return "", fmt.Errorf("reading layers: %w", err)
+		return fmt.Errorf("reading layers: %w", err)
 	}
 	// Walk layers newest-first so later overrides win. Track OCI whiteouts
 	// from newer layers so we don't resurrect a file deleted in the final image.
@@ -166,14 +166,14 @@ func (o *OCI) Install(ref, version, destDir string) (string, error) {
 	for i := len(layers) - 1; i >= 0; i-- {
 		found, err := extractBinaryFromLayer(layers[i], searchPaths, dest, whiteouts)
 		if err != nil {
-			return "", err
+			return err
 		}
 		if found {
-			return dest, nil
+			return nil
 		}
 	}
 
-	return "", fmt.Errorf("binary %q not found in image %s at paths: %v", binName, nameRef, searchPaths)
+	return fmt.Errorf("binary %q not found in image %s at paths: %v", binName, nameRef, searchPaths)
 }
 
 // extractBinaryFromLayer scans a layer's tar stream once, looking for any of

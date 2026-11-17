@@ -31,10 +31,12 @@ func (g *GoInstall) FetchRelease(ref, version string) (*Release, error) {
 	return nil, fmt.Errorf("go install provider does not use FetchRelease; use Install()")
 }
 
-// Install compiles the module and returns the path to the compiled binary.
-func (g *GoInstall) Install(ref, version, destDir string) (string, error) {
+// Install compiles the module with `go install` and writes the binary to
+// the file dest (installFile). The caller picks dest: the file that the
+// b.yaml entry names.
+func (g *GoInstall) Install(ref, version, dest string) error {
 	if _, err := exec.LookPath("go"); err != nil {
-		return "", fmt.Errorf("go not found on PATH (required for go:// provider)")
+		return fmt.Errorf("go not found on PATH (required for go:// provider)")
 	}
 
 	module := goModule(ref)
@@ -45,7 +47,7 @@ func (g *GoInstall) Install(ref, version, destDir string) (string, error) {
 	// Create a temporary GOBIN
 	tmpDir, err := os.MkdirTemp("", "b-goinstall-*")
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer os.RemoveAll(tmpDir)
 
@@ -54,40 +56,32 @@ func (g *GoInstall) Install(ref, version, destDir string) (string, error) {
 	cmd.Env = append(os.Environ(), "GOBIN="+tmpDir)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("go install %s: %w", installArg, err)
+		return fmt.Errorf("go install %s: %w", installArg, err)
 	}
 
-	// Find the compiled binary (last segment of module path)
+	// Find the compiled binary: go install names it after the package
+	// (BinaryName). Else take the only file in GOBIN.
 	name := BinaryName(ref)
 	compiled := filepath.Join(tmpDir, name)
 	if _, err := os.Stat(compiled); err != nil {
-		// Try to find any executable in tmpDir
 		entries, _ := os.ReadDir(tmpDir)
-		if len(entries) == 1 {
-			compiled = filepath.Join(tmpDir, entries[0].Name())
-			name = entries[0].Name()
-		} else {
-			return "", fmt.Errorf("compiled binary %q not found in GOBIN", name)
+		if len(entries) != 1 {
+			return fmt.Errorf("compiled binary %q not found in GOBIN", name)
 		}
+		compiled = filepath.Join(tmpDir, entries[0].Name())
 	}
 
-	// Move to dest
-	dest := filepath.Join(destDir, name)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return "", err
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return err
 	}
 
 	// Copy, not rename: GOBIN can be on another filesystem.
 	src, err := os.Open(compiled)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer src.Close()
-	if err := installFile(dest, src); err != nil {
-		return "", err
-	}
-
-	return dest, nil
+	return installFile(dest, src)
 }
 
 func goModule(ref string) string {

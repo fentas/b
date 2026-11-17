@@ -239,7 +239,8 @@ func regularFileSHA256(file string) (string, error) {
 // name of its b.lock row: lockName of the entry's binary. A provider ref
 // has the binary name from the ref and its alias; a preset entry has its
 // own name as the alias (resolveBinary), the name of an alias entry is the
-// alias.
+// alias. Each provider writes the file of this name (BinaryPath), also the
+// providers that install the file themselves (go, git, docker, oci).
 func entryFileName(e *binary.LocalBinary) string {
 	b := &binary.Binary{Alias: e.Name, File: e.File, FileAsWritten: e.FileAsWritten}
 	if e.IsProviderRef {

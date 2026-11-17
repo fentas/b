@@ -74,13 +74,15 @@ func (d *Docker) ResolveDigest(ref, version string) (string, error) {
 	return desc.Digest.String(), nil
 }
 
-// Install pulls the image, creates a container, copies the binary out, and cleans up.
-// searchPaths are the paths to search for the binary inside the container.
-// If the ref includes ":/<path>", that path is used as the single search path.
-func (d *Docker) Install(ref, version, destDir string, searchPaths []string) (string, error) {
+// Install pulls the image, creates a container, copies the binary out to
+// the file dest (installFile), and cleans up. The caller picks dest: the
+// file that the b.yaml entry names. searchPaths are the paths to search
+// for the binary inside the container. If the ref includes ":/<path>",
+// that path is used as the single search path.
+func (d *Docker) Install(ref, version, dest string, searchPaths []string) error {
 	runtime, err := detectContainerRuntime()
 	if err != nil {
-		return "", err
+		return err
 	}
 
 	rest := strings.TrimPrefix(ref, "docker://")
@@ -100,13 +102,13 @@ func (d *Docker) Install(ref, version, destDir string, searchPaths []string) (st
 	cmd := exec.Command(runtime, "pull", imageRef)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("pulling image %s: %w", imageRef, err)
+		return fmt.Errorf("pulling image %s: %w", imageRef, err)
 	}
 
 	// Create container (don't start it)
 	out, err := exec.Command(runtime, "create", imageRef).Output()
 	if err != nil {
-		return "", fmt.Errorf("creating container from %s: %w", imageRef, err)
+		return fmt.Errorf("creating container from %s: %w", imageRef, err)
 	}
 	containerID := strings.TrimSpace(string(out))
 	defer exec.Command(runtime, "rm", containerID).Run()
@@ -123,16 +125,15 @@ func (d *Docker) Install(ref, version, destDir string, searchPaths []string) (st
 		}
 	}
 
-	dest := filepath.Join(destDir, name)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return "", err
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return err
 	}
 
 	// The cp command writes its target in place. So it copies the binary
 	// to a temp directory, and installFile replaces dest in one step.
 	tmpDir, err := os.MkdirTemp("", "b-docker-cp-*")
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer os.RemoveAll(tmpDir)
 	copied := filepath.Join(tmpDir, name)
@@ -153,24 +154,21 @@ func (d *Docker) Install(ref, version, destDir string, searchPaths []string) (st
 		// Found it
 		fi, err := os.Lstat(copied)
 		if err != nil {
-			return "", err
+			return err
 		}
 		if !fi.Mode().IsRegular() {
-			return "", fmt.Errorf("%s in image %s is not a regular file (%s copied a symlink or a directory)", p, imageRef, runtime)
+			return fmt.Errorf("%s in image %s is not a regular file (%s copied a symlink or a directory)", p, imageRef, runtime)
 		}
 		src, err := os.Open(copied)
 		if err != nil {
-			return "", err
+			return err
 		}
 		err = installFile(dest, src)
 		src.Close()
-		if err != nil {
-			return "", err
-		}
-		return dest, nil
+		return err
 	}
 
-	return "", fmt.Errorf("binary %q not found in image %s at paths: %v", name, imageRef, searchPaths)
+	return fmt.Errorf("binary %q not found in image %s at paths: %v", name, imageRef, searchPaths)
 }
 
 // dockerImage returns the image name (without tag/path) for legacy callers

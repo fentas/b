@@ -81,9 +81,8 @@ func TestGit_LatestVersion_Local(t *testing.T) {
 	}
 
 	// Install local
-	dest := t.TempDir()
-	out, err := g.Install(ref, "", dest)
-	if err != nil {
+	out := filepath.Join(t.TempDir(), "script.sh")
+	if err := g.Install(ref, "", out); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 	if _, err := os.Stat(out); err != nil {
@@ -124,7 +123,7 @@ func TestGoInstall_Install_MissingGo(t *testing.T) {
 	defer os.Setenv("PATH", oldPath)
 	os.Setenv("PATH", "/nonexistent")
 	g := &GoInstall{}
-	if _, err := g.Install("go://example.com/foo", "latest", t.TempDir()); err == nil {
+	if err := g.Install("go://example.com/foo", "latest", filepath.Join(t.TempDir(), "foo")); err == nil {
 		t.Error("expected no-go error")
 	}
 }
@@ -496,7 +495,7 @@ func TestDocker_Install_NoRuntime(t *testing.T) {
 	defer os.Setenv("PATH", oldPath)
 	os.Setenv("PATH", "/nonexistent")
 	d := &Docker{}
-	if _, err := d.Install("docker://x/y", "latest", t.TempDir(), nil); err == nil {
+	if err := d.Install("docker://x/y", "latest", filepath.Join(t.TempDir(), "y"), nil); err == nil {
 		t.Error("expected no-runtime error")
 	}
 }

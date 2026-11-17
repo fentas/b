@@ -208,41 +208,24 @@ func (b *Binary) downloadViaProvider() error {
 		return err
 	}
 
-	destDir := filepath.Dir(b.BinaryPath())
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	// Each provider writes the file of b (BinaryPath): its `file:`, else its
+	// alias or its name in the binary directory. b.yaml and b.lock name
+	// that file.
+	dest := b.BinaryPath()
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return err
 	}
 
 	// Special providers that compile/extract directly
 	switch pt := p.(type) {
 	case *provider.GoInstall:
-		path, err := pt.Install(b.ProviderRef, b.Version, destDir)
-		if err != nil {
-			return err
-		}
-		b.File = path
-		return nil
+		return pt.Install(b.ProviderRef, b.Version, dest)
 	case *provider.Docker:
-		path, err := pt.Install(b.ProviderRef, b.Version, destDir, nil)
-		if err != nil {
-			return err
-		}
-		b.File = path
-		return nil
+		return pt.Install(b.ProviderRef, b.Version, dest, nil)
 	case *provider.OCI:
-		path, err := pt.Install(b.ProviderRef, b.Version, destDir)
-		if err != nil {
-			return err
-		}
-		b.File = path
-		return nil
+		return pt.Install(b.ProviderRef, b.Version, dest)
 	case *provider.Git:
-		path, err := pt.Install(b.ProviderRef, b.Version, destDir)
-		if err != nil {
-			return err
-		}
-		b.File = path
-		return nil
+		return pt.Install(b.ProviderRef, b.Version, dest)
 	}
 
 	// If asset was pre-resolved (e.g. via interactive prompt before download),
