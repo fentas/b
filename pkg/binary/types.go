@@ -33,7 +33,7 @@ type Binary struct {
 	Alias         string          `json:"-"`
 	Name          string          `json:"name" yaml:"name"`
 	File          string          `json:"-"`
-	FileAsWritten string          `json:"-"` // the `file:` of the b.yaml entry as b.yaml writes it (LocalBinary.FileAsWritten)
+	FileAsWritten string          `json:"-" yaml:"-"` // the `file:` of the b.yaml entry as b.yaml writes it (LocalBinary.FileAsWritten)
 	IsTarGz       bool            `json:"-"`
 	IsTarXz       bool            `json:"-"`
 	IsZip         bool            `json:"-"`
