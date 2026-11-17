@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/lock"
 	"github.com/fentas/b/pkg/state"
+	"github.com/fentas/goodies/streams"
 )
 
 // pinsFixture is a project with a .bin directory, a b.yaml, and a release
@@ -115,7 +117,14 @@ func (f *pinsFixture) run(t *testing.T, force bool, args ...string) error {
 // gives (--add, --on-post, ...), and returns the error of Run.
 func (f *pinsFixture) runWith(t *testing.T, set func(*InstallOptions), args ...string) error {
 	t.Helper()
-	shared := NewSharedOptions(mkIO(), f.presets())
+	// Run installs the binaries in parallel, and each goroutine writes to
+	// IO.ErrOut (an onPost hook's output, a hook warning). The CLI's
+	// os.Stderr takes concurrent writes; a bytes.Buffer does not.
+	shared := NewSharedOptions(&streams.IO{
+		In:     strings.NewReader(""),
+		Out:    &syncWriter{w: &bytes.Buffer{}},
+		ErrOut: &syncWriter{w: &bytes.Buffer{}},
+	}, f.presets())
 	shared.ConfigPath = f.config
 	if err := shared.LoadConfig(); err != nil {
 		t.Fatal(err)
