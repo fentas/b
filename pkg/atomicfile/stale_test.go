@@ -154,7 +154,7 @@ func TestIsTemp_MatchesTheTempFilesOfCreate(t *testing.T) {
 // only them: the files of other names, a directory and a symlink with a
 // temp file name, and the file itself stay.
 func TestRemoveStale_RemovesOnlyStaleTempFilesOfTheFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := realTempDir(t)
 	path := filepath.Join(dir, "tool")
 	mustWrite := func(name string) {
 		t.Helper()
@@ -202,6 +202,18 @@ func TestRemoveStale_RemovesOnlyStaleTempFilesOfTheFile(t *testing.T) {
 
 // A temp file that a write uses (Create holds its lock) stays, also when
 // this process made it: a flock belongs to an open file.
+// realTempDir is t.TempDir with its symlinks resolved. RemoveStale looks
+// beside the resolved target and names the files there; on macOS the temp
+// dir is under /var, a symlink to /private/var.
+func realTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func TestRemoveStale_KeepsATempFileInUse(t *testing.T) {
 	if !Lockable {
 		t.Skip("no flock here")
@@ -244,7 +256,7 @@ func TestRemoveStale_ASymlinkLooksBesideTheTarget(t *testing.T) {
 	if !Lockable {
 		t.Skip("no flock here")
 	}
-	real, links := t.TempDir(), t.TempDir()
+	real, links := realTempDir(t), realTempDir(t)
 	target := filepath.Join(real, "tool-1.0")
 	if err := os.WriteFile(target, []byte("old"), 0755); err != nil {
 		t.Fatal(err)
