@@ -105,6 +105,10 @@ func (f *pinsFixture) verify(t *testing.T) error {
 	t.Helper()
 	shared := NewSharedOptions(mkIO(), f.presets())
 	shared.ConfigPath = f.config
+	// The root command loads b.yaml for each subcommand.
+	if err := shared.LoadConfig(); err != nil {
+		return err
+	}
 	return (&VerifyOptions{SharedOptions: shared}).Run()
 }
 
@@ -723,8 +727,11 @@ func TestInstall_AddRefusesASecondEntryOfOneFile(t *testing.T) {
 // file are named, sorted. The file is the path relative to the binary
 // directory.
 func TestCheckConfigFiles(t *testing.T) {
-	dir := t.TempDir()
+	project := t.TempDir()
+	dir := filepath.Join(project, ".bin")
+	mustMkdir(t, dir)
 	t.Setenv("PATH_BIN", dir)
+	t.Setenv("PATH_BASE", project)
 	ok := "binaries:\n  tool: {}\n  t2:\n    alias: tool\n  github.com/org/repo: {}\n  github.com/org/repo/cli:\n    alias: cli\n  github.com/org/other:\n    alias: other2\n"
 	three := "binaries:\n  github.com/c/tool: {}\n  github.com/a/tool: {}\n  github.com/b/x:\n    alias: tool\n"
 	files := "binaries:\n  github.com/a/tool:\n    file: ../a/tool\n  github.com/b/tool:\n    file: ../b/tool\n"
@@ -825,6 +832,66 @@ func TestInstall_PresetDoesNotTakeTheRowOfARef(t *testing.T) {
 		t.Errorf("b.lock row tool: %+v, want it unchanged: %+v", e, ref)
 	}
 	f.checkRow(t, lk, "t2", "tool v3.0.0\n", "v3.0.0")
+}
+
+// TestInstall_AbsoluteFileHasOneRowInEachCheckout: a b.yaml entry with an
+// absolute `file:` outside the project has a row under the absolute path of
+// the file. The name does not depend on the directory of the checkout: a
+// second checkout at another depth with the same b.yaml and b.lock finds
+// the row, downloads nothing and adds no row. b verify reads the file,
+// because b.yaml installs it. When the entry and the file are gone, the
+// prune removes the row.
+func TestInstall_AbsoluteFileHasOneRowInEachCheckout(t *testing.T) {
+	f := newPinsFixture(t)
+	outDir := t.TempDir()
+	file := filepath.Join(outDir, "custom-tool")
+	cfg := []byte("binaries:\n  tool:\n    version: v2.0.0\n    file: " + file + "\n")
+	mustWrite(t, f.config, cfg)
+	f.install(t, false)
+	realOut, err := filepath.EvalSymlinks(outDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.ToSlash(filepath.Join(realOut, "custom-tool"))
+	if got := f.rowNames(t); got != want {
+		t.Fatalf("b.lock rows: %q, want %q", got, want)
+	}
+	if err := f.verify(t); err != nil {
+		t.Errorf("b verify: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(f.binDir, "b.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deep := filepath.Join(t.TempDir(), "x", "y", "proj")
+	f.dir, f.binDir = deep, filepath.Join(deep, ".bin")
+	f.config = filepath.Join(f.binDir, "b.yaml")
+	mustMkdir(t, f.binDir)
+	mustWrite(t, f.config, cfg)
+	mustWrite(t, filepath.Join(f.binDir, "b.lock"), data)
+	t.Setenv("PATH_BIN", f.binDir)
+	t.Setenv("PATH_BASE", f.dir)
+	f.hits.Store(0)
+	f.install(t, false)
+	if n := f.hits.Load(); n != 0 {
+		t.Errorf("the install in the second checkout: %d downloads, want 0", n)
+	}
+	if got := f.rowNames(t); got != want {
+		t.Errorf("b.lock rows in the second checkout: %q, want %q", got, want)
+	}
+	if err := f.verify(t); err != nil {
+		t.Errorf("b verify in the second checkout: %v", err)
+	}
+
+	mustWrite(t, f.config, []byte("binaries: {}\n"))
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	f.install(t, false)
+	if got := f.rowNames(t); got != "" {
+		t.Errorf("b.lock rows without the entry and the file: %q, want none", got)
+	}
 }
 
 // TestInstall_OldRowOfAnotherPresetIsDownloaded: b.yaml changed the entry

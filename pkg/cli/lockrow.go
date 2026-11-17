@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 
 	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/lock"
@@ -22,11 +21,12 @@ import (
 // A b.lock row describes one installed file. Its name is the path of the
 // file relative to the binary directory (fileName, lockName): for a file in
 // that directory its name, the alias of the binary when it has one, else the
-// name of the binary; for a file that b.yaml puts elsewhere (`file:`) a path
-// such as ../tools/x. So each b.yaml entry has its own row, also when two
-// entries install the same preset or two provider refs have the same binary
-// name. b verify and the prune find the file of each row by that name
-// (lockRowFile).
+// name of the binary; for a file that b.yaml puts elsewhere in the project
+// (`file:`) a path such as ../tools/x; for a file outside the project its
+// absolute path. So each b.yaml entry has its own row, also when two entries
+// install the same preset or two provider refs have the same binary name.
+// b verify and the prune find the file of each row by that name
+// (lockFiles).
 //
 // Older versions of b wrote some rows under another name: the name of the
 // binary for an alias entry of a preset (before alias rows) and for a
@@ -38,12 +38,17 @@ import (
 // file. So a row that moved does not cause a download. The row under the old
 // name stays while it can describe a file (describesNoFile).
 
-// fileName is the name of the b.lock row of the file at file: the path of
-// the file relative to the binary directory, with "/" as separator. For a
-// file in the binary directory that is its name. When file is "", the file
-// is the one of that name in the binary directory. The path is the one
-// between the real directories (realDir): a project reached through a
-// symlink gives the same name as through its real path.
+// fileName is the name of the b.lock row of the file at file, with "/" as
+// separator: the path of the file relative to the binary directory when the
+// file is in the binary directory, or when the file and the binary
+// directory are in the project (projectRoot); else the absolute path of the
+// file. So the name does not depend on the directory of a checkout of the
+// project: a relative path between two directories of the project, or the
+// path of a file outside it, is the same in each checkout. For a file in
+// the binary directory the name is its name. When file is "", the file is
+// the one of that name in the binary directory. The paths are the ones of
+// the real directories (realDir): a project reached through a symlink gives
+// the same name as through its real path.
 func fileName(file, name string) string {
 	if file == "" {
 		return name
@@ -53,10 +58,24 @@ func fileName(file, name string) string {
 		return filepath.Base(file)
 	}
 	resolved := filepath.Join(realDir(filepath.Dir(file)), filepath.Base(file))
-	if rel, err := filepath.Rel(realDir(binDir), resolved); err == nil {
-		return filepath.ToSlash(rel)
+	realBin := realDir(binDir)
+	inProject := false
+	if root := projectRoot(); root != "" {
+		root = realDir(root)
+		inProject = within(root, resolved) && within(root, realBin)
+	}
+	if within(realBin, resolved) || inProject {
+		if rel, err := filepath.Rel(realBin, resolved); err == nil {
+			return filepath.ToSlash(rel)
+		}
 	}
 	return filepath.ToSlash(resolved)
+}
+
+// within reports whether file is dir or in dir. Both are absolute and clean.
+func within(dir, file string) bool {
+	rel, err := filepath.Rel(dir, file)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // realDir is the absolute path of the directory dir with its symlinks
@@ -83,18 +102,21 @@ func realDir(dir string) string {
 }
 
 // lockFiles finds the files of b.lock rows. The name of a row is the path
-// of its file relative to the binary directory (fileName). b reads a file
-// of a row only inside the roots: the project, the directory of b.yaml and
-// the binary directory. A crafted name can make b read no other file.
+// of its file relative to the binary directory, or an absolute path
+// (fileName). b reads the file of a row only inside the roots (the project,
+// the directory of b.yaml and the binary directory), or when a b.yaml entry
+// installs the file of that row (named: for example an absolute `file:`).
+// A crafted name can make b read no other file.
 type lockFiles struct {
-	binDir string   // the binary directory, its symlinks resolved
-	roots  []string // their symlinks resolved
+	binDir string          // the binary directory, its symlinks resolved
+	roots  []string        // their symlinks resolved
+	named  map[string]bool // the rows of the files that b.yaml installs
 }
 
-// lockFiles is the lockFiles of this project.
+// lockFiles is the lockFiles of this project and its b.yaml.
 func (o *SharedOptions) lockFiles() lockFiles {
 	binDir := path.GetBinaryPath()
-	l := lockFiles{binDir: realDir(binDir)}
+	l := lockFiles{binDir: realDir(binDir), named: lockFileNames(o.Config)}
 	for _, root := range []string{binDir, o.LockDir(), o.ProjectRoot()} {
 		if root != "" {
 			l.roots = append(l.roots, realDir(root))
@@ -107,40 +129,42 @@ func (o *SharedOptions) lockFiles() lockFiles {
 type rowFileState int
 
 const (
-	rowFileMissing rowFileState = iota // no file, also a dangling symlink
-	rowFileOutside                     // outside the roots: b does not read it
-	rowFileThere                       // a file inside the roots, of any type
+	rowFileMissing rowFileState = iota // no file (brokenPath), also a dangling symlink
+	rowFileOutside                     // a file that b does not read: outside the roots, not named
+	rowFileThere                       // a file that b can read, of any type
+	rowFileUnknown                     // b cannot follow the path (for example no permission)
 )
 
-// find is the file of the b.lock row of that name, and its state. It
-// follows symlinks, as b verify reads a file: a symlink to a file inside
-// the roots is that file, a symlink to a file outside them is outside, and
-// a dangling symlink is no file. It does not open the file.
-func (l lockFiles) find(name string) (string, rowFileState) {
+// find is the file of the b.lock row of that name, its state, and for
+// rowFileUnknown the error. It follows symlinks, as b verify reads a file:
+// a symlink to a file inside the roots is that file, a symlink to a file
+// outside them is outside, and a dangling symlink, a symlink loop or a path
+// through a file (plain/sub) is no file. It does not open the file: the
+// prune can find out whether the file of a row outside the roots is there.
+func (l lockFiles) find(name string) (string, rowFileState, error) {
 	file := filepath.FromSlash(name)
 	if !filepath.IsAbs(file) {
 		file = filepath.Join(l.binDir, file)
 	}
-	if !l.inside(file) {
-		return file, rowFileOutside
-	}
+	file = filepath.Clean(file)
 	resolved, err := filepath.EvalSymlinks(file)
-	switch {
-	case os.IsNotExist(err):
-		return file, rowFileMissing
-	case err != nil:
-		return file, rowFileThere // there, but b cannot follow it
-	case !l.inside(resolved):
-		return file, rowFileOutside
+	if err != nil {
+		// EvalSymlinks gives no error number for a loop; os.Stat does.
+		if _, statErr := os.Stat(file); statErr == nil || !brokenPath(statErr) {
+			return file, rowFileUnknown, err
+		}
+		return file, rowFileMissing, nil
 	}
-	return resolved, rowFileThere
+	if !l.named[name] && !l.inside(resolved) {
+		return file, rowFileOutside, nil
+	}
+	return resolved, rowFileThere, nil
 }
 
 // inside reports whether file is in one of the roots.
 func (l lockFiles) inside(file string) bool {
 	for _, root := range l.roots {
-		rel, err := filepath.Rel(root, file)
-		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if within(root, file) {
 			return true
 		}
 	}
@@ -151,11 +175,31 @@ func (l lockFiles) inside(file string) bool {
 // regular file.
 var errNotRegular = errors.New("not a regular file")
 
-// regularFileSHA256 is the sha256 of the regular file at file. It opens the
-// file without blocking (a FIFO does not block it) and reads it only when
-// it is a regular file; else it returns errNotRegular.
+// fileSHA256 is the sha256 of the regular file at file, through its
+// symlinks (regularFileSHA256).
+func fileSHA256(file string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(file)
+	if err != nil {
+		return "", err
+	}
+	return regularFileSHA256(resolved)
+}
+
+// regularFileSHA256 is the sha256 of the regular file at file, a path
+// without symlinks. It reads only a regular file, else it returns
+// errNotRegular: it checks the type before it opens the file (so it does
+// not open a device or a FIFO), it opens the file without blocking and
+// without following a symlink (openFlags), and it checks again that the
+// open file is that regular file.
 func regularFileSHA256(file string) (string, error) {
-	f, err := os.OpenFile(file, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	before, err := os.Lstat(file)
+	if err != nil {
+		return "", err
+	}
+	if !before.Mode().IsRegular() {
+		return "", errNotRegular
+	}
+	f, err := os.OpenFile(file, os.O_RDONLY|openFlags, 0)
 	if err != nil {
 		return "", err
 	}
@@ -164,7 +208,7 @@ func regularFileSHA256(file string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !fi.Mode().IsRegular() {
+	if !fi.Mode().IsRegular() || !os.SameFile(before, fi) {
 		return "", errNotRegular
 	}
 	h := sha256.New()
@@ -240,12 +284,12 @@ func joinNames(names []string) string {
 
 // describesFile reports whether the b.lock row e describes the file at file:
 // its sha256 is the sha256 of the file. Only then does b trust the version
-// of the row.
+// of the row. It reads only a regular file (fileSHA256).
 func describesFile(e *lock.BinEntry, file string) bool {
 	if e == nil || e.SHA256 == "" {
 		return false
 	}
-	hash, err := lock.SHA256File(file)
+	hash, err := fileSHA256(file)
 	return err == nil && hash == e.SHA256
 }
 
@@ -337,14 +381,15 @@ func lockFileNames(cfg *state.State) map[string]bool {
 // describesNoFile reports whether the b.lock row of that name describes no
 // file: keep (the files that b.yaml installs) has no file of that name, and
 // no file is at the path of the row (find: missing, also a dangling
-// symlink). A row of a file that is there can describe it, also without a
-// b.yaml entry; so can a row whose file b does not read (outside the
-// roots).
+// symlink, a symlink loop or a path through a file). This is also true for
+// a row outside the roots: find only finds out whether its file is there.
+// A row of a file that is there can describe it, also without a b.yaml
+// entry; so can a row whose path b cannot follow.
 func (l lockFiles) describesNoFile(name string, keep map[string]bool) bool {
 	if name == "" || keep[name] {
 		return false
 	}
-	_, state := l.find(name)
+	_, state, _ := l.find(name)
 	return state == rowFileMissing
 }
 

@@ -120,11 +120,18 @@ func TestUpdateLock_FollowsThePlan(t *testing.T) {
 
 // TestLockName: a b.lock row has the name of the installed file: the alias
 // of the binary when it has one (an alias entry of a preset, a provider ref
-// with an alias), else the name of the binary.
+// with an alias), else the name of the binary. A file elsewhere in the
+// project has its path relative to the binary directory, a file outside the
+// project its absolute path.
 func TestLockName(t *testing.T) {
 	dir := t.TempDir()
 	binDir := filepath.Join(dir, ".bin")
 	t.Setenv("PATH_BIN", binDir)
+	t.Setenv("PATH_BASE", dir)
+	outside, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name string
 		b    *binary.Binary
@@ -136,6 +143,7 @@ func TestLockName(t *testing.T) {
 		{"a provider ref with an alias", &binary.Binary{Name: "tool", Alias: "t", AutoDetect: true, ProviderRef: "github.com/org/tool"}, "t"},
 		{"a file in the binary directory", &binary.Binary{Name: "tool", Alias: "t", File: filepath.Join(binDir, "t")}, "t"},
 		{"a file elsewhere", &binary.Binary{Name: "tool", Alias: "t", File: filepath.Join(dir, "tools", "x")}, "../tools/x"},
+		{"a file outside the project", &binary.Binary{Name: "tool", Alias: "t", File: filepath.Join(outside, "x")}, filepath.ToSlash(filepath.Join(outside, "x"))},
 	} {
 		if got := lockName(tc.b); got != tc.want {
 			t.Errorf("%s: lockName = %q, want %q", tc.name, got, tc.want)
