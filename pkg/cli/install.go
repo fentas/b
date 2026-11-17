@@ -221,7 +221,9 @@ func (o *InstallOptions) Complete(args []string) error {
 		}
 
 		// --alias overrides; without it, the alias of the b.yaml entry stays.
-		// An --alias that already names another binary is refused. A preset
+		// An --alias that already names another binary is refused: an entry
+		// of another binary always, another preset without an entry unless
+		// --force (its file is then overwritten). A preset
 		// installed under --alias is the binary of the entry of that name
 		// (the one --add writes): it takes that entry's settings as the
 		// no-argument install does (version, enforced pin, file, onPost).
@@ -232,6 +234,9 @@ func (o *InstallOptions) Complete(args []string) error {
 		if o.Alias != "" {
 			if e := o.aliasOwner(b); e != nil {
 				return fmt.Errorf("--alias %s: the b.yaml entry %s is another binary, not %s\n  Hint: pick another alias, or install %s by its own name", o.Alias, e.Name, b.Name, e.Name)
+			}
+			if o.aliasPreset(b) && !o.Force {
+				return fmt.Errorf("--alias %s: %s is the preset %s, another binary than %s\n  Hint: pick another alias, or add --force to install %s over the file of %s", o.Alias, o.Alias, o.Alias, b.Name, b.Name, o.Alias)
 			}
 			if !isProviderRef(b) {
 				b.File = ""
@@ -335,6 +340,21 @@ func (o *InstallOptions) aliasOwner(b *binary.Binary) *binary.LocalBinary {
 		}
 	}
 	return nil
+}
+
+// aliasPreset reports whether the name --alias is the name of another preset
+// that has no b.yaml entry of that name: a preset of that name other than
+// b's own (for a provider ref b: any preset of that name). Its binary
+// installs at that name, so the alias would take its file. When b.yaml has
+// an entry of that name, the entry decides (aliasOwner).
+func (o *InstallOptions) aliasPreset(b *binary.Binary) bool {
+	if o.configEntry(o.Alias) != nil {
+		return false
+	}
+	if _, ok := o.lookup[o.Alias]; !ok {
+		return false
+	}
+	return isProviderRef(b) || o.Alias != b.Name
 }
 
 // entryOfPreset reports whether a b.yaml entry that is not a provider ref is

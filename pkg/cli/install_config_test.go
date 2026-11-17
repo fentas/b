@@ -439,6 +439,74 @@ func TestComplete_AliasTakesTheFileOfItsEntry(t *testing.T) {
 	}
 }
 
+// TestComplete_AliasRefusesTheNameOfAnotherPreset: an --alias that is the
+// name of another preset is refused, also when that preset has no b.yaml
+// entry: the binary would take the preset's file. --force installs it
+// anyway; it does not lift the refusal of an entry of another binary. The
+// binary's own name is not another preset, and a b.yaml entry of that name
+// that is an alias of the binary's preset decides for it.
+func TestComplete_AliasRefusesTheNameOfAnotherPreset(t *testing.T) {
+	for _, tc := range []struct {
+		name, arg, flag string
+		config          []*binary.LocalBinary
+		force, refused  bool
+		refusal         string // "" = the refusal of the preset's name
+	}{
+		{name: "another preset", arg: "plain", flag: "other", refused: true},
+		{name: "another preset, with a version", arg: "plain@v2.0.0", flag: "other", refused: true},
+		{name: "another preset, beside an entry of the argument", arg: "plain", flag: "other",
+			config: []*binary.LocalBinary{{Name: "plain", Version: "v1.0.0"}}, refused: true},
+		{name: "a provider ref under the name of a preset", arg: "github.com/org/tool", flag: "other", refused: true},
+		{name: "a provider ref under the name of the preset of its name", arg: "github.com/org/plain", flag: "plain", refused: true},
+		{name: "another preset with --force", arg: "plain", flag: "other", force: true},
+		{name: "the entry of another preset with --force", arg: "plain", flag: "other",
+			config: []*binary.LocalBinary{{Name: "other", Version: "v1.0.0"}}, force: true, refused: true, refusal: "is another binary"},
+		{name: "its own name", arg: "plain", flag: "plain"},
+		{name: "an alias entry of its preset of that name", arg: "plain", flag: "other",
+			config: []*binary.LocalBinary{{Name: "other", Alias: "plain"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			t.Setenv("PATH_BIN", binDir)
+			presets := []*binary.Binary{
+				{Name: "plain", Context: context.Background()},
+				{Name: "other", Context: context.Background()},
+			}
+			shared := NewSharedOptions(&streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, presets)
+			shared.Force = tc.force
+			list := state.BinaryList{}
+			for _, e := range tc.config {
+				c := *e
+				list = append(list, &c)
+			}
+			shared.Config = &state.State{Binaries: list}
+
+			o := &InstallOptions{SharedOptions: shared, Alias: tc.flag}
+			err := o.Complete([]string{tc.arg})
+			if tc.refused {
+				refusal := tc.refusal
+				if refusal == "" {
+					refusal = "is the preset " + tc.flag
+				}
+				if err == nil || !strings.Contains(err.Error(), refusal) {
+					t.Fatalf("b install %s --alias %s: error %v, want a refusal with %q", tc.arg, tc.flag, err, refusal)
+				}
+				if len(o.specifiedBinaries) != 0 {
+					t.Errorf("%d binaries to install after the refusal, want 0", len(o.specifiedBinaries))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("b install %s --alias %s: %v", tc.arg, tc.flag, err)
+			}
+			b := o.specifiedBinaries[0]
+			if want := filepath.Join(binDir, tc.flag); b.Alias != tc.flag || b.BinaryPath() != want {
+				t.Errorf("alias %q, file %q; want %s, %s", b.Alias, b.BinaryPath(), tc.flag, want)
+			}
+		})
+	}
+}
+
 // aliasSettingsConfig is a b.yaml with the own entry of the preset plain and
 // two alias entries of it, as the loader builds it.
 func aliasSettingsConfig(t *testing.T) *state.State {
