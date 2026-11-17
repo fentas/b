@@ -67,6 +67,8 @@ func TestPlanInstall(t *testing.T) {
 // the previous entry.
 func TestUpdateLock_FollowsThePlan(t *testing.T) {
 	dir := t.TempDir()
+	// The binary directory: a b.lock row names a file in it by its name.
+	t.Setenv("PATH_BIN", dir)
 	config := filepath.Join(dir, "b.yaml")
 	mustWrite(t, config, []byte("binaries: {}\n"))
 	files := map[string]string{}
@@ -120,6 +122,9 @@ func TestUpdateLock_FollowsThePlan(t *testing.T) {
 // of the binary when it has one (an alias entry of a preset, a provider ref
 // with an alias), else the name of the binary.
 func TestLockName(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, ".bin")
+	t.Setenv("PATH_BIN", binDir)
 	for _, tc := range []struct {
 		name string
 		b    *binary.Binary
@@ -129,6 +134,8 @@ func TestLockName(t *testing.T) {
 		{"an alias entry of a preset", &binary.Binary{Name: "tool", Alias: "t2"}, "t2"},
 		{"a provider ref", &binary.Binary{Name: "tool", AutoDetect: true, ProviderRef: "github.com/org/tool"}, "tool"},
 		{"a provider ref with an alias", &binary.Binary{Name: "tool", Alias: "t", AutoDetect: true, ProviderRef: "github.com/org/tool"}, "t"},
+		{"a file in the binary directory", &binary.Binary{Name: "tool", Alias: "t", File: filepath.Join(binDir, "t")}, "t"},
+		{"a file elsewhere", &binary.Binary{Name: "tool", Alias: "t", File: filepath.Join(dir, "tools", "x")}, "../tools/x"},
 	} {
 		if got := lockName(tc.b); got != tc.want {
 			t.Errorf("%s: lockName = %q, want %q", tc.name, got, tc.want)

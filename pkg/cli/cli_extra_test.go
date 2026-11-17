@@ -1476,6 +1476,8 @@ func TestAddEnvToConfig_WithLabel(t *testing.T) {
 
 func TestUpdateLock_NewBinary(t *testing.T) {
 	tmpDir := t.TempDir()
+	// The binary directory: a b.lock row names a file in it by its name.
+	t.Setenv("PATH_BIN", tmpDir)
 	configPath := filepath.Join(tmpDir, "b.yaml")
 	os.WriteFile(configPath, []byte("binaries: {}\n"), 0644)
 
@@ -1517,6 +1519,8 @@ func TestUpdateLock_NewBinary(t *testing.T) {
 
 func TestUpdateLock_WithProviderRef(t *testing.T) {
 	tmpDir := t.TempDir()
+	// The binary directory: a b.lock row names a file in it by its name.
+	t.Setenv("PATH_BIN", tmpDir)
 	configPath := filepath.Join(tmpDir, "b.yaml")
 	os.WriteFile(configPath, []byte("binaries: {}\n"), 0644)
 
@@ -1564,6 +1568,8 @@ func TestUpdateLock_WithProviderRef(t *testing.T) {
 
 func TestUpdateLock_PresetBinary(t *testing.T) {
 	tmpDir := t.TempDir()
+	// The binary directory: a b.lock row names a file in it by its name.
+	t.Setenv("PATH_BIN", tmpDir)
 	configPath := filepath.Join(tmpDir, "b.yaml")
 	os.WriteFile(configPath, []byte("binaries: {}\n"), 0644)
 

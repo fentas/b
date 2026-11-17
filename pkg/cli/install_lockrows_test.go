@@ -441,10 +441,11 @@ func TestDigestMatchesLock_OldRowNeedsTheFile(t *testing.T) {
 // staleRowsFixture is a project with b.lock rows that no b.yaml entry
 // installs. b.yaml has an alias entry t2 of the preset tool, and an alias
 // entry t3 with its file outside the binary directory (b.yaml `file:`).
-// b.lock has the rows of t2 and t3; the row tool of an older b (before alias
-// rows) without a file .bin/tool; the row gone of an entry that b.yaml does
-// not have any more, without a file; and the row adhoc of a present file
-// that b.yaml does not install (`b install` of a binary without --add).
+// b.lock has the row of t2; the row of t3 under its alias, as an older b
+// wrote it; the row tool of an older b (before alias rows) without a file
+// .bin/tool; the row gone of an entry that b.yaml does not have any more,
+// without a file; and the row adhoc of a present file that b.yaml does not
+// install (`b install` of a binary without --add).
 func staleRowsFixture(t *testing.T) *pinsFixture {
 	t.Helper()
 	f := newPinsFixture(t)
@@ -480,10 +481,10 @@ func (f *pinsFixture) rowNames(t *testing.T) string {
 
 // TestInstall_PrunesRowsThatDescribeNoFile: `b install` without arguments
 // removes the b.lock rows that no b.yaml entry installs and whose file is
-// not in the binary directory: b verify reports such a row as missing. The
-// rows of the entries stay (also t3, whose file is outside the binary
-// directory), and so does the row of a present file without an entry. A
-// named install removes nothing.
+// not there: b verify reports such a row as missing. The rows of the
+// entries stay: the row of t3, whose file is outside the binary directory,
+// moves to the path of its file. The row of a present file without an
+// entry stays too. A named install removes nothing.
 func TestInstall_PrunesRowsThatDescribeNoFile(t *testing.T) {
 	f := staleRowsFixture(t)
 	f.install(t, false, "t2")
@@ -495,8 +496,11 @@ func TestInstall_PrunesRowsThatDescribeNoFile(t *testing.T) {
 	if n := f.hits.Load(); n != 0 {
 		t.Errorf("%d downloads, want 0", n)
 	}
-	if got, want := f.rowNames(t), "t2 t3 adhoc"; got != want {
+	if got, want := f.rowNames(t), "t2 adhoc ../tools/t3"; got != want {
 		t.Errorf("b.lock rows after `b install`: %q, want %q", got, want)
+	}
+	if err := f.verify(t); err != nil {
+		t.Errorf("b verify: %v", err)
 	}
 }
 
@@ -509,11 +513,71 @@ func TestUpdate_PrunesRowsThatDescribeNoFile(t *testing.T) {
 		t.Errorf("b.lock rows after `b update --dry-run`: %q, want %q", got, want)
 	}
 	f.update(t)
-	if got, want := f.rowNames(t), "t2 t3 adhoc"; got != want {
+	if got, want := f.rowNames(t), "t2 adhoc ../tools/t3"; got != want {
 		t.Errorf("b.lock rows after `b update`: %q, want %q", got, want)
 	}
 	if n := f.hits.Load(); n != 0 {
 		t.Errorf("%d downloads, want 0", n)
+	}
+	if err := f.verify(t); err != nil {
+		t.Errorf("b verify: %v", err)
+	}
+}
+
+// TestInstall_SharedLockKeepsTheRowOfAFileElsewhere: two configuration
+// files in .bin use the same b.lock. b.ci.yaml puts t3 outside the binary
+// directory (`file: ../tools/t3`); b.yaml does not have t3. `b install`
+// with b.yaml keeps the row of t3: its file is there. So the next install
+// with b.ci.yaml downloads nothing, and b verify passes.
+func TestInstall_SharedLockKeepsTheRowOfAFileElsewhere(t *testing.T) {
+	f := newPinsFixture(t)
+	main := f.config
+	ci := filepath.Join(f.binDir, "b.ci.yaml")
+	mustWrite(t, ci, []byte("binaries:\n  t3:\n    alias: tool\n    version: v1.0.0\n    file: ../tools/t3\n"))
+	mustWrite(t, main, []byte("binaries:\n  tool:\n    version: v1.0.0\n"))
+	f.config = ci
+	f.install(t, false)
+	f.config = main
+	f.install(t, false)
+	if got, want := f.rowNames(t), "../tools/t3 tool"; got != want {
+		t.Errorf("b.lock rows: %q, want %q", got, want)
+	}
+	f.config = ci
+	f.hits.Store(0)
+	f.install(t, false)
+	if n := f.hits.Load(); n != 0 {
+		t.Errorf("the second install with b.ci.yaml: %d downloads, want 0", n)
+	}
+	if err := f.verify(t); err != nil {
+		t.Errorf("b verify: %v", err)
+	}
+}
+
+// TestInstall_TwoRefsWithTheirOwnFiles: two provider refs with the same
+// binary name, each with its own `file:`, install two files. b.yaml is
+// accepted, and each file has its own b.lock row under its path, so a
+// second `b install` downloads nothing.
+func TestInstall_TwoRefsWithTheirOwnFiles(t *testing.T) {
+	f := newPinsFixture(t)
+	f.serveRefs(t)
+	mustWrite(t, f.config, []byte("binaries:\n  fakerel://a/tool:\n    version: v1.0.0\n    file: ../a/tool\n  fakerel://b/tool:\n    version: v3.0.0\n    file: ../b/tool\n"))
+	f.install(t, false)
+	if n := f.hits.Load(); n != 2 {
+		t.Fatalf("the first install: %d downloads, want 2", n)
+	}
+	f.hits.Store(0)
+	f.install(t, false)
+	if n := f.hits.Load(); n != 0 {
+		t.Errorf("the second install: %d downloads, want 0", n)
+	}
+	lk := f.readLock(t)
+	for name, version := range map[string]string{"../a/tool": "v1.0.0", "../b/tool": "v3.0.0"} {
+		if e := lk.FindBinary(name); e == nil || e.Version != version || e.Binary != "tool" {
+			t.Errorf("b.lock row %q: %+v, want version %s of the binary tool", name, e, version)
+		}
+	}
+	if err := f.verify(t); err != nil {
+		t.Errorf("b verify: %v", err)
 	}
 }
 
@@ -576,16 +640,23 @@ func TestInstall_RefusesTwoEntriesOfOneFile(t *testing.T) {
 }
 
 // TestCheckConfigFiles: each entry installs its own file, also two refs of
-// one repository (one under an alias) and an alias equal to the binary name.
-// All entries of one file are named, sorted.
+// one repository (one under an alias), an alias equal to the binary name,
+// and two refs of one binary name with their own `file:`. All entries of one
+// file are named, sorted. The file is the path relative to the binary
+// directory.
 func TestCheckConfigFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH_BIN", dir)
 	ok := "binaries:\n  tool: {}\n  t2:\n    alias: tool\n  github.com/org/repo: {}\n  github.com/org/repo/cli:\n    alias: cli\n  github.com/org/other:\n    alias: other2\n"
 	three := "binaries:\n  github.com/c/tool: {}\n  github.com/a/tool: {}\n  github.com/b/x:\n    alias: tool\n"
+	files := "binaries:\n  github.com/a/tool:\n    file: ../a/tool\n  github.com/b/tool:\n    file: ../b/tool\n"
+	oneFile := "binaries:\n  github.com/a/tool:\n    file: ../x/tool\n  github.com/b/tool:\n    file: ../x/tool\n  tool: {}\n"
 	for _, tc := range []struct{ name, config, want string }{
 		{"one file per entry", ok, ""},
 		{"three entries of one file", three, "b.yaml: the entries github.com/a/tool, github.com/b/x and github.com/c/tool install the same file tool"},
+		{"two refs with their own files", files, ""},
+		{"two refs with one file", oneFile, "b.yaml: the entries github.com/a/tool and github.com/b/tool install the same file ../x/tool"},
 	} {
-		dir := t.TempDir()
 		config := filepath.Join(dir, "b.yaml")
 		mustWrite(t, config, []byte(tc.config))
 		shared := NewSharedOptions(mkIO(), nil)

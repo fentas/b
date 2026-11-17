@@ -63,7 +63,7 @@ func (o *VerifyOptions) Run() error {
 			failures++
 			continue
 		}
-		filePath := filepath.Join(binPath, entry.Name)
+		filePath := lockRowFile(binPath, entry.Name)
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			fmt.Fprintf(o.IO.Out, "  %-40s ✗ missing\n", entry.Name)
 			failures++

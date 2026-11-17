@@ -112,14 +112,16 @@ func isProviderRef(b *binary.Binary) bool {
 }
 
 // lockName is the name of a binary's b.lock row: the name of the file that
-// it installs, its alias when it has one, else its name. So two b.yaml
-// entries of one preset, or two provider refs with the same binary name, each
-// have their own row (lockrow.go).
+// it installs (fileName), its alias when it has one, else its name, or the
+// path of its file relative to the binary directory when b.yaml puts it
+// elsewhere. So two b.yaml entries of one preset, or two provider refs with
+// the same binary name, each have their own row (lockrow.go).
 func lockName(b *binary.Binary) string {
+	name := b.Name
 	if b.Alias != "" {
-		return b.Alias
+		name = b.Alias
 	}
-	return b.Name
+	return fileName(b.File, name)
 }
 
 // NewInstallCmd creates the install subcommand
