@@ -108,12 +108,12 @@ func isProviderRef(b *binary.Binary) bool {
 	return b.AutoDetect && b.ProviderRef != ""
 }
 
-// lockName is the name of a binary's b.lock row. An alias entry of a preset
-// has its own row under the alias, so two b.yaml entries of one preset (each
-// with its own file and version) never share a row. The preset's own entry
-// and a provider ref keep the row under the binary's name, as before.
+// lockName is the name of a binary's b.lock row: the name of the file that
+// it installs, its alias when it has one, else its name. So two b.yaml
+// entries of one preset, or two provider refs with the same binary name, each
+// have their own row (lockrow.go).
 func lockName(b *binary.Binary) string {
-	if b.Alias != "" && !isProviderRef(b) {
+	if b.Alias != "" {
 		return b.Alias
 	}
 	return b.Name
@@ -461,7 +461,8 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	o.removed = nil
 	var toDownload []*binary.Binary
 	for _, b := range binaries {
-		plan := planInstall(b, lk.FindBinary(lockName(b)), o.Force)
+		prev, _ := findLockRow(lk, b)
+		plan := planInstall(b, prev, o.Force)
 		o.plans[b] = plan
 		if plan.download {
 			toDownload = append(toDownload, b)
@@ -634,9 +635,26 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		return err
 	}
 
+	// The rows of these names stay. A row that an older b wrote for a binary
+	// under the binary's name moves to the name of the file, unless the old
+	// name is also the file of a b.yaml entry or of a binary of this install.
+	stay := lockFileNames(o.Config, binaries)
+
 	for _, b := range binaries {
 		if b.File == "" {
 			continue
+		}
+		name := lockName(b)
+		var prev *lock.BinEntry
+		row, rowName := findLockRow(lk, b)
+		if row != nil {
+			copied := *row
+			prev = &copied
+		}
+		dropOldRow := func() {
+			if prev != nil && rowName != name && !stay[rowName] {
+				lk.RemoveBinary(rowName)
+			}
 		}
 		// A failed download writes no entry. While a file is there (the file
 		// that the download did not change), its entry stays as it was. When
@@ -645,7 +663,8 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		// not there.
 		if o.failed[b] {
 			if _, err := os.Stat(b.File); os.IsNotExist(err) {
-				lk.RemoveBinary(lockName(b))
+				lk.RemoveBinary(name)
+				dropOldRow()
 			}
 			continue
 		}
@@ -660,7 +679,7 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			version = plan.keptVersion
 		}
 		entry := lock.BinEntry{
-			Name:    lockName(b),
+			Name:    name,
 			Version: version,
 			SHA256:  hash,
 		}
@@ -682,7 +701,6 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			// associate an old image's digest with a new Source, which
 			// could produce coincidental false "up to date" skips later.
 			preserveDigest := func() {
-				prev := lk.FindBinary(entry.Name)
 				if prev == nil || prev.Source != entry.Source {
 					return
 				}
@@ -712,6 +730,7 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			}
 		}
 		lk.UpsertBinary(entry)
+		dropOldRow()
 	}
 
 	return lock.WriteLock(lockDir, lk, o.bVersion)

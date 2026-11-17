@@ -105,6 +105,12 @@ Rules for `--alias`:
 
 With `--add`, b does not write a version that the entry's `enforced` pin contradicts. Add `--fix` to move the pin as well. A version that is the pin without or with a leading `v` (`3.0.0` for a pin `v3.0.0`) is the pinned version: b installs it and writes it as the pin spells it.
 
+### The b.lock rows of binaries
+
+`b install` writes one row into `b.lock` for each file that it installs. The name of the row is the name of the file in `.bin`: the alias of the binary when it has one, else the name of the binary. So two b.yaml entries of one preset, or two provider refs with the same binary name under their own aliases, each have their own row. `b verify` checks the file `.bin/<name of the row>`.
+
+Older versions of b wrote some rows under the name of the binary: the row of a provider ref with an alias, and (before alias entries had their own rows) the row of an alias entry of a preset. `b install` and `b update` find such a row and write it under the name of the file. When the sha256 of the file is the one in the row, b does not download the binary again. The row under the old name goes, unless a b.yaml entry installs a file of that name.
+
 ### Sync environment files (SCP syntax)
 
 Use SCP-style syntax to sync files from upstream git repositories:

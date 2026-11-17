@@ -27,7 +27,9 @@ type ToolInfo struct {
 	B string `json:"b"`
 }
 
-// BinEntry is a single binary in the lockfile.
+// BinEntry is a single binary in the lockfile. Name is the name of the
+// installed file in the binary directory: the alias of the binary when it
+// has one, else the name of the binary.
 type BinEntry struct {
 	Name     string `json:"name"`
 	Version  string `json:"version"`
