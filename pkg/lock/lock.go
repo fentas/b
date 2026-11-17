@@ -27,9 +27,18 @@ type ToolInfo struct {
 	B string `json:"b"`
 }
 
-// BinEntry is a single binary in the lockfile.
+// BinEntry is a single binary in the lockfile. Name is the path of the
+// installed file relative to the binary directory, with "/" as separator:
+// for a file in that directory its name, the alias of the binary when it has
+// one, else the name of the binary; for a file that b.yaml puts elsewhere
+// (`file:`) a path such as ../tools/x.
 type BinEntry struct {
-	Name     string `json:"name"`
+	Name string `json:"name"`
+	// Binary is the name of the binary in the file when it is not Name: the
+	// preset of an alias entry, the binary of a provider ref with an alias,
+	// or the binary that `b install --alias <name> --force` put there. Empty
+	// when the file has the name of its binary, and in rows of an older b.
+	Binary   string `json:"binary,omitempty"`
 	Version  string `json:"version"`
 	SHA256   string `json:"sha256"`
 	Source   string `json:"source"`

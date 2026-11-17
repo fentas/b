@@ -132,6 +132,44 @@ func TestSaveConfig_KeepsRelativeFilePaths_RelativeConfigPath(t *testing.T) {
 	}
 }
 
+// TestSaveConfig_KeepsRelativeFileOutsideTheConfigDir: a relative `file:`
+// that leaves the config dir (../tools/x) stays as b.yaml writes it after a
+// load→modify→save round-trip. It must not become the absolute path of one
+// checkout: b.yaml is often in git, and the name of the b.lock row of the
+// file comes from the written value. The in-memory File stays absolute.
+func TestSaveConfig_KeepsRelativeFileOutsideTheConfigDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, ".bin", "b.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("binaries:\n  tool:\n    file: ../tools/x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadConfigFromPath(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	abs := filepath.Join(tmpDir, "tools", "x")
+	if got := mustFile(config, "tool"); got != abs {
+		t.Fatalf("File after load: %q, want %q", got, abs)
+	}
+	config.Binaries = append(config.Binaries, &binary.LocalBinary{Name: "yq"})
+	if err := SaveConfig(config, configPath); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); !strings.Contains(got, "file: ../tools/x\n") || strings.Contains(got, tmpDir) {
+		t.Errorf("b.yaml after the save, want file: ../tools/x and no absolute path:\n%s", got)
+	}
+	if got := mustFile(config, "tool"); got != abs {
+		t.Errorf("File in memory after the save: %q, want %q", got, abs)
+	}
+}
+
 // TestSaveConfig_KeepsRelativeFilePaths_NewFile covers the clean-save path
 // (no pre-existing file), where the binaries are marshaled from scratch.
 func TestSaveConfig_KeepsRelativeFilePaths_NewFile(t *testing.T) {

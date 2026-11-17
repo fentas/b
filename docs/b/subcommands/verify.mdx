@@ -58,8 +58,8 @@ steps:
 
 For each entry in `b.lock`:
 
-- **Binaries**: Computes SHA-256 of the installed binary file and compares against the lock checksum
-- **Env files**: Computes SHA-256 of each synced file at its destination path and compares against the lock checksum
+- **Binaries**: Computes SHA-256 of the installed binary file and compares against the lock checksum. The name of the row is the name of the file in `.bin`, or the `file:` of b.yaml: a name with `./` or `../` in front is relative to the directory of b.yaml, and an absolute name is absolute. b reads only a regular file inside the project, the directory of b.yaml or `.bin`, or a file that a b.yaml entry installs (for example a `file:` outside the project). It reports another row as `outside the project, the b.yaml directory and the binary directory (not read)`, and a directory or a FIFO as `not a regular file`. It follows a symlink. A dangling symlink, a symlink loop or a path through a file (`plain/sub`) is a missing file. When b cannot follow the path (for example, no permission), it reports the error. The project is the directory in `PATH_BASE`, else the root of the git repository, else the working directory.
+- **Env files**: Computes SHA-256 of each synced file at its destination path and compares against the lock checksum. b reads only a regular file: it reports a FIFO as `not a regular file`.
 
 A mismatch means the file on disk differs from what was last synced — either due to local edits, corruption, or a missing file.
 

@@ -39,6 +39,10 @@ func NewVerifyCmd(shared *SharedOptions) *cobra.Command {
 	return cmd
 }
 
+// msgOutside is what b verify says for a b.lock row whose file it does not
+// read (lockFiles).
+const msgOutside = "outside the project, the b.yaml directory and the binary directory (not read)"
+
 // Run executes the verify operation
 func (o *VerifyOptions) Run() error {
 	dir := o.LockDir()
@@ -55,7 +59,11 @@ func (o *VerifyOptions) Run() error {
 
 	failures := 0
 
-	// Verify binaries
+	// Verify binaries. b reads only the regular file of a row inside the
+	// project, the directory of b.yaml or the binary directory, or a file
+	// that a b.yaml entry installs (lockFiles). A dangling symlink, a
+	// symlink loop or a path through a file is a missing file.
+	files := o.lockFiles()
 	for _, entry := range lk.Binaries {
 		binPath := path.GetBinaryPath()
 		if binPath == "" {
@@ -63,13 +71,22 @@ func (o *VerifyOptions) Run() error {
 			failures++
 			continue
 		}
-		filePath := filepath.Join(binPath, entry.Name)
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		filePath, state, err := files.find(entry.Name)
+		switch state {
+		case rowFileMissing:
 			fmt.Fprintf(o.IO.Out, "  %-40s ✗ missing\n", entry.Name)
 			failures++
 			continue
+		case rowFileOutside:
+			fmt.Fprintf(o.IO.Out, "  %-40s ✗ %s\n", entry.Name, msgOutside)
+			failures++
+			continue
+		case rowFileUnknown:
+			fmt.Fprintf(o.IO.Out, "  %-40s ✗ %v\n", entry.Name, err)
+			failures++
+			continue
 		}
-		hash, err := lock.SHA256File(filePath)
+		hash, err := regularFileSHA256(filePath)
 		if err != nil {
 			fmt.Fprintf(o.IO.Out, "  %-40s ✗ %v\n", entry.Name, err)
 			failures++
@@ -115,7 +132,8 @@ func (o *VerifyOptions) Run() error {
 				failures++
 				continue
 			}
-			hash, err := lock.SHA256File(destPath)
+			// Read only a regular file, without blocking on a FIFO.
+			hash, err := fileSHA256(destPath)
 			if err != nil {
 				fmt.Fprintf(o.IO.Out, "    %-38s ✗ %v\n", f.Dest, err)
 				failures++

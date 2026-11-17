@@ -67,16 +67,19 @@ type installPlan struct {
 // file is kept when no version is asked for, or when b.lock says that file
 // (by its sha256) is the version asked for. When another version is asked
 // for, or b.lock does not describe the file, the binary is downloaded: a
-// kept file must never be recorded under a version it is not.
+// kept file must never be recorded under a version it is not. When b.lock
+// says that the file is another binary (otherBinary), the binary is
+// downloaded too, also when no version is asked for.
 func planInstall(b *binary.Binary, prev *lock.BinEntry, force bool) installPlan {
 	if force || !b.BinaryExists() {
 		return installPlan{download: true}
 	}
 	known := ""
-	if prev != nil && prev.SHA256 != "" {
-		if hash, err := lock.SHA256File(b.BinaryPath()); err == nil && hash == prev.SHA256 {
-			known = prev.Version
+	if describesFile(prev, b.BinaryPath()) {
+		if otherBinary(prev, b) {
+			return installPlan{download: true}
 		}
+		known = prev.Version
 	}
 	requested := b.Version
 	if requested == "latest" {
@@ -108,15 +111,17 @@ func isProviderRef(b *binary.Binary) bool {
 	return b.AutoDetect && b.ProviderRef != ""
 }
 
-// lockName is the name of a binary's b.lock row. An alias entry of a preset
-// has its own row under the alias, so two b.yaml entries of one preset (each
-// with its own file and version) never share a row. The preset's own entry
-// and a provider ref keep the row under the binary's name, as before.
+// lockName is the name of a binary's b.lock row: the name of the file that
+// it installs (fileName), its alias when it has one, else its name, or the
+// path of its `file:` as b.yaml writes it when b.yaml puts it elsewhere. So
+// two b.yaml entries of one preset, or two provider refs with the same
+// binary name, each have their own row (lockrow.go).
 func lockName(b *binary.Binary) string {
-	if b.Alias != "" && !isProviderRef(b) {
-		return b.Alias
+	name := b.Name
+	if b.Alias != "" {
+		name = b.Alias
 	}
-	return b.Name
+	return fileName(b.File, b.FileAsWritten, name)
 }
 
 // NewInstallCmd creates the install subcommand
@@ -182,7 +187,7 @@ func (o *InstallOptions) Complete(args []string) error {
 		if o.Config == nil {
 			return fmt.Errorf("no b.yaml configuration found and no binaries specified")
 		}
-		return nil
+		return checkConfigFiles(o.Config)
 	}
 
 	// Parse args — detect SCP-style env installs vs binary installs
@@ -203,8 +208,15 @@ func (o *InstallOptions) Complete(args []string) error {
 			continue
 		}
 
-		// Binary install. --alias names the file of one binary, so it
-		// takes only one.
+		// Binary install. b.yaml must give each file one entry
+		// (checkConfigFiles); with --add, the b.yaml that --add writes
+		// (below). --alias names the file of one binary, so it takes only
+		// one.
+		if len(o.specifiedBinaries) == 0 && !o.Add {
+			if err := checkConfigFiles(o.Config); err != nil {
+				return err
+			}
+		}
 		if o.Alias != "" && len(o.specifiedBinaries) > 0 {
 			return fmt.Errorf("--alias %s names one binary, but %s is a second one\n  Hint: install each binary on its own, with its own --alias", o.Alias, arg)
 		}
@@ -239,12 +251,12 @@ func (o *InstallOptions) Complete(args []string) error {
 				return fmt.Errorf("--alias %s: %s is the preset %s, another binary than %s\n  Hint: pick another alias, or add --force to install %s over the file of %s", o.Alias, o.Alias, o.Alias, b.Name, b.Name, o.Alias)
 			}
 			if !isProviderRef(b) {
-				b.File = ""
+				b.File, b.FileAsWritten = "", ""
 				if e := o.configEntry(o.Alias); e != nil {
 					if rb, ok := o.resolveBinary(e); ok {
 						b = rb
 					}
-					b.File = e.File
+					b.File, b.FileAsWritten = e.File, e.FileAsWritten
 				}
 			}
 			b.Alias = o.Alias
@@ -278,6 +290,12 @@ func (o *InstallOptions) Complete(args []string) error {
 		o.specifiedBinaries = append(o.specifiedBinaries, b)
 	}
 
+	// Refuse an --add that would write a b.yaml in which two entries
+	// install the same file, before any download: the next run would
+	// refuse that b.yaml.
+	if o.Add && len(o.specifiedBinaries) > 0 {
+		return checkConfigFiles(o.withAdded(o.specifiedBinaries))
+	}
 	return nil
 }
 
@@ -340,8 +358,8 @@ func sameVersion(a, b string) bool {
 // aliasOwner is the b.yaml entry of another binary that the name --alias
 // already belongs to, nil when there is none. That is an entry of that name
 // which is not an entry of b's preset (for a provider ref b: any entry of
-// that name), or a provider-ref entry other than b's own whose binary has
-// that name: its alias, or the name from the ref.
+// that name), or a provider-ref entry other than b's own that installs the
+// file of that name (entryFileName).
 func (o *InstallOptions) aliasOwner(b *binary.Binary) *binary.LocalBinary {
 	if o.Config == nil {
 		return nil
@@ -357,11 +375,7 @@ func (o *InstallOptions) aliasOwner(b *binary.Binary) *binary.LocalBinary {
 		if e.Name == b.ProviderRef {
 			continue // b's own entry; a preset has no ref
 		}
-		name := e.Alias
-		if name == "" {
-			name = provider.BinaryName(e.Name)
-		}
-		if e.Name == o.Alias || name == o.Alias {
+		if e.Name == o.Alias || entryFileName(e) == o.Alias {
 			return e
 		}
 	}
@@ -408,10 +422,13 @@ func (o *InstallOptions) Run() error {
 
 	// Handle binary installs
 	var binariesToInstall []*binary.Binary
+	// A run without arguments installs all of b.yaml. It also removes the
+	// b.lock rows that describe no file (pruneLock).
+	all := len(o.specifiedBinaries) == 0 && len(o.envInstalls) == 0 && len(o.configEnvRefs) == 0
 
 	if len(o.specifiedBinaries) > 0 {
 		binariesToInstall = o.specifiedBinaries
-	} else if len(o.envInstalls) == 0 && len(o.configEnvRefs) == 0 {
+	} else if all {
 		// Install all from config (binaries + envs)
 		binariesToInstall = o.GetBinariesFromConfig()
 
@@ -424,6 +441,9 @@ func (o *InstallOptions) Run() error {
 	}
 
 	if len(binariesToInstall) == 0 && len(o.envInstalls) == 0 && len(o.configEnvRefs) == 0 {
+		if all {
+			o.reportPruned(o.pruneLock())
+		}
 		fmt.Fprintln(o.IO.Out, "No binaries or envs to install")
 		return nil
 	}
@@ -435,6 +455,9 @@ func (o *InstallOptions) Run() error {
 
 		if err := o.updateLock(binariesToInstall); err != nil {
 			fmt.Fprintf(o.IO.ErrOut, "Warning: failed to update b.lock: %v\n", err)
+		}
+		if all {
+			o.reportPruned(o.pruneLock())
 		}
 
 		if o.Add {
@@ -456,11 +479,13 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	if err != nil {
 		return fmt.Errorf("cannot read b.lock: %w\n  Hint: repair %s, or remove it; b then downloads each pinned binary once and writes a new b.lock", err, filepath.Join(o.LockDir(), "b.lock"))
 	}
+	o.moveOldRows(lk, binaries)
 	o.plans = make(map[*binary.Binary]installPlan, len(binaries))
 	o.failed = make(map[*binary.Binary]bool)
 	o.removed = nil
 	var toDownload []*binary.Binary
 	for _, b := range binaries {
+		// moveOldRows moved the rows of an older b to these names.
 		plan := planInstall(b, lk.FindBinary(lockName(b)), o.Force)
 		o.plans[b] = plan
 		if plan.download {
@@ -555,8 +580,31 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 	if config == nil {
 		config = &state.State{}
 	}
+	o.addEntries(config, binaries)
+	return state.SaveConfig(config, configPath)
+}
 
-	// Add binaries to config
+// withAdded is a copy of b.yaml with the entries that --add writes for
+// binaries (addEntries). o.Config does not change.
+func (o *InstallOptions) withAdded(binaries []*binary.Binary) *state.State {
+	config := &state.State{}
+	if o.Config != nil {
+		*config = *o.Config
+		config.Binaries = make(state.BinaryList, len(o.Config.Binaries))
+		for i, e := range o.Config.Binaries {
+			if e != nil {
+				copied := *e
+				e = &copied
+			}
+			config.Binaries[i] = e
+		}
+	}
+	o.addEntries(config, binaries)
+	return config
+}
+
+// addEntries writes the entries that --add writes for binaries into config.
+func (o *InstallOptions) addEntries(config *state.State, binaries []*binary.Binary) {
 	for _, b := range binaries {
 		// Check if already exists: a provider ref has one entry, under the
 		// ref, with the binary's name as its alias; an alias of a preset has
@@ -622,8 +670,6 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 			config.Binaries = append(config.Binaries, entry)
 		}
 	}
-
-	return state.SaveConfig(config, configPath)
 }
 
 // updateLock updates b.lock with installed binary checksums
@@ -634,9 +680,17 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		return err
 	}
 
+	// installBinaries moved the rows of an older b to the names of the files
+	// (moveOldRows) before the downloads.
 	for _, b := range binaries {
 		if b.File == "" {
 			continue
+		}
+		name := lockName(b)
+		var prev *lock.BinEntry
+		if row := lk.FindBinary(name); row != nil {
+			copied := *row
+			prev = &copied
 		}
 		// A failed download writes no entry. While a file is there (the file
 		// that the download did not change), its entry stays as it was. When
@@ -645,7 +699,7 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		// not there.
 		if o.failed[b] {
 			if _, err := os.Stat(b.File); os.IsNotExist(err) {
-				lk.RemoveBinary(lockName(b))
+				lk.RemoveBinary(name)
 			}
 			continue
 		}
@@ -660,7 +714,8 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			version = plan.keptVersion
 		}
 		entry := lock.BinEntry{
-			Name:    lockName(b),
+			Name:    name,
+			Binary:  lockBinary(b),
 			Version: version,
 			SHA256:  hash,
 		}
@@ -682,7 +737,6 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			// associate an old image's digest with a new Source, which
 			// could produce coincidental false "up to date" skips later.
 			preserveDigest := func() {
-				prev := lk.FindBinary(entry.Name)
 				if prev == nil || prev.Source != entry.Source {
 					return
 				}
@@ -707,9 +761,7 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			}
 		} else {
 			entry.Preset = true
-			if b.GitHubRepo != "" {
-				entry.Source = "github.com/" + b.GitHubRepo
-			}
+			entry.Source = presetSource(b)
 		}
 		lk.UpsertBinary(entry)
 	}

@@ -103,7 +103,7 @@ func (o *SharedOptions) resolveBinary(lb *binary.LocalBinary) (*binary.Binary, b
 			b.Version = lb.Enforced
 		}
 		if lb.File != "" {
-			b.File = lb.File
+			b.File, b.FileAsWritten = lb.File, lb.FileAsWritten
 		}
 		if lb.OnPost != "" {
 			b.OnPost = lb.OnPost
@@ -167,7 +167,7 @@ func (o *SharedOptions) GetBinary(name string) (*binary.Binary, bool) {
 				b.Version = configEntry.Enforced
 			}
 			if configEntry.File != "" {
-				b.File = configEntry.File
+				b.File, b.FileAsWritten = configEntry.File, configEntry.FileAsWritten
 			}
 			if configEntry.Alias != "" {
 				b.Alias = configEntry.Alias
@@ -208,7 +208,7 @@ func (o *SharedOptions) GetBinariesFromConfig() []*binary.Binary {
 				b.Version = lb.Enforced
 			}
 			if lb.File != "" {
-				b.File = lb.File
+				b.File, b.FileAsWritten = lb.File, lb.FileAsWritten
 			}
 			if lb.Alias != "" {
 				b.Alias = lb.Alias

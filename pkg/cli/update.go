@@ -136,6 +136,12 @@ func (o *UpdateOptions) Complete(args []string) error {
 		if o.Config == nil {
 			return fmt.Errorf("no b.yaml configuration found and no binaries specified")
 		}
+		// b.yaml must give each file one entry (checkConfigFiles), when
+		// the run touches binaries (runAll): not with --envs-only, --group
+		// or --plan-json (a plan of env changes).
+		if !o.EnvsOnly && o.Group == "" && !o.PlanJSON {
+			return checkConfigFiles(o.Config)
+		}
 		return nil
 	}
 
@@ -152,6 +158,10 @@ func (o *UpdateOptions) Complete(args []string) error {
 			continue
 		}
 		o.specifiedBinaries = append(o.specifiedBinaries, b)
+	}
+	// --plan-json ignores binary arguments (runSpecified).
+	if len(o.specifiedBinaries) > 0 && !o.PlanJSON {
+		return checkConfigFiles(o.Config)
 	}
 
 	return nil
@@ -509,6 +519,11 @@ func (o *UpdateOptions) runAll() error {
 			if err := o.callUpdateBinaries(binariesToUpdate); err != nil {
 				return err
 			}
+		}
+		// All binaries of b.yaml are in scope: remove the b.lock rows that
+		// describe no file, as `b install` without arguments does.
+		if !o.effectiveDryRun() {
+			o.reportPruned(o.pruneLock())
 		}
 	}
 
@@ -1177,6 +1192,11 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	var lk *lock.Lock
 	if readLk, err := lock.ReadLock(o.LockDir()); err == nil {
 		lk = readLk
+		// Move the rows of an older b to the names of the files before any
+		// download and before the prune of runAll, as b install does.
+		if !o.effectiveDryRun() {
+			o.moveOldRows(lk, binaries)
+		}
 	}
 
 	// Resolve digests once per digest-capable binary up-front. We reuse these
@@ -1193,8 +1213,14 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	// Only these get digest resolution AND pre-SHA hashing — skipping
 	// SHA256File for everything else keeps `b update` cheap on projects
 	// that don't use docker:// / oci://.
-	digestCapable := make(map[string]bool, len(binaries))
-	freshDigests := make(map[string]string, len(binaries))
+	//
+	// These maps (and downloadFailed below) are keyed by the binary: two
+	// binaries with the same name under other aliases must not share a
+	// digest or an outcome. A key that the download cannot change: a
+	// provider that installs the file itself sets b.File, and with it the
+	// name of the b.lock row (lockName).
+	digestCapable := make(map[*binary.Binary]bool, len(binaries))
+	freshDigests := make(map[*binary.Binary]string, len(binaries))
 	for _, b := range binaries {
 		if !b.AutoDetect || b.ProviderRef == "" {
 			continue
@@ -1203,14 +1229,14 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 		if !ok {
 			continue
 		}
-		digestCapable[b.Name] = true
+		digestCapable[b] = true
 		d, err := dr.ResolveDigest(b.ProviderRef, b.Version)
 		if err != nil {
 			fmt.Fprintf(o.IO.ErrOut, "Warning: resolving digest for %s (%s): %v\n", b.Name, b.ProviderRef, err)
 			continue
 		}
 		if d != "" {
-			freshDigests[b.Name] = d
+			freshDigests[b] = d
 		}
 	}
 	// preSHA lets refreshLockDigests tell which binaries actually re-downloaded:
@@ -1218,13 +1244,13 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	// Only compute for digest-capable binaries — hashing on-disk bytes is
 	// otherwise wasted work for github/gitlab/go provider binaries we'll
 	// never consult preSHA for.
-	preSHA := make(map[string]string, len(digestCapable))
+	preSHA := make(map[*binary.Binary]string, len(digestCapable))
 	for _, b := range binaries {
-		if b.File == "" || !digestCapable[b.Name] {
+		if b.File == "" || !digestCapable[b] {
 			continue
 		}
 		if h, err := lock.SHA256File(b.File); err == nil {
-			preSHA[b.Name] = h
+			preSHA[b] = h
 		}
 	}
 
@@ -1232,7 +1258,7 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	// lock refresh can avoid advancing Digest/SHA256 for binaries whose
 	// on-disk bytes didn't actually update.
 	var outcomeMu sync.Mutex
-	downloadFailed := make(map[string]bool, len(binaries))
+	downloadFailed := make(map[*binary.Binary]bool, len(binaries))
 
 	wg := sync.WaitGroup{}
 	pw := newProgressRun(o.IO.Out)
@@ -1261,7 +1287,7 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 				attempted = true
 				err = b.DownloadBinary()
 				downloaded = err == nil
-			case digestMatchesLock(b, lk, freshDigests[b.Name]) && b.BinaryExists():
+			case digestMatchesLock(b, lk, freshDigests[b]) && b.BinaryExists():
 				// Manifest digest matches the locked one AND the binary
 				// is actually on disk: upstream hasn't moved since the
 				// last install. Nothing to do. The BinaryExists() check
@@ -1311,7 +1337,7 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 				}
 			}
 			outcomeMu.Lock()
-			downloadFailed[b.Name] = attempted && err != nil
+			downloadFailed[b] = attempted && err != nil
 			outcomeMu.Unlock()
 
 			// Run onPost hook only when a download actually changed the
@@ -1356,7 +1382,7 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 // freshDigests is reused from updateBinaries so each registry is HEAD-ed
 // only once per run. Best-effort: any error is surfaced as a warning
 // without failing the update — the binaries are already on disk.
-func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDigests, preSHA map[string]string, downloadFailed map[string]bool) {
+func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDigests, preSHA map[*binary.Binary]string, downloadFailed map[*binary.Binary]bool) {
 	lk, err := lock.ReadLock(o.LockDir())
 	if err != nil {
 		fmt.Fprintf(o.IO.ErrOut, "Warning: can't read b.lock to refresh digests: %v\n", err)
@@ -1373,9 +1399,11 @@ func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDiges
 		// Download was attempted and failed: don't touch the lock. The
 		// previous digest/SHA still match the previous binary, which is
 		// what's on disk.
-		if downloadFailed[b.Name] {
+		if downloadFailed[b] {
 			continue
 		}
+		// updateBinaries moved the rows of an older b to the names of the
+		// files (moveOldRows) before the downloads.
 		entry := lk.FindBinary(lockName(b))
 		if entry == nil {
 			continue
@@ -1401,8 +1429,8 @@ func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDiges
 		// when the download still succeeded via cache/retry. Conversely,
 		// a pure skip (digest matched, hash unchanged) refreshes only
 		// Digest. Decide each one on its own.
-		digest := freshDigests[b.Name]
-		pre := preSHA[b.Name]
+		digest := freshDigests[b]
+		pre := preSHA[b]
 		hashChanged := pre != hash
 
 		// SHA256: refresh whenever the on-disk bytes actually moved.
@@ -1455,12 +1483,14 @@ func isDigestProvider(ref string) bool {
 // digest, mismatched Source (user changed the docker/oci ref or
 // in-container path but kept the derived binary name), no fresh
 // digest, non-digest provider, absent ProviderRef — so the caller
-// still attempts an update.
+// still attempts an update. A row that an older b wrote under the binary's
+// name counts only when it describes b's file (findLockRow): under that name
+// it can also describe another file.
 func digestMatchesLock(b *binary.Binary, lk *lock.Lock, fresh string) bool {
 	if lk == nil || b.ProviderRef == "" || fresh == "" {
 		return false
 	}
-	entry := lk.FindBinary(lockName(b))
+	entry, _ := findLockRow(lk, b)
 	if entry == nil || entry.Digest == "" {
 		return false
 	}

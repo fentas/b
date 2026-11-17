@@ -28,6 +28,7 @@ func TestPlanInstall(t *testing.T) {
 	}
 	locked := &lock.BinEntry{Name: "tool", Version: "v1.0.0", SHA256: hash}
 	stale := &lock.BinEntry{Name: "tool", Version: "v1.0.0", SHA256: "another file"}
+	other := &lock.BinEntry{Name: "tool", Binary: "other", Version: "v1.0.0", SHA256: hash}
 
 	for _, tc := range []struct {
 		name     string
@@ -48,6 +49,8 @@ func TestPlanInstall(t *testing.T) {
 		{"another version asked", file, "v3.0.0", locked, false, true, ""},
 		{"a version asked, not locked", file, "v1.0.0", nil, false, true, ""},
 		{"a version asked, b.lock hashes another file", file, "v1.0.0", stale, false, true, ""},
+		{"no version asked, b.lock says the file is another binary", file, "", other, false, true, ""},
+		{"the locked version asked, b.lock says the file is another binary", file, "v1.0.0", other, false, true, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := &binary.Binary{Name: "tool", Version: tc.version, File: tc.file}
@@ -64,6 +67,8 @@ func TestPlanInstall(t *testing.T) {
 // the previous entry.
 func TestUpdateLock_FollowsThePlan(t *testing.T) {
 	dir := t.TempDir()
+	// The binary directory: a b.lock row names a file in it by its name.
+	t.Setenv("PATH_BIN", dir)
 	config := filepath.Join(dir, "b.yaml")
 	mustWrite(t, config, []byte("binaries: {}\n"))
 	files := map[string]string{}
@@ -113,10 +118,21 @@ func TestUpdateLock_FollowsThePlan(t *testing.T) {
 	}
 }
 
-// TestLockName: an alias entry of a preset has its own b.lock row under the
-// alias. The preset's own entry and a provider ref keep the row under the
-// binary's name, so b.lock files written before still match them.
+// TestLockName: a b.lock row has the name of the installed file: the alias
+// of the binary when it has one (an alias entry of a preset, a provider ref
+// with an alias), else the name of the binary. A file that b.yaml puts
+// elsewhere has its `file:` as b.yaml writes it, cleaned: a relative path
+// with "./" or "../" in front (relative to the directory of b.yaml), or an
+// absolute path, also through a symlink (b does not resolve it).
 func TestLockName(t *testing.T) {
+	dir := t.TempDir()
+	binDir := filepath.Join(dir, ".bin")
+	t.Setenv("PATH_BIN", binDir)
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(t.TempDir(), link); err != nil {
+		t.Fatal(err)
+	}
+	abs := filepath.Join(link, "x")
 	for _, tc := range []struct {
 		name string
 		b    *binary.Binary
@@ -125,7 +141,14 @@ func TestLockName(t *testing.T) {
 		{"a preset", &binary.Binary{Name: "tool"}, "tool"},
 		{"an alias entry of a preset", &binary.Binary{Name: "tool", Alias: "t2"}, "t2"},
 		{"a provider ref", &binary.Binary{Name: "tool", AutoDetect: true, ProviderRef: "github.com/org/tool"}, "tool"},
-		{"a provider ref with an alias", &binary.Binary{Name: "tool", Alias: "t", AutoDetect: true, ProviderRef: "github.com/org/tool"}, "tool"},
+		{"a provider ref with an alias", &binary.Binary{Name: "tool", Alias: "t", AutoDetect: true, ProviderRef: "github.com/org/tool"}, "t"},
+		{"a file in the binary directory", &binary.Binary{Name: "tool", Alias: "t", File: filepath.Join(binDir, "t"), FileAsWritten: "t"}, "t"},
+		{"a relative file elsewhere", &binary.Binary{Name: "tool", Alias: "t", File: filepath.Join(dir, "tools", "x"), FileAsWritten: "../tools/x"}, "../tools/x"},
+		{"a relative file outside the project", &binary.Binary{Name: "tool", File: filepath.Join(dir, "..", "tools", "x"), FileAsWritten: "../../tools/x"}, "../../tools/x"},
+		{"a relative file beside b.yaml", &binary.Binary{Name: "tool", File: filepath.Join(dir, "tools", "x"), FileAsWritten: "tools/x"}, "./tools/x"},
+		{"an untidy relative file", &binary.Binary{Name: "tool", File: filepath.Join(dir, "tools", "x"), FileAsWritten: "./a/../../tools/x"}, "../tools/x"},
+		{"an absolute file through a symlink", &binary.Binary{Name: "tool", File: abs, FileAsWritten: abs}, filepath.ToSlash(abs)},
+		{"a file that b.yaml does not give", &binary.Binary{Name: "tool", File: abs}, filepath.ToSlash(abs)},
 	} {
 		if got := lockName(tc.b); got != tc.want {
 			t.Errorf("%s: lockName = %q, want %q", tc.name, got, tc.want)
