@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -91,7 +92,7 @@ func within(dir, file string) bool {
 // realDir is the absolute path of the directory dir with its symlinks
 // resolved: the longest part of it that exists, through
 // filepath.EvalSymlinks, and the rest as it is. The directory need not
-// exist.
+// exist. It works the same for the path of a file (entryPath).
 func realDir(dir string) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -249,10 +250,34 @@ func entryFileName(e *binary.LocalBinary) string {
 	return lockName(b)
 }
 
-// configFileNames maps the name of each file that b.yaml installs to the
-// names of the entries that install it, sorted.
-func configFileNames(cfg *state.State) map[string][]string {
-	files := map[string][]string{}
+// entryPath is the path of the file that a b.yaml entry installs: its
+// `file:` (LoadConfigFromPath joins a relative one to the directory of
+// b.yaml), else the file of its name (entryFileName) in the binary
+// directory, as BinaryPath gives it. The path is absolute and clean, with
+// its symlinks resolved (realDir): the install writes through a symlink to
+// the file that it points to (atomicfile), so a symlink and that file are
+// one file. Thus two entries that write one file in two forms, for example
+// ./tools/x and the absolute path of tools/x, have the same entryPath.
+func entryPath(e *binary.LocalBinary) string {
+	file := e.File
+	if file == "" {
+		file = filepath.Join(path.GetBinaryPath(), entryFileName(e))
+	}
+	return realDir(file)
+}
+
+// configFile is a file that b.yaml installs: the names of the entries that
+// install it, and the names of its b.lock row as these entries write the
+// file (entryFileName). Both are sorted, without repeats in rows.
+type configFile struct {
+	entries []string
+	rows    []string
+}
+
+// configFiles maps the path of each file that b.yaml installs (entryPath)
+// to the entries that install it.
+func configFiles(cfg *state.State) map[string]*configFile {
+	files := map[string]*configFile{}
 	if cfg == nil {
 		return files
 	}
@@ -260,35 +285,46 @@ func configFileNames(cfg *state.State) map[string][]string {
 		if e == nil {
 			continue
 		}
-		file := entryFileName(e)
-		files[file] = append(files[file], e.Name)
+		file := entryPath(e)
+		f := files[file]
+		if f == nil {
+			f = &configFile{}
+			files[file] = f
+		}
+		f.entries = append(f.entries, e.Name)
+		if row := entryFileName(e); !slices.Contains(f.rows, row) {
+			f.rows = append(f.rows, row)
+		}
 	}
-	for _, names := range files {
-		sort.Strings(names)
+	for _, f := range files {
+		sort.Strings(f.entries)
+		sort.Strings(f.rows)
 	}
 	return files
 }
 
 // checkConfigFiles refuses a b.yaml in which two entries install the same
-// file. The two binaries would replace each other at each install, and
-// b.lock has one row for the file. Two preset entries always have their own
-// names, so at least one of the entries is a provider ref.
+// file (configFiles). The two binaries would replace each other at each
+// install, and b.lock has one row for the file. Two preset entries always
+// have their own names, so at least one of the entries is a provider ref or
+// has a `file:`. The error names the file as the entries write it. When
+// they write it in two forms, it names the path of the file and each form.
 func checkConfigFiles(cfg *state.State) error {
-	files := configFileNames(cfg)
-	var dups []string
-	for file, names := range files {
-		if len(names) > 1 {
-			dups = append(dups, file)
+	var lines []string
+	for file, f := range configFiles(cfg) {
+		if len(f.entries) < 2 {
+			continue
 		}
+		name := f.rows[0]
+		if len(f.rows) > 1 {
+			name = fmt.Sprintf("%s, written as %s", file, joinNames(f.rows))
+		}
+		lines = append(lines, fmt.Sprintf("b.yaml: the entries %s install the same file %s", joinNames(f.entries), name))
 	}
-	if len(dups) == 0 {
+	if len(lines) == 0 {
 		return nil
 	}
-	sort.Strings(dups)
-	lines := make([]string, 0, len(dups))
-	for _, file := range dups {
-		lines = append(lines, fmt.Sprintf("b.yaml: the entries %s install the same file %s", joinNames(files[file]), file))
-	}
+	sort.Strings(lines)
 	return fmt.Errorf("%s\n  Hint: give a provider ref its own file name with `alias: <name>`, or remove one of the entries", strings.Join(lines, "\n"))
 }
 
@@ -390,8 +426,13 @@ func presetSource(b *binary.Binary) string {
 // there.
 func lockFileNames(cfg *state.State) map[string]bool {
 	names := map[string]bool{}
-	for file := range configFileNames(cfg) {
-		names[file] = true
+	if cfg == nil {
+		return names
+	}
+	for _, e := range cfg.Binaries {
+		if e != nil {
+			names[entryFileName(e)] = true
+		}
 	}
 	return names
 }
