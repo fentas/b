@@ -8,6 +8,10 @@ import (
 	"os"
 )
 
+// Lockable is false: Create takes no lock on Windows (stale_flock.go).
+// There, the remove of a temp file that a process has open fails.
+const Lockable = false
+
 // lockTemp takes no lock on Windows, and reports true: Go opens a file
 // without FILE_SHARE_DELETE, so Windows refuses to remove a temp file that a
 // process has open (removeIfStale), also right after its creation.

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -113,5 +114,47 @@ func TestUpdate_OtherBinaryErrorStops(t *testing.T) {
 				t.Errorf("%d env syncs, want none", *syncs)
 			}
 		})
+	}
+}
+
+// When b.lock cannot be read after the downloads (the digest refresh of b
+// update), the error names the failed download and the b.lock error. The
+// command stops on it: the prune does not run, so the b.lock error comes
+// once. Before, the b.lock error replaced the error of the download.
+func TestUpdate_LockRefreshErrorKeepsTheDownloadError(t *testing.T) {
+	f := newPinsFixture(t)
+	mustWrite(t, f.config, []byte("binaries:\n  t2:\n    alias: tool\n    version: v3.0.0\n"))
+	f.writeLock(t, lock.BinEntry{Name: "t2", Version: "v3.0.0", SHA256: "the sha256 of .bin/t2", Preset: true})
+	f.missing["v3.0.0"] = true
+	lockPath := filepath.Join(f.binDir, "b.lock")
+	// The download breaks b.lock: the reads before it work, the digest
+	// refresh after it fails.
+	var breakErr error
+	f.mu.Lock()
+	f.onRequest = func() {
+		err := os.WriteFile(lockPath, []byte("{not a lock"), 0644)
+		f.mu.Lock()
+		breakErr = err
+		f.mu.Unlock()
+	}
+	f.mu.Unlock()
+	err := f.cmdErr(t, "update", func(*UpdateOptions) {})
+	f.mu.Lock()
+	if breakErr != nil {
+		t.Fatal(breakErr)
+	}
+	f.mu.Unlock()
+	if f.hits.Load() == 0 {
+		t.Fatal("no download, want one that fails")
+	}
+	if err == nil {
+		t.Fatal("b update: no error, want the download error and the b.lock error")
+	}
+	msg := err.Error()
+	if want := "download failed:\n  t2 (tool): tool v3.0.0 not found (latest: v2.0.0)\ncannot read b.lock: "; !strings.HasPrefix(msg, want) {
+		t.Errorf("b update: error %q, want the error of the download of t2, then the b.lock error", msg)
+	}
+	if n := strings.Count(msg, "cannot read b.lock: "); n != 1 || !isLockReadError(err) {
+		t.Errorf("b update: the b.lock error comes %d times in %q, want once", n, msg)
 	}
 }

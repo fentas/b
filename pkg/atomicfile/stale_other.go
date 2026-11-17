@@ -4,6 +4,9 @@ package atomicfile
 
 import "os"
 
+// Lockable is false: Create takes no lock on this platform (stale_flock.go).
+const Lockable = false
+
 // lockTemp takes no lock, and reports true: this platform has no flock in
 // the syscall package, and removeIfStale removes nothing here.
 func lockTemp(*os.File) bool { return true }

@@ -16,17 +16,23 @@ type downloadFailure struct{ msg string }
 
 func (e *downloadFailure) Error() string { return e.msg }
 
-// isDownloadFailure reports whether err is a downloadFailure.
+// isDownloadFailure reports whether err is a downloadFailure and nothing
+// else. An error that joins a downloadFailure with another error (a b.lock
+// that cannot be read) is not: the command stops on it at once.
 func isDownloadFailure(err error) bool {
-	var df *downloadFailure
-	return errors.As(err, &df)
+	_, ok := err.(*downloadFailure)
+	return ok
 }
 
 // withDownloadErr is err, after the error dl of the failed downloads when
-// there is one. Without dl it is err as it is.
+// there is one. Without dl it is err as it is, and without err it is dl as
+// it is.
 func withDownloadErr(dl, err error) error {
 	if dl == nil {
 		return err
+	}
+	if err == nil {
+		return dl
 	}
 	return errors.Join(dl, err)
 }

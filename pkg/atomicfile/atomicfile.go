@@ -159,15 +159,26 @@ func (f *File) Write(p []byte) (int, error) {
 	return f.tmp.Write(p)
 }
 
-// Commit syncs and closes the temp file, sets its mode, and renames it to the
-// path of the file. When a step fails, Commit removes the temp file, and the
-// file stays as it was. On Windows, the rename fails while a program has the
-// file open (for example, a binary that runs); the file then stays too.
+// Commit syncs the temp file, sets its mode, renames it to the path of the
+// file, and closes it. When a step fails, Commit removes the temp file, and
+// the file stays as it was.
+//
+// Where Create locks the temp file (Lockable), Commit closes it only after
+// the rename: the lock holds until the file is in place, so a RemoveStale
+// of another process cannot take the temp file between the steps. A Close
+// error after the rename is returned, but the file is then already
+// replaced. On the other platforms, Commit closes the temp file before the
+// rename, as Windows cannot rename an open file. On Windows, the rename
+// also fails while a program has the file open (for example, a binary that
+// runs); the file then stays too.
 func (f *File) Commit(mode os.FileMode) error {
 	if f.done {
 		return errDone
 	}
 	f.done = true
+	if Lockable {
+		return f.commitLocked(mode)
+	}
 	name := f.tmp.Name()
 	err := f.tmp.Sync()
 	if closeErr := f.tmp.Close(); err == nil {
@@ -177,6 +188,7 @@ func (f *File) Commit(mode os.FileMode) error {
 		err = os.Chmod(name, mode)
 	}
 	if err == nil {
+		beforeRename()
 		err = os.Rename(name, f.path)
 	}
 	if err != nil {
@@ -184,6 +196,31 @@ func (f *File) Commit(mode os.FileMode) error {
 	}
 	return err
 }
+
+// commitLocked is Commit where Create locks the temp file: the mode is set
+// on the open file, and the file is closed (the lock released) after the
+// rename.
+func (f *File) commitLocked(mode os.FileMode) error {
+	name := f.tmp.Name()
+	err := f.tmp.Sync()
+	if err == nil {
+		err = f.tmp.Chmod(mode)
+	}
+	if err == nil {
+		beforeRename()
+		err = os.Rename(name, f.path)
+	}
+	closeErr := f.tmp.Close()
+	if err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	return closeErr
+}
+
+// beforeRename runs in Commit just before the rename. It does nothing; a
+// test replaces it to act in the moment between the steps.
+var beforeRename = func() {}
 
 // Abort closes and removes the temp file. The file stays as it was. After
 // Commit or Abort, Abort does nothing, so a deferred Abort is safe.

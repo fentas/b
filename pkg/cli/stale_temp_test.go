@@ -3,7 +3,6 @@ package cli
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -11,16 +10,6 @@ import (
 	"github.com/fentas/b/pkg/atomicfile"
 	"github.com/fentas/b/pkg/binary"
 )
-
-// flockHere reports whether atomicfile can tell a temp file in use from a
-// stale one on this platform (its flock).
-func flockHere() bool {
-	switch runtime.GOOS {
-	case "linux", "darwin", "freebsd", "netbsd", "openbsd", "dragonfly":
-		return true
-	}
-	return false
-}
 
 // notStale are files in .bin that are not temp files of tool: b removes
 // none of them.
@@ -31,8 +20,8 @@ var notStale = []string{".tool.tmp", ".tool.abc.tmp", ".tool.1.2.tmp", ".toolx.1
 // files of notStale.
 func staleFixture(t *testing.T) *pinsFixture {
 	t.Helper()
-	if !flockHere() {
-		t.Skip("no flock here: b leaves every temp file")
+	if !atomicfile.Lockable {
+		t.Skip("no lock here: b leaves every temp file")
 	}
 	f := newPinsFixture(t)
 	mustWrite(t, f.config, []byte("binaries:\n  tool: {}\n"))

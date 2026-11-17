@@ -1390,14 +1390,15 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	// Record freshly-resolved digests in the lockfile so subsequent `b update`
 	// runs can skip when the tag hasn't moved. Only touches digest-resolver
 	// providers; non-digest entries and the rest of the lock are left alone.
+	var refreshErr error
 	if !o.effectiveDryRun() {
-		if err := o.refreshLockDigests(binaries, freshDigests, preSHA, downloadFailed); err != nil {
-			return err
-		}
+		refreshErr = o.refreshLockDigests(binaries, freshDigests, preSHA, downloadFailed)
 	}
 	// A failed update is an error, as in b install. Each binary that failed
 	// keeps its old file: a download replaces it in one step (atomicfile).
-	return failedDownloads(binaries, failed, "")
+	// When the refresh failed too (b.lock cannot be read), the error names
+	// both, and the command stops on it (isDownloadFailure).
+	return withDownloadErr(failedDownloads(binaries, failed, ""), refreshErr)
 }
 
 // refreshLockDigests re-reads b.lock and updates the Digest + SHA256 for

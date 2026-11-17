@@ -804,8 +804,9 @@ func TestUpdate_PruneKeepsTheRowOfAnEntry(t *testing.T) {
 		lock.BinEntry{Name: "t2", Version: "v3.0.0", SHA256: "the sha256 of .bin/t2", Preset: true},
 	)
 	f.missing["v3.0.0"] = true
-	if err := f.cmdErr(t, "update", func(*UpdateOptions) {}); err == nil || !strings.HasPrefix(err.Error(), "download failed:\n  t2") {
-		t.Errorf("b update: error %v, want the error of the download of t2", err)
+	want := "download failed:\n  t2 (tool): tool v3.0.0 not found (latest: v2.0.0)"
+	if err := f.cmdErr(t, "update", func(*UpdateOptions) {}); err == nil || err.Error() != want {
+		t.Errorf("b update: error %v, want %q", err, want)
 	}
 	if f.hits.Load() == 0 {
 		t.Error("no download, want one that fails")

@@ -1,20 +1,89 @@
 package atomicfile
 
 import (
+	"bufio"
+	"go/build/constraint"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 )
 
-// hasFlock reports whether this platform has the flock of lockTemp.
-func hasFlock() bool {
-	switch runtime.GOOS {
-	case "linux", "darwin", "freebsd", "netbsd", "openbsd", "dragonfly":
-		return true
+// buildTags is the //go:build line of the source file file, parsed.
+func buildTags(t *testing.T, file string) constraint.Expr {
+	t.Helper()
+	f, err := os.Open(file)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return false
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		if constraint.IsGoBuild(sc.Text()) {
+			expr, err := constraint.Parse(sc.Text())
+			if err != nil {
+				t.Fatalf("%s: %v", file, err)
+			}
+			return expr
+		}
+	}
+	t.Fatalf("%s has no //go:build line", file)
+	return nil
+}
+
+// builds reports whether a file with the tags expr builds for goos. The go
+// tool also sets linux for android, darwin for ios, and solaris for illumos.
+func builds(expr constraint.Expr, goos string) bool {
+	implied := map[string]string{"android": "linux", "ios": "darwin", "illumos": "solaris"}[goos]
+	return expr.Eval(func(tag string) bool { return tag == goos || tag == implied })
+}
+
+// The platforms of the lock are in the build tags of stale_flock.go only.
+// Lockable follows them, and so do the tests, which read Lockable. The
+// other files follow them too: stale_other.go and stale_windows.go cover
+// each other platform, the stale_symlink_*.go files split the platforms of
+// the lock, and stale_flock_test.go has the same tags as stale_flock.go. A
+// file whose tags drift makes the tests of the lock skip on a platform, or
+// the package not build there.
+func TestLockable_MatchesTheBuildTags(t *testing.T) {
+	flock := buildTags(t, "stale_flock.go")
+	if want := builds(flock, runtime.GOOS); Lockable != want {
+		t.Errorf("Lockable is %v on %s, but stale_flock.go builds there: %v", Lockable, runtime.GOOS, want)
+	}
+	flockTest := buildTags(t, "stale_flock_test.go")
+	rest := []constraint.Expr{flock, buildTags(t, "stale_other.go"), buildTags(t, "stale_windows.go")}
+	symlinks := []constraint.Expr{
+		buildTags(t, "stale_symlink_bsd.go"),
+		buildTags(t, "stale_symlink_netbsd.go"),
+		buildTags(t, "stale_symlink_other.go"),
+	}
+	count := func(exprs []constraint.Expr, goos string) int {
+		n := 0
+		for _, e := range exprs {
+			if builds(e, goos) {
+				n++
+			}
+		}
+		return n
+	}
+	for _, goos := range strings.Fields("aix android darwin dragonfly freebsd hurd illumos ios js linux netbsd openbsd plan9 solaris wasip1 windows zos") {
+		locks := builds(flock, goos)
+		if builds(flockTest, goos) != locks {
+			t.Errorf("%s: stale_flock_test.go builds: %v, stale_flock.go: %v", goos, !locks, locks)
+		}
+		if n := count(rest, goos); n != 1 {
+			t.Errorf("%s: %d of stale_flock.go, stale_other.go and stale_windows.go build, want 1", goos, n)
+		}
+		want := 0
+		if locks {
+			want = 1
+		}
+		if n := count(symlinks, goos); n != want {
+			t.Errorf("%s: %d stale_symlink_*.go files build, want %d", goos, n, want)
+		}
+	}
 }
 
 // names are the names of the entries of dir, sorted.
@@ -112,7 +181,7 @@ func TestRemoveStale_RemovesOnlyStaleTempFilesOfTheFile(t *testing.T) {
 		}
 		keep = append(keep, ".tool.789.tmp")
 	}
-	if !hasFlock() && runtime.GOOS != "windows" {
+	if !Lockable && runtime.GOOS != "windows" {
 		t.Skip("no flock here: RemoveStale removes nothing")
 	}
 
@@ -134,7 +203,7 @@ func TestRemoveStale_RemovesOnlyStaleTempFilesOfTheFile(t *testing.T) {
 // A temp file that a write uses (Create holds its lock) stays, also when
 // this process made it: a flock belongs to an open file.
 func TestRemoveStale_KeepsATempFileInUse(t *testing.T) {
-	if !hasFlock() {
+	if !Lockable {
 		t.Skip("no flock here")
 	}
 	dir := t.TempDir()
@@ -172,7 +241,7 @@ func TestRemoveStale_ASymlinkLooksBesideTheTarget(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks need privileges on Windows")
 	}
-	if !hasFlock() {
+	if !Lockable {
 		t.Skip("no flock here")
 	}
 	real, links := t.TempDir(), t.TempDir()
@@ -246,7 +315,7 @@ func takeTemps(t *testing.T, n int) *int {
 // When a cleanup took the new temp file, Create makes another one, and the
 // write commits.
 func TestCreate_MakesANewTempFileWhenACleanupTookIt(t *testing.T) {
-	if !hasFlock() {
+	if !Lockable {
 		t.Skip("no flock here: Create cannot see a cleanup")
 	}
 	calls := takeTemps(t, 1)
@@ -266,7 +335,7 @@ func TestCreate_MakesANewTempFileWhenACleanupTookIt(t *testing.T) {
 
 // When a cleanup takes each temp file, Create fails after createTries.
 func TestCreate_FailsWhenACleanupTakesEachTempFile(t *testing.T) {
-	if !hasFlock() {
+	if !Lockable {
 		t.Skip("no flock here: Create cannot see a cleanup")
 	}
 	calls := takeTemps(t, createTries)
