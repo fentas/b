@@ -88,10 +88,10 @@ func toolTarGz(t *testing.T, content []byte) []byte {
 }
 
 // TestInstallAndUpdate_FailedDownloadKeepsTheBinary: a download that fails
-// after the server sent a part of the body (an empty body, a connection
-// that closes halfway, a tar.gz that ends halfway, a zip with a bad
-// checksum) leaves the old binary as it was, in `b install --force` and in
-// `b update --force`, and leaves no temp file. b install returns the error.
+// (an empty body, a connection that closes halfway, a tar.gz that ends
+// halfway, a zip with a bad checksum) leaves the old binary as it was, in
+// `b install --force` and in `b update --force`, and leaves no temp file.
+// b install returns the error.
 // A later `b install` without a version keeps that binary, and b.lock keeps
 // its version: it must never record an incomplete file.
 func TestInstallAndUpdate_FailedDownloadKeepsTheBinary(t *testing.T) {
@@ -132,6 +132,9 @@ func TestInstallAndUpdate_FailedDownloadKeepsTheBinary(t *testing.T) {
 		serve   http.HandlerFunc
 	}{
 		{name: "an empty body", serve: serve(nil)},
+		// Fails before any write: the download keeps the body in a temp
+		// file until it is complete. This case covers the path before the
+		// write.
 		{name: "a connection that closes halfway", serve: func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Length", "1000")
 			_, _ = w.Write(newTool)

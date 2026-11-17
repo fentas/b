@@ -137,13 +137,27 @@ func (d *Docker) Install(ref, version, destDir string, searchPaths []string) (st
 	defer os.RemoveAll(tmpDir)
 	copied := filepath.Join(tmpDir, name)
 
+	// A symlink in the image points to a path in the image. docker cp -L
+	// follows it in the container. The cp of podman and nerdctl gets no -L,
+	// and b never follows a copied symlink on the host.
+	cpArgs := []string{"cp"}
+	if runtime == "docker" {
+		cpArgs = append(cpArgs, "-L")
+	}
 	for _, p := range searchPaths {
 		_ = os.Remove(copied)
-		cpCmd := exec.Command(runtime, "cp", containerID+":"+p, copied)
+		cpCmd := exec.Command(runtime, append(cpArgs, containerID+":"+p, copied)...)
 		if err := cpCmd.Run(); err != nil {
 			continue
 		}
 		// Found it
+		fi, err := os.Lstat(copied)
+		if err != nil {
+			return "", err
+		}
+		if !fi.Mode().IsRegular() {
+			return "", fmt.Errorf("%s in image %s is not a regular file (%s copied a symlink or a directory)", p, imageRef, runtime)
+		}
 		src, err := os.Open(copied)
 		if err != nil {
 			return "", err

@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/fentas/b/pkg/atomicfile"
 )
 
 // Lock is the top-level b.lock structure.
@@ -116,7 +118,16 @@ func WriteLock(dir string, lock *Lock, toolVersion string) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0644)
+	// Replace b.lock in one step, so a failed write keeps the old b.lock.
+	// The new file keeps the mode of the old one.
+	mode := os.FileMode(0644)
+	if fi, err := os.Stat(path); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	return atomicfile.Write(path, mode, func(w io.Writer) error {
+		_, err := w.Write(data)
+		return err
+	})
 }
 
 // sameEntries reports whether two locks hold the same binary and env

@@ -143,6 +143,60 @@ func TestWrite_FollowsASymlink(t *testing.T) {
 	noTemp(t, targetDir)
 }
 
+// checkLink fails the test when path is not a symlink to want.
+func checkLink(t *testing.T, path, want string) {
+	t.Helper()
+	got, err := os.Readlink(path)
+	if err != nil {
+		t.Fatalf("%s is not a symlink any more: %v", path, err)
+	}
+	if got != want {
+		t.Errorf("%s points to %q, want %q", path, got, want)
+	}
+}
+
+// TestWrite_RefusesASymlinkThatDoesNotResolve: when the path is a symlink
+// whose target is missing, or links that make a loop, Write returns an error
+// and writes nothing. The links stay as they were, no target is made, and no
+// temp file stays.
+func TestWrite_RefusesASymlinkThatDoesNotResolve(t *testing.T) {
+	t.Run("a missing target", func(t *testing.T) {
+		dir, targetDir := t.TempDir(), t.TempDir()
+		target := filepath.Join(targetDir, "tool")
+		path := filepath.Join(dir, "tool")
+		if err := os.Symlink(target, path); err != nil {
+			t.Skipf("no symlinks here: %v", err)
+		}
+		err := Write(path, 0755, writeString("new"))
+		if err == nil || !strings.Contains(err.Error(), "symlink that does not resolve") {
+			t.Fatalf("Write: %v, want the error about the symlink", err)
+		}
+		checkLink(t, path, target)
+		if _, err := os.Lstat(target); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("target %s: %v, want no file", target, err)
+		}
+		noTemp(t, dir)
+		noTemp(t, targetDir)
+	})
+	t.Run("a loop", func(t *testing.T) {
+		dir := t.TempDir()
+		a, b := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+		if err := os.Symlink(b, a); err != nil {
+			t.Skipf("no symlinks here: %v", err)
+		}
+		if err := os.Symlink(a, b); err != nil {
+			t.Fatal(err)
+		}
+		err := Write(a, 0755, writeString("new"))
+		if err == nil || !strings.Contains(err.Error(), "symlink that does not resolve") {
+			t.Fatalf("Write: %v, want the error about the symlink", err)
+		}
+		checkLink(t, a, b)
+		checkLink(t, b, a)
+		noTemp(t, dir)
+	})
+}
+
 // TestCommit_FailedRenameKeepsTheFile: when the rename fails (here: a
 // directory is at the path), Commit returns the error, removes the temp file
 // and leaves the path as it was.

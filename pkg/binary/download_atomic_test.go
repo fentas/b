@@ -78,6 +78,13 @@ func noTempFiles(t *testing.T, dir string) {
 // bad checksum) leaves the old binary as it was, and no temp file. A
 // download that works puts a new file in place: a hard link to the old file
 // keeps the old content.
+//
+// The empty bodies, the tar.gz preset and the zips fail after the write to
+// the binary started, so they prove that a failed write keeps the binary.
+// The connections that close halfway and the tar.gz asset fail before any
+// write: the download keeps the body in a temp file until it is complete,
+// and a tar.gz asset is read into memory before b writes the binary. These
+// cases cover the path before the write.
 func TestDownload_ReplacesTheBinaryInOneStep(t *testing.T) {
 	newTool := []byte("tool v2\n")
 	cutConnection := func(w http.ResponseWriter, _ *http.Request) {
@@ -100,11 +107,14 @@ func TestDownload_ReplacesTheBinaryInOneStep(t *testing.T) {
 		bad     http.HandlerFunc
 	}{
 		{name: "a raw preset with an empty body", good: newTool, bad: serve(nil)},
+		// Fails before the write: the download keeps the body in a temp file.
 		{name: "a raw preset whose connection closes halfway", good: newTool, bad: cutConnection},
 		{name: "a tar.gz preset cut halfway", archive: "tar.gz", good: makeTarGz(t, tarEntry{name: "tool", mode: 0755, content: newTool}).Bytes(), bad: serve(cutTarGz(t, "tool"))},
 		{name: "a zip preset with a bad checksum", archive: "zip", good: makeZip(t, map[string][]byte{"tool": newTool}).Bytes(), bad: serve(badChecksumZip(t, "tool", newTool))},
 		{name: "a raw asset with an empty body", asset: "tool", good: newTool, bad: serve(nil)},
+		// Fails before the write: the download keeps the body in a temp file.
 		{name: "a raw asset whose connection closes halfway", asset: "tool", good: newTool, bad: cutConnection},
+		// Fails before the write: the asset is read into memory first.
 		{name: "a tar.gz asset cut halfway", asset: "tool.tar.gz", good: makeTarGz(t, tarEntry{name: "tool", mode: 0755, content: newTool}).Bytes(), bad: serve(cutTarGz(t, "tool"))},
 		{name: "a zip asset with a bad checksum", asset: "tool.zip", good: makeZip(t, map[string][]byte{"tool": newTool}).Bytes(), bad: serve(badChecksumZip(t, "tool", newTool))},
 	} {
