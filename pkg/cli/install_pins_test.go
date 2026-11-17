@@ -18,17 +18,18 @@ import (
 // pinsFixture is a project with a .bin directory, a b.yaml, and a release
 // server for the presets "tool" and "other": GET /<version> answers
 // "tool <version>\n" and GET /other/<version> answers "other <version>\n",
-// or 404 when the version is in missing. The latest version is v2.0.0.
+// or 404 when the version is in missing, or an empty body when the version
+// is in empty. The latest version is v2.0.0.
 type pinsFixture struct {
 	dir, binDir, config string
 	srv                 *httptest.Server
 	hits                atomic.Int32
-	missing             map[string]bool
+	missing, empty      map[string]bool
 }
 
 func newPinsFixture(t *testing.T) *pinsFixture {
 	t.Helper()
-	f := &pinsFixture{dir: t.TempDir(), missing: map[string]bool{}}
+	f := &pinsFixture{dir: t.TempDir(), missing: map[string]bool{}, empty: map[string]bool{}}
 	f.binDir = filepath.Join(f.dir, ".bin")
 	mustMkdir(t, f.binDir)
 	f.config = filepath.Join(f.binDir, "b.yaml")
@@ -43,6 +44,9 @@ func newPinsFixture(t *testing.T) *pinsFixture {
 		}
 		if f.missing[version] {
 			http.NotFound(w, r)
+			return
+		}
+		if f.empty[version] {
 			return
 		}
 		_, _ = io.WriteString(w, name+" "+version+"\n")
@@ -373,5 +377,57 @@ func TestInstall_NoArgumentsInstallsTheConfigEntries(t *testing.T) {
 	f.install(t, false)
 	if n := f.hits.Load(); n != 0 {
 		t.Errorf("the second install: %d downloads, want 0", n)
+	}
+}
+
+// TestInstall_FailedDownloadLeavesNoPartialFile: a download that fails after
+// it has written the file (here: an empty body, which the download rejects
+// after it has truncated the file) leaves no file and no b.lock entry. The
+// next install of the unpinned binary then downloads it again; it must not
+// keep the incomplete file and record it in b.lock as installed.
+func TestInstall_FailedDownloadLeavesNoPartialFile(t *testing.T) {
+	f := newPinsFixture(t)
+	f.present(t, "v1.0.0", true)
+	f.empty["v2.0.0"] = true
+	f.install(t, true, "tool")
+	if _, err := os.Stat(filepath.Join(f.binDir, "tool")); !os.IsNotExist(err) {
+		t.Errorf(".bin/tool after the failed download: %v, want no file", err)
+	}
+	lk, err := lock.ReadLock(f.binDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := lk.FindBinary("tool"); e != nil {
+		t.Errorf("b.lock entry after the failed download: %+v, want none", e)
+	}
+
+	f.empty = map[string]bool{}
+	f.hits.Store(0)
+	f.install(t, false, "tool")
+	if n := f.hits.Load(); n != 1 {
+		t.Errorf("the next install: %d downloads, want 1", n)
+	}
+	if e, describes := f.entry(t); e.Version != "v2.0.0" || !describes {
+		t.Errorf("b.lock says %q and describes the file on disk = %v, want v2.0.0 and true", e.Version, describes)
+	}
+}
+
+// TestInstall_FailedDownloadDropsTheEntryOfAMissingFile: when a download of
+// a missing binary fails, b.lock keeps no entry for it: the entry would
+// describe a file that is not there.
+func TestInstall_FailedDownloadDropsTheEntryOfAMissingFile(t *testing.T) {
+	f := newPinsFixture(t)
+	f.present(t, "v1.0.0", true)
+	if err := os.Remove(filepath.Join(f.binDir, "tool")); err != nil {
+		t.Fatal(err)
+	}
+	f.missing["v3.0.0"] = true
+	f.install(t, false, "tool@v3.0.0")
+	lk, err := lock.ReadLock(f.binDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e := lk.FindBinary("tool"); e != nil {
+		t.Errorf("b.lock entry of the missing file: %+v, want none", e)
 	}
 }

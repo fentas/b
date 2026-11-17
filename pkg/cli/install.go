@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -46,10 +47,12 @@ type InstallOptions struct {
 	configEnvRefs     []string         // env refs to sync from config
 
 	// Set by installBinaries for updateLock: what the install did to each
-	// binary's file, and which downloads failed.
+	// binary's file, which downloads failed, and the files of failed
+	// downloads that were removed (discardPartial).
 	plans    map[*binary.Binary]installPlan
 	failedMu sync.Mutex
 	failed   map[*binary.Binary]bool
+	removed  []string
 }
 
 // installPlan is what an install does to one binary's file, decided before
@@ -83,6 +86,20 @@ func planInstall(b *binary.Binary, prev *lock.BinEntry, force bool) installPlan 
 		return installPlan{download: true}
 	}
 	return installPlan{keptVersion: known}
+}
+
+// discardPartial removes what a failed download left at file. The download
+// writes the file in place, so it can leave a part of the new binary where
+// the old one was. A file that is not the one that was there before the
+// download (before is its sha256, "" when there was none) is removed, so
+// that no later install keeps it as installed. It reports whether it removed
+// the file. A file that the download did not change stays.
+func discardPartial(file, before string) bool {
+	after, err := lock.SHA256File(file)
+	if err != nil || after == before {
+		return false
+	}
+	return os.Remove(file) == nil
 }
 
 // isProviderRef reports whether b is the binary of a provider ref, not a
@@ -393,6 +410,7 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	}
 	o.plans = make(map[*binary.Binary]installPlan, len(binaries))
 	o.failed = make(map[*binary.Binary]bool)
+	o.removed = nil
 	var toDownload []*binary.Binary
 	for _, b := range binaries {
 		plan := planInstall(b, lk.FindBinary(lockName(b)), o.Force)
@@ -433,10 +451,16 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 			// only when a download happened, not when the file was kept.
 			var err error
 			if o.plans[b].download {
+				file := b.BinaryPath()
+				before, _ := lock.SHA256File(file)
 				err = b.DownloadBinary()
 				if err != nil {
+					removed := discardPartial(file, before)
 					o.failedMu.Lock()
 					o.failed[b] = true
+					if removed {
+						o.removed = append(o.removed, file)
+					}
 					o.failedMu.Unlock()
 				}
 			}
@@ -464,6 +488,10 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	wg.Wait()
 	// Render the last frame
 	pw.Stop()
+	sort.Strings(o.removed)
+	for _, file := range o.removed {
+		fmt.Fprintf(o.IO.ErrOut, "Removed %s: its download failed and left an incomplete file\n", file)
+	}
 	return nil
 }
 
@@ -551,10 +579,15 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		if b.File == "" {
 			continue
 		}
-		// A failed download leaves the entry as it is. The download writes the
-		// file in place, so a partial file can stay; its hash then differs
-		// from the entry, and the next run downloads a pinned binary again.
+		// A failed download writes no entry. While a file is there (the file
+		// that the download did not change), its entry stays as it was. When
+		// no file is there (it was missing, or discardPartial removed what the
+		// download left), the entry goes: it would describe a file that is
+		// not there.
 		if o.failed[b] {
+			if _, err := os.Stat(b.File); os.IsNotExist(err) {
+				lk.RemoveBinary(lockName(b))
+			}
 			continue
 		}
 		hash, err := lock.SHA256File(b.File)
