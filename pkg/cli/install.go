@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -382,11 +383,13 @@ func (o *InstallOptions) Run() error {
 // installBinaries installs the specified binaries with progress tracking
 func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	// Decide per binary whether to download it or keep the present file
-	// (planInstall). A b.lock that cannot be read describes no file, so a
-	// requested version is downloaded.
+	// (planInstall), from b.lock. A missing b.lock describes no file, so a
+	// requested version is downloaded. A b.lock that is there but cannot be
+	// read is an error: taken as empty, it would make each run download every
+	// pinned binary again, and the install could not write it either.
 	lk, err := lock.ReadLock(o.LockDir())
 	if err != nil {
-		lk = &lock.Lock{}
+		return fmt.Errorf("cannot read b.lock: %w\n  Hint: repair %s, or remove it; b then downloads each pinned binary once and writes a new b.lock", err, filepath.Join(o.LockDir(), "b.lock"))
 	}
 	o.plans = make(map[*binary.Binary]installPlan, len(binaries))
 	o.failed = make(map[*binary.Binary]bool)

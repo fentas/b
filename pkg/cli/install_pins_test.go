@@ -78,6 +78,14 @@ func (f *pinsFixture) present(t *testing.T, version string, locked bool) {
 // install runs `b install <args>` in the fixture.
 func (f *pinsFixture) install(t *testing.T, force bool, args ...string) {
 	t.Helper()
+	if err := f.run(t, force, args...); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}
+
+// run is install, and returns the error of Run.
+func (f *pinsFixture) run(t *testing.T, force bool, args ...string) error {
+	t.Helper()
 	shared := NewSharedOptions(mkIO(), f.presets())
 	shared.ConfigPath = f.config
 	shared.Force = force
@@ -88,9 +96,7 @@ func (f *pinsFixture) install(t *testing.T, force bool, args ...string) {
 	if err := o.Complete(args); err != nil {
 		t.Fatal(err)
 	}
-	if err := o.Run(); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
+	return o.Run()
 }
 
 // file is the content of .bin/tool. entry is its b.lock entry, and whether
@@ -273,5 +279,42 @@ func TestInstall_TwoEntriesOfOnePresetKeepTheirFiles(t *testing.T) {
 	shared.ConfigPath = f.config
 	if err := (&VerifyOptions{SharedOptions: shared}).Run(); err != nil {
 		t.Errorf("b verify: %v", err)
+	}
+}
+
+// TestInstall_UnreadableLockIsAnError: a b.lock that is there but cannot be
+// read (it is not JSON, or it is not a file) stops the install before any
+// download, with an error that names b.lock. Taken as an empty lock, it
+// would make each run download every pinned binary again.
+func TestInstall_UnreadableLockIsAnError(t *testing.T) {
+	for name, spoil := range map[string]func(t *testing.T, file string){
+		"not JSON": func(t *testing.T, file string) {
+			mustWrite(t, file, []byte("{not json\n"))
+		},
+		"a directory": func(t *testing.T, file string) {
+			if err := os.Remove(file); err != nil {
+				t.Fatal(err)
+			}
+			mustMkdir(t, file)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newPinsFixture(t)
+			mustWrite(t, f.config, []byte("binaries:\n  tool:\n    version: v1.0.0\n"))
+			f.present(t, "v1.0.0", true)
+			spoil(t, filepath.Join(f.binDir, "b.lock"))
+			for _, args := range [][]string{{"tool"}, nil} {
+				err := f.run(t, false, args...)
+				if err == nil || !strings.Contains(err.Error(), "b.lock") {
+					t.Errorf("b install %v: error %v, want an error about b.lock", args, err)
+				}
+			}
+			if n := f.hits.Load(); n != 0 {
+				t.Errorf("%d downloads, want 0", n)
+			}
+			if got := f.file(t); got != "tool v1.0.0\n" {
+				t.Errorf(".bin/tool is %q, want the v1.0.0 file, untouched", got)
+			}
+		})
 	}
 }
