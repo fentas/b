@@ -193,15 +193,12 @@ func (o *InstallOptions) Complete(args []string) error {
 			return fmt.Errorf("unknown binary: %s\n  Hint: use a provider ref like github.com/org/repo to install any release\n  Hint: use ref:/glob dest for env file sync", name)
 		}
 
-		if version != "" {
-			b.Version = version
-		}
-
 		// --alias overrides; without it, the alias of the b.yaml entry stays.
 		// A preset installed under --alias is the binary of the entry of
-		// that name (the one --add writes): it takes that entry's file, or
-		// its own file when there is none. A provider ref keeps its one
-		// entry, file included.
+		// that name (the one --add writes): it takes that entry's settings
+		// as the no-argument install does (version, enforced pin, file,
+		// onPost), or its own file when there is no such entry. A provider
+		// ref keeps its one entry, file included.
 		if o.Alias != "" {
 			if !b.AutoDetect || b.ProviderRef == "" {
 				b.File = ""
@@ -209,10 +206,23 @@ func (o *InstallOptions) Complete(args []string) error {
 					if !entryOfPreset(e, b.Name) {
 						return fmt.Errorf("--alias %s: the b.yaml entry %s is another binary, not %s\n  Hint: pick another alias, or install %s by its own name", o.Alias, e.Name, b.Name, e.Name)
 					}
+					if rb, ok := o.resolveBinary(e); ok {
+						b = rb
+					}
 					b.File = e.File
 				}
 			}
 			b.Alias = o.Alias
+		}
+
+		// A version on the command line wins over the b.yaml entry.
+		if version != "" {
+			b.Version = version
+		}
+		if o.Add && !o.Fix {
+			if err := o.checkPin(b); err != nil {
+				return err
+			}
 		}
 		if o.Asset != "" {
 			b.AssetFilter = o.Asset
@@ -237,6 +247,33 @@ func (o *InstallOptions) configEntry(name string) *binary.LocalBinary {
 		}
 	}
 	return nil
+}
+
+// configKey is the name of the b.yaml entry of a binary, the entry that
+// --add writes: the ref of a provider ref, the alias of a preset installed
+// under an alias, the preset's name otherwise.
+func configKey(b *binary.Binary) string {
+	if b.AutoDetect && b.ProviderRef != "" {
+		return b.ProviderRef
+	}
+	if b.Alias != "" {
+		return b.Alias
+	}
+	return b.Name
+}
+
+// checkPin refuses an --add that would set the version of a b.yaml entry
+// to a value its enforced pin contradicts. The pin wins at every later
+// install, so the entry would name a version that b never installs.
+func (o *InstallOptions) checkPin(b *binary.Binary) error {
+	if b.Version == "" || b.Version == "latest" {
+		return nil
+	}
+	e := o.configEntry(configKey(b))
+	if e == nil || e.Enforced == "" || e.Enforced == b.Version {
+		return nil
+	}
+	return fmt.Errorf("--add: the b.yaml entry %s is pinned to %s (enforced), not %s\n  Hint: add --fix to move the pin, or install without --add", e.Name, e.Enforced, b.Version)
 }
 
 // entryOfPreset reports whether a b.yaml entry is the binary of that preset:
@@ -418,10 +455,7 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 		// ref, with the binary's name as its alias; an alias of a preset has
 		// its own entry under the alias (as a new entry below gets it)
 		isRef := b.AutoDetect && b.ProviderRef != ""
-		key := configName
-		if b.Alias != "" && !isRef {
-			key = b.Alias
-		}
+		key := configKey(b)
 		found := false
 		for i, existing := range config.Binaries {
 			if existing.Name == key {

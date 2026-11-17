@@ -11,6 +11,7 @@ import (
 	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/state"
 	"github.com/fentas/goodies/streams"
+	"gopkg.in/yaml.v3"
 )
 
 // TestGetBinary_ConfigEntryOverPreset: a named binary takes the b.yaml entry
@@ -105,7 +106,8 @@ func TestComplete_KeepsTheConfigAlias(t *testing.T) {
 // TestAddToConfig_UpdatesTheAliasEntry: `b install <name>@<version> --add`
 // for a b.yaml entry that is an alias of a preset updates that entry. It
 // does not add a second entry of the same name, which would replace the
-// first and lose its enforced version and its file.
+// first and lose its file and its onPost. (An entry with an enforced pin:
+// TestAddToConfig_KeepsTheEnforcedPin.)
 func TestAddToConfig_UpdatesTheAliasEntry(t *testing.T) {
 	t.Setenv("PATH_BIN", t.TempDir())
 	configPath := filepath.Join(t.TempDir(), ".bin", "b.yaml")
@@ -114,7 +116,7 @@ func TestAddToConfig_UpdatesTheAliasEntry(t *testing.T) {
 	shared := NewSharedOptions(io, presets)
 	shared.ConfigPath = configPath
 	shared.Config = &state.State{Binaries: state.BinaryList{
-		&binary.LocalBinary{Name: "tool", Alias: "rtool", Enforced: "v1.0.0", File: "/opt/x/tool"},
+		&binary.LocalBinary{Name: "tool", Alias: "rtool", Version: "v1.0.0", File: "/opt/x/tool", OnPost: "echo tool"},
 	}}
 
 	o := &InstallOptions{SharedOptions: shared, Add: true}
@@ -132,8 +134,8 @@ func TestAddToConfig_UpdatesTheAliasEntry(t *testing.T) {
 		t.Fatalf("b.yaml has %d entries, want 1: %+v", len(cfg.Binaries), cfg.Binaries)
 	}
 	e := cfg.Binaries[0]
-	if e.Name != "tool" || e.Alias != "rtool" || e.Version != "v2.0.0" || e.Enforced != "v1.0.0" || e.File != "/opt/x/tool" {
-		t.Errorf("the entry: name %q, alias %q, version %q, enforced %q, file %q; want tool, rtool, v2.0.0, v1.0.0, /opt/x/tool", e.Name, e.Alias, e.Version, e.Enforced, e.File)
+	if e.Name != "tool" || e.Alias != "rtool" || e.Version != "v2.0.0" || e.File != "/opt/x/tool" || e.OnPost != "echo tool" {
+		t.Errorf("the entry: name %q, alias %q, version %q, file %q, onPost %q; want tool, rtool, v2.0.0, /opt/x/tool, echo tool", e.Name, e.Alias, e.Version, e.File, e.OnPost)
 	}
 }
 
@@ -410,6 +412,146 @@ func TestComplete_AliasTakesTheFileOfItsEntry(t *testing.T) {
 			}
 			if got := b.BinaryPath(); got != installed {
 				t.Errorf("entry %q resolves to %q, but the binary was installed at %q", tc.flag, got, installed)
+			}
+		})
+	}
+}
+
+// aliasSettingsConfig is a b.yaml with the own entry of the preset plain and
+// two alias entries of it, as the loader builds it.
+func aliasSettingsConfig(t *testing.T) *state.State {
+	t.Helper()
+	var cfg state.State
+	if err := yaml.Unmarshal([]byte(`binaries:
+  plain:
+    version: v1.0.0
+    onPost: echo plain
+  x:
+    alias: plain
+    enforced: v3.0.0
+    file: /opt/x
+    onPost: echo x
+  z:
+    alias: plain
+    version: v4.0.0
+`), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	return &cfg
+}
+
+// TestComplete_AliasTakesTheSettingsOfItsEntry: a preset installed under an
+// --alias that names an entry of the same preset is the binary of that
+// entry. It takes that entry's version, enforced pin, file and onPost, as
+// the no-argument install does; only a version on the command line wins.
+// The settings of the entry named by the argument do not carry over.
+func TestComplete_AliasTakesTheSettingsOfItsEntry(t *testing.T) {
+	for _, tc := range []struct {
+		arg, flag, version, file, onPost string // file "" = PATH_BIN/<flag>
+		presetFile                       string // the preset's file, as BinaryPath leaves it
+	}{
+		{"plain", "x", "v3.0.0", "/opt/x", "echo x", ""},
+		{"plain@v2.0.0", "x", "v2.0.0", "/opt/x", "echo x", ""},
+		{"plain", "z", "v4.0.0", "", "", ""},
+		{"plain", "z", "v4.0.0", "", "", "/cached/plain"},
+		{"x", "plain", "v1.0.0", "", "echo plain", ""},
+		{"x", "x", "v3.0.0", "/opt/x", "echo x", ""},
+		{"z", "x", "v3.0.0", "/opt/x", "echo x", ""},
+	} {
+		t.Run(tc.arg+" --alias "+tc.flag+" "+tc.presetFile, func(t *testing.T) {
+			binDir := t.TempDir()
+			t.Setenv("PATH_BIN", binDir)
+			presets := []*binary.Binary{{Name: "plain", File: tc.presetFile, Context: context.Background()}}
+			shared := NewSharedOptions(&streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, presets)
+			shared.Config = aliasSettingsConfig(t)
+
+			o := &InstallOptions{SharedOptions: shared, Alias: tc.flag}
+			if err := o.Complete([]string{tc.arg}); err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			b := o.specifiedBinaries[0]
+			file := tc.file
+			if file == "" {
+				file = filepath.Join(binDir, tc.flag)
+			}
+			if b.Name != "plain" || b.Alias != tc.flag || b.Version != tc.version || b.BinaryPath() != file || b.OnPost != tc.onPost {
+				t.Errorf("name %q, alias %q, version %q, file %q, onPost %q; want plain, %s, %s, %s, %q", b.Name, b.Alias, b.Version, b.BinaryPath(), b.OnPost, tc.flag, tc.version, file, tc.onPost)
+			}
+		})
+	}
+}
+
+// TestCheckPin: only a version that --add writes can contradict a pin.
+func TestCheckPin(t *testing.T) {
+	shared := NewSharedOptions(&streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, nil)
+	shared.Config = aliasSettingsConfig(t)
+	o := &InstallOptions{SharedOptions: shared}
+	for version, refused := range map[string]bool{"": false, "latest": false, "v3.0.0": false, "v2.0.0": true} {
+		err := o.checkPin(&binary.Binary{Name: "plain", Alias: "x", Version: version})
+		if (err != nil) != refused {
+			t.Errorf("version %q: error %v, want refused %v", version, err, refused)
+		}
+	}
+}
+
+// TestAddToConfig_KeepsTheEnforcedPin: --add does not set the version of a
+// b.yaml entry to a value its enforced pin contradicts. Without a version
+// on the command line the entry's pin is the version; another version is
+// refused before anything is installed, unless --fix moves the pin too.
+func TestAddToConfig_KeepsTheEnforcedPin(t *testing.T) {
+	for _, tc := range []struct {
+		name, arg, flag   string
+		fix               bool
+		refused           bool
+		version, enforced string // the entry x after --add
+	}{
+		{name: "the entry's pin", arg: "plain", flag: "x", version: "v3.0.0", enforced: "v3.0.0"},
+		{name: "another version under --alias", arg: "plain@v2.0.0", flag: "x", refused: true},
+		{name: "another version by its name", arg: "x@v2.0.0", refused: true},
+		{name: "another version with --fix", arg: "plain@v2.0.0", flag: "x", fix: true, version: "v2.0.0", enforced: "v2.0.0"},
+		{name: "the pinned version by its name", arg: "x@v3.0.0", version: "v3.0.0", enforced: "v3.0.0"},
+		{name: "latest by its name, which --add does not write", arg: "x@latest", version: "", enforced: "v3.0.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PATH_BIN", t.TempDir())
+			configPath := filepath.Join(t.TempDir(), ".bin", "b.yaml")
+			presets := []*binary.Binary{{Name: "plain", Context: context.Background()}}
+			shared := NewSharedOptions(&streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, presets)
+			shared.ConfigPath = configPath
+			shared.Config = aliasSettingsConfig(t)
+
+			o := &InstallOptions{SharedOptions: shared, Add: true, Fix: tc.fix, Alias: tc.flag}
+			err := o.Complete([]string{tc.arg})
+			if tc.refused {
+				if err == nil || !strings.Contains(err.Error(), "enforced") {
+					t.Fatalf("error %v, want the refusal of the enforced pin", err)
+				}
+				if len(o.specifiedBinaries) != 0 {
+					t.Errorf("%d binaries to install after the refusal, want 0", len(o.specifiedBinaries))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			if err := o.addToConfig(o.specifiedBinaries); err != nil {
+				t.Fatalf("addToConfig: %v", err)
+			}
+			cfg, err := state.LoadConfigFromPath(configPath)
+			if err != nil {
+				t.Fatalf("LoadConfigFromPath: %v", err)
+			}
+			for _, e := range cfg.Binaries {
+				switch e.Name {
+				case "x":
+					if e.Version != tc.version || e.Enforced != tc.enforced || e.File != "/opt/x" {
+						t.Errorf("entry x: version %q, enforced %q, file %q; want %s, %s, /opt/x", e.Version, e.Enforced, e.File, tc.version, tc.enforced)
+					}
+				case "plain":
+					if e.Version != "v1.0.0" {
+						t.Errorf("entry plain: version %q, want v1.0.0 (unchanged)", e.Version)
+					}
+				}
 			}
 		})
 	}
