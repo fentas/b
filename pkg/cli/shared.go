@@ -113,25 +113,32 @@ func (o *SharedOptions) resolveBinary(lb *binary.LocalBinary) (*binary.Binary, b
 	return b, ok
 }
 
-// GetBinary returns a binary by name or provider ref.
+// GetBinary returns a binary by name or provider ref. A b.yaml entry of that
+// name applies over the preset (version, file, onPost), with the same merge
+// as the no-argument install (resolveBinary), so `b install <name>` and
+// `b install` install the same binary.
 func (o *SharedOptions) GetBinary(name string) (*binary.Binary, bool) {
-	// First try direct lookup (preset)
-	if b, ok := o.lookup[name]; ok {
-		return b, ok
-	}
-
-	// If not found and we have config, check if this is a reference alias
+	// First the config entry of that name: a preset with its overrides, or a
+	// reference alias. A provider ref is resolved below; its alias is the
+	// binary's name, not a preset.
 	var configEntry *binary.LocalBinary
 	if o.Config != nil {
 		for _, lb := range o.Config.Binaries {
 			if lb.Name == name {
-				if b, ok := o.resolveBinary(lb); ok {
-					return b, true
+				if !lb.IsProviderRef {
+					if b, ok := o.resolveBinary(lb); ok {
+						return b, true
+					}
 				}
 				configEntry = lb
 				break
 			}
 		}
+	}
+
+	// Then the preset itself
+	if b, ok := o.lookup[name]; ok {
+		return b, ok
 	}
 
 	// Check if this is a provider ref (e.g. github.com/derailed/k9s)
@@ -161,6 +168,9 @@ func (o *SharedOptions) GetBinary(name string) (*binary.Binary, bool) {
 			}
 			if configEntry.File != "" {
 				b.File = configEntry.File
+			}
+			if configEntry.Alias != "" {
+				b.Alias = configEntry.Alias
 			}
 			if configEntry.Asset != "" {
 				b.AssetFilter = configEntry.Asset

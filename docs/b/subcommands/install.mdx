@@ -94,6 +94,13 @@ b install --alias envsubst --add renvsubst
 b install --alias myenvsubst renvsubst@v0.10.0
 ```
 
+Rules for `--alias`:
+- It takes one binary argument. To give several binaries an alias, install each one on its own.
+- When the alias is the name of a b.yaml entry of the same binary, the install uses the settings of that entry (version, enforced pin, file, onPost). A version on the command line wins.
+- When the alias is already the name of another binary (another entry in b.yaml, or the binary of a provider ref), b refuses the install.
+
+With `--add`, b does not write a version that the entry's `enforced` pin contradicts. Add `--fix` to move the pin as well.
+
 ### Sync environment files (SCP syntax)
 
 Use SCP-style syntax to sync files from upstream git repositories:

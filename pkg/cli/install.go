@@ -44,6 +44,56 @@ type InstallOptions struct {
 	specifiedBinaries []*binary.Binary // Binaries specified on command line
 	envInstalls       []envInstall     // SCP-style env installs
 	configEnvRefs     []string         // env refs to sync from config
+
+	// Set by installBinaries for updateLock: what the install did to each
+	// binary's file, and which downloads failed.
+	plans    map[*binary.Binary]installPlan
+	failedMu sync.Mutex
+	failed   map[*binary.Binary]bool
+}
+
+// installPlan is what an install does to one binary's file, decided before
+// any download.
+type installPlan struct {
+	download    bool   // download the binary: it is missing, --force, or another version is asked for
+	keptVersion string // the version of a present file that is kept, from b.lock; "" when unknown
+}
+
+// planInstall decides whether an install replaces a present binary or keeps
+// it. prev is the binary's b.lock entry, nil when there is none. A present
+// file is kept when no version is asked for, or when b.lock says that file
+// (by its sha256) is the version asked for. When another version is asked
+// for, or b.lock does not describe the file, the binary is downloaded: a
+// kept file must never be recorded under a version it is not.
+func planInstall(b *binary.Binary, prev *lock.BinEntry, force bool) installPlan {
+	if force || !b.BinaryExists() {
+		return installPlan{download: true}
+	}
+	known := ""
+	if prev != nil && prev.SHA256 != "" {
+		if hash, err := lock.SHA256File(b.BinaryPath()); err == nil && hash == prev.SHA256 {
+			known = prev.Version
+		}
+	}
+	requested := b.Version
+	if requested == "latest" {
+		requested = ""
+	}
+	if requested != "" && requested != known {
+		return installPlan{download: true}
+	}
+	return installPlan{keptVersion: known}
+}
+
+// lockName is the name of a binary's b.lock row. An alias entry of a preset
+// has its own row under the alias, so two b.yaml entries of one preset (each
+// with its own file and version) never share a row. The preset's own entry
+// and a provider ref keep the row under the binary's name, as before.
+func lockName(b *binary.Binary) string {
+	if b.Alias != "" && (!b.AutoDetect || b.ProviderRef == "") {
+		return b.Alias
+	}
+	return b.Name
 }
 
 // NewInstallCmd creates the install subcommand
@@ -92,7 +142,7 @@ func NewInstallCmd(shared *SharedOptions) *cobra.Command {
 
 	cmd.Flags().BoolVar(&o.Add, "add", false, "Add binary to b.yaml during install")
 	cmd.Flags().BoolVar(&o.Fix, "fix", false, "Pin the specified version in b.yaml")
-	cmd.Flags().StringVar(&o.Alias, "alias", "", "Alias for the binary")
+	cmd.Flags().StringVar(&o.Alias, "alias", "", "Alias for the binary (one binary argument only)")
 	cmd.Flags().StringVar(&o.Asset, "asset", "", "Glob pattern to filter release assets (e.g. \"argsh-so-*\")")
 	cmd.Flags().StringVar(&o.OnPost, "on-post", "", "Shell command to run after install/update (saved to b.yaml with --add)")
 	return cmd
@@ -130,7 +180,11 @@ func (o *InstallOptions) Complete(args []string) error {
 			continue
 		}
 
-		// Binary install
+		// Binary install. --alias names the file of one binary, so it
+		// takes only one.
+		if o.Alias != "" && len(o.specifiedBinaries) > 0 {
+			return fmt.Errorf("--alias %s names one binary, but %s is a second one\n  Hint: install each binary on its own, with its own --alias", o.Alias, arg)
+		}
 		name, version := parseBinaryArg(arg)
 		b, ok := o.GetBinary(name)
 		if !ok {
@@ -143,11 +197,38 @@ func (o *InstallOptions) Complete(args []string) error {
 			return fmt.Errorf("unknown binary: %s\n  Hint: use a provider ref like github.com/org/repo to install any release\n  Hint: use ref:/glob dest for env file sync", name)
 		}
 
+		// --alias overrides; without it, the alias of the b.yaml entry stays.
+		// An --alias that already names another binary is refused. A preset
+		// installed under --alias is the binary of the entry of that name
+		// (the one --add writes): it takes that entry's settings as the
+		// no-argument install does (version, enforced pin, file, onPost),
+		// or its own file when there is no such entry. A provider ref keeps
+		// its one entry, file included.
+		if o.Alias != "" {
+			if e := o.aliasOwner(b); e != nil {
+				return fmt.Errorf("--alias %s: the b.yaml entry %s is another binary, not %s\n  Hint: pick another alias, or install %s by its own name", o.Alias, e.Name, b.Name, e.Name)
+			}
+			if !b.AutoDetect || b.ProviderRef == "" {
+				b.File = ""
+				if e := o.configEntry(o.Alias); e != nil {
+					if rb, ok := o.resolveBinary(e); ok {
+						b = rb
+					}
+					b.File = e.File
+				}
+			}
+			b.Alias = o.Alias
+		}
+
+		// A version on the command line wins over the b.yaml entry.
 		if version != "" {
 			b.Version = version
 		}
-
-		b.Alias = o.Alias
+		if o.Add && !o.Fix {
+			if err := o.checkPin(b); err != nil {
+				return err
+			}
+		}
 		if o.Asset != "" {
 			b.AssetFilter = o.Asset
 		}
@@ -158,6 +239,87 @@ func (o *InstallOptions) Complete(args []string) error {
 	}
 
 	return nil
+}
+
+// configEntry is the b.yaml entry of that name, nil when there is none.
+func (o *InstallOptions) configEntry(name string) *binary.LocalBinary {
+	if o.Config == nil {
+		return nil
+	}
+	for _, lb := range o.Config.Binaries {
+		if lb.Name == name {
+			return lb
+		}
+	}
+	return nil
+}
+
+// configKey is the name of the b.yaml entry of a binary, the entry that
+// --add writes: the ref of a provider ref, the alias of a preset installed
+// under an alias, the preset's name otherwise.
+func configKey(b *binary.Binary) string {
+	if b.AutoDetect && b.ProviderRef != "" {
+		return b.ProviderRef
+	}
+	if b.Alias != "" {
+		return b.Alias
+	}
+	return b.Name
+}
+
+// checkPin refuses an --add that would set the version of a b.yaml entry
+// to a value its enforced pin contradicts. The pin wins at every later
+// install, so the entry would name a version that b never installs.
+func (o *InstallOptions) checkPin(b *binary.Binary) error {
+	if b.Version == "" || b.Version == "latest" {
+		return nil
+	}
+	e := o.configEntry(configKey(b))
+	if e == nil || e.Enforced == "" || e.Enforced == b.Version {
+		return nil
+	}
+	return fmt.Errorf("--add: the b.yaml entry %s is pinned to %s (enforced), not %s\n  Hint: add --fix to move the pin, or install without --add", e.Name, e.Enforced, b.Version)
+}
+
+// aliasOwner is the b.yaml entry of another binary that the name --alias
+// already belongs to, nil when there is none. That is an entry of that name
+// which is not an entry of b's preset (for a provider ref b: any entry of
+// that name), or a provider-ref entry other than b's own whose binary has
+// that name: its alias, or the name from the ref. The name decides whether
+// an entry is a provider ref, as in the loader.
+func (o *InstallOptions) aliasOwner(b *binary.Binary) *binary.LocalBinary {
+	if o.Config == nil {
+		return nil
+	}
+	isRef := b.AutoDetect && b.ProviderRef != ""
+	for _, e := range o.Config.Binaries {
+		if !provider.IsProviderRef(e.Name) {
+			if e.Name == o.Alias && (isRef || !entryOfPreset(e, b.Name)) {
+				return e
+			}
+			continue
+		}
+		if e.Name == b.ProviderRef {
+			continue // b's own entry; a preset has no ref
+		}
+		name := e.Alias
+		if name == "" {
+			name = provider.BinaryName(e.Name)
+		}
+		if e.Name == o.Alias || name == o.Alias {
+			return e
+		}
+	}
+	return nil
+}
+
+// entryOfPreset reports whether a b.yaml entry that is not a provider ref is
+// the binary of that preset: the preset's own entry, or an alias entry of it.
+func entryOfPreset(e *binary.LocalBinary, preset string) bool {
+	if e.Alias == "" {
+		return e.Name == preset
+	}
+	return e.Alias == preset
 }
 
 // Validate checks if the install operation is valid
@@ -215,21 +377,28 @@ func (o *InstallOptions) Run() error {
 
 // installBinaries installs the specified binaries with progress tracking
 func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
-	// Pre-resolve ambiguous assets before starting progress bars.
-	// In force mode, all binaries will download. In non-force mode,
-	// only resolve for missing binaries (the ones EnsureBinary will download).
-	if o.Force {
-		resolveAmbiguousAssets(binaries, o.Quiet, o.IO)
-	} else {
-		var missing []*binary.Binary
-		for _, b := range binaries {
-			if !b.BinaryExists() {
-				missing = append(missing, b)
-			}
+	// Decide per binary whether to download it or keep the present file
+	// (planInstall). A b.lock that cannot be read describes no file, so a
+	// requested version is downloaded.
+	lk, err := lock.ReadLock(o.LockDir())
+	if err != nil {
+		lk = &lock.Lock{}
+	}
+	o.plans = make(map[*binary.Binary]installPlan, len(binaries))
+	o.failed = make(map[*binary.Binary]bool)
+	var toDownload []*binary.Binary
+	for _, b := range binaries {
+		plan := planInstall(b, lk.FindBinary(lockName(b)), o.Force)
+		o.plans[b] = plan
+		if plan.download {
+			toDownload = append(toDownload, b)
 		}
-		if len(missing) > 0 {
-			resolveAmbiguousAssets(missing, o.Quiet, o.IO)
-		}
+	}
+
+	// Pre-resolve ambiguous assets before starting progress bars, for the
+	// binaries that will download.
+	if len(toDownload) > 0 {
+		resolveAmbiguousAssets(toDownload, o.Quiet, o.IO)
 	}
 
 	// Wire fallback selector for any remaining ambiguous cases
@@ -256,17 +425,18 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 			b.Tracker = tracker
 			b.Writer = pw
 
-			// Track whether a download actually happened so we only run
-			// the onPost hook when the binary changed — not on a no-op
-			// "already exists" skip from EnsureBinary(false).
-			wasMissing := !b.BinaryExists()
+			// Download or keep the file, as planned. The onPost hook runs
+			// only when a download happened, not when the file was kept.
 			var err error
-			if o.Force {
+			if o.plans[b].download {
 				err = b.DownloadBinary()
-			} else {
-				err = b.EnsureBinary(false) // Don't update, just ensure
+				if err != nil {
+					o.failedMu.Lock()
+					o.failed[b] = true
+					o.failedMu.Unlock()
+				}
 			}
-			downloaded := err == nil && (o.Force || wasMissing)
+			downloaded := err == nil && o.plans[b].download
 
 			// Run onPost hook only when a download actually happened.
 			if downloaded && b.OnPost != "" {
@@ -314,16 +484,24 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 			configName = b.ProviderRef
 		}
 
-		// Check if already exists
+		// Check if already exists: a provider ref has one entry, under the
+		// ref, with the binary's name as its alias; an alias of a preset has
+		// its own entry under the alias (as a new entry below gets it)
+		isRef := b.AutoDetect && b.ProviderRef != ""
+		key := configKey(b)
 		found := false
 		for i, existing := range config.Binaries {
-			if existing.Name == configName {
+			if existing.Name == key {
 				// Update version only if we have a specific version
 				if b.Version != "" && b.Version != "latest" {
 					config.Binaries[i].Version = b.Version
 					if o.Fix {
 						config.Binaries[i].Enforced = b.Version
 					}
+				}
+				// --alias renames the binary of a provider ref
+				if isRef && o.Alias != "" {
+					config.Binaries[i].Alias = o.Alias
 				}
 				found = true
 				break
@@ -342,8 +520,14 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 				}
 			}
 			if b.Alias != "" {
-				entry.Name = b.Alias
-				entry.Alias = configName
+				if isRef {
+					entry.Alias = b.Alias
+				} else {
+					entry.Name = b.Alias
+					if b.Alias != configName {
+						entry.Alias = configName
+					}
+				}
 			}
 			if b.AssetFilter != "" {
 				entry.Asset = b.AssetFilter
@@ -370,13 +554,25 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		if b.File == "" {
 			continue
 		}
+		// A failed download leaves the entry as it is. The download writes the
+		// file in place, so a partial file can stay; its hash then differs
+		// from the entry, and the next run downloads a pinned binary again.
+		if o.failed[b] {
+			continue
+		}
 		hash, err := lock.SHA256File(b.File)
 		if err != nil {
 			continue
 		}
+		// A kept file keeps the version that b.lock gives it ("" when b.lock
+		// does not describe it), not the version of the command line.
+		version := b.Version
+		if plan, ok := o.plans[b]; ok && !plan.download {
+			version = plan.keptVersion
+		}
 		entry := lock.BinEntry{
-			Name:    b.Name,
-			Version: b.Version,
+			Name:    lockName(b),
+			Version: version,
 			SHA256:  hash,
 		}
 		if b.AutoDetect {
@@ -397,7 +593,7 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			// associate an old image's digest with a new Source, which
 			// could produce coincidental false "up to date" skips later.
 			preserveDigest := func() {
-				prev := lk.FindBinary(b.Name)
+				prev := lk.FindBinary(entry.Name)
 				if prev == nil || prev.Source != entry.Source {
 					return
 				}
