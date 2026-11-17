@@ -862,9 +862,6 @@ func TestCallUpdateBinaries_UsesHook(t *testing.T) {
 }
 
 func TestCallUpdateBinaries_DefaultPath(t *testing.T) {
-	if raceEnabled {
-		t.Skip("skipping: go-pretty progress.Render/Stop race (library bug)")
-	}
 	tmpDir := t.TempDir()
 	binPath := filepath.Join(tmpDir, "jq")
 	os.WriteFile(binPath, []byte("binary"), 0755)
@@ -882,13 +879,7 @@ func TestCallUpdateBinaries_DefaultPath(t *testing.T) {
 
 // --- updateBinaries ---
 
-// The following tests call updateBinaries directly which triggers a race in
-// the go-pretty progress library (Render/Stop race). Skipped under -race.
-
 func TestUpdateBinaries_WithBinary(t *testing.T) {
-	if raceEnabled {
-		t.Skip("skipping: go-pretty progress.Render/Stop race (library bug)")
-	}
 	tmpDir := t.TempDir()
 	binPath := filepath.Join(tmpDir, "jq")
 	os.WriteFile(binPath, []byte("binary"), 0755)
@@ -913,9 +904,6 @@ func TestUpdateBinaries_WithBinary(t *testing.T) {
 }
 
 func TestUpdateBinaries_WithAlias(t *testing.T) {
-	if raceEnabled {
-		t.Skip("skipping: go-pretty progress.Render/Stop race (library bug)")
-	}
 	tmpDir := t.TempDir()
 	binPath := filepath.Join(tmpDir, "envsubst")
 	os.WriteFile(binPath, []byte("binary"), 0755)
@@ -941,9 +929,6 @@ func TestUpdateBinaries_WithAlias(t *testing.T) {
 }
 
 func TestUpdateBinaries_Force(t *testing.T) {
-	if raceEnabled {
-		t.Skip("skipping: go-pretty progress.Render/Stop race (library bug)")
-	}
 	tmpDir := t.TempDir()
 	binPath := filepath.Join(tmpDir, "jq")
 	os.WriteFile(binPath, []byte("binary"), 0755)

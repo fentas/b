@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/fatih/color"
 	"github.com/fentas/goodies/progress"
@@ -410,10 +409,7 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	}
 
 	wg := sync.WaitGroup{}
-	pw := progress.NewWriter(progress.StyleDownload, o.IO.Out)
-	pw.Style().Visibility.Percentage = true
-	go pw.Render()
-	defer pw.Stop()
+	pw := newProgressRun(o.IO.Out)
 
 	for _, b := range binaries {
 		wg.Add(1)
@@ -423,7 +419,7 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 
 			tracker := pw.AddTracker(fmt.Sprintf("Installing %s", b.Name), 0)
 			b.Tracker = tracker
-			b.Writer = pw
+			b.Writer = pw.Writer
 
 			// Download or keep the file, as planned. The onPost hook runs
 			// only when a download happened, not when the file was kept.
@@ -458,8 +454,8 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	}
 
 	wg.Wait()
-	// Let the progress bar render
-	time.Sleep(200 * time.Millisecond)
+	// Render the last frame
+	pw.Stop()
 	return nil
 }
 

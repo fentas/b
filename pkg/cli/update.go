@@ -1235,9 +1235,7 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	downloadFailed := make(map[string]bool, len(binaries))
 
 	wg := sync.WaitGroup{}
-	pw := progress.NewWriter(progress.StyleDownload, o.IO.Out)
-	pw.Style().Visibility.Percentage = true
-	go pw.Render()
+	pw := newProgressRun(o.IO.Out)
 	defer pw.Stop()
 
 	for _, b := range binaries {
@@ -1253,7 +1251,7 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 
 			tracker := pw.AddTracker(fmt.Sprintf("Updating %s", name), 0)
 			b.Tracker = tracker
-			b.Writer = pw
+			b.Writer = pw.Writer
 
 			var err error
 			attempted := false
