@@ -793,11 +793,15 @@ func TestInstall_AliasForceDoesNotTakeOverThePresetsRow(t *testing.T) {
 // TestUpdate_PruneKeepsTheRowOfAnEntry: the prune keeps the row of a file
 // that a b.yaml entry installs, also while the file is not there: here the
 // download of `b update` fails. The row keeps the pin of the entry for the
-// next install.
+// next install. The prune of the same `b update` removes the row gone,
+// which no entry installs and whose file is not there.
 func TestUpdate_PruneKeepsTheRowOfAnEntry(t *testing.T) {
 	f := newPinsFixture(t)
 	mustWrite(t, f.config, []byte("binaries:\n  t2:\n    alias: tool\n    version: v3.0.0\n"))
-	f.writeLock(t, lock.BinEntry{Name: "t2", Version: "v3.0.0", SHA256: "the sha256 of .bin/t2", Preset: true})
+	f.writeLock(t,
+		lock.BinEntry{Name: "gone", Version: "v1.0.0", SHA256: "the sha256 of .bin/gone", Preset: true},
+		lock.BinEntry{Name: "t2", Version: "v3.0.0", SHA256: "the sha256 of .bin/t2", Preset: true},
+	)
 	f.missing["v3.0.0"] = true
 	f.update(t)
 	if f.hits.Load() == 0 {
@@ -891,6 +895,34 @@ func TestInstall_AbsoluteFileHasOneRowInEachCheckout(t *testing.T) {
 	f.install(t, false)
 	if got := f.rowNames(t); got != "" {
 		t.Errorf("b.lock rows without the entry and the file: %q, want none", got)
+	}
+}
+
+// TestVerify_ReadsFilesInTheDirectoryOfBYaml: b.yaml is outside the
+// project (b --config). b verify reads the file of a row in the directory
+// of b.yaml, also when no b.yaml entry installs it.
+func TestVerify_ReadsFilesInTheDirectoryOfBYaml(t *testing.T) {
+	f := newPinsFixture(t)
+	conf := t.TempDir()
+	f.config = filepath.Join(conf, "b.yaml")
+	mustWrite(t, f.config, []byte("binaries: {}\n"))
+	file := filepath.Join(conf, "tools", "x")
+	mustMkdir(t, filepath.Dir(file))
+	mustWriteExec(t, file, []byte("x\n"))
+	hash, err := lock.SHA256File(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realConf, err := filepath.EvalSymlinks(conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := filepath.ToSlash(filepath.Join(realConf, "tools", "x"))
+	if err := lock.WriteLock(conf, &lock.Lock{Binaries: []lock.BinEntry{{Name: name, SHA256: hash}}}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.verify(t); err != nil {
+		t.Errorf("b verify: %v", err)
 	}
 }
 
