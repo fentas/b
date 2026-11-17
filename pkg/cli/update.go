@@ -1221,9 +1221,7 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	//
 	// These maps (and downloadFailed below) are keyed by the binary: two
 	// binaries with the same name under other aliases must not share a
-	// digest or an outcome. A key that the download cannot change: a
-	// provider that installs the file itself sets b.File, and with it the
-	// name of the b.lock row (lockName).
+	// digest or an outcome.
 	digestCapable := make(map[*binary.Binary]bool, len(binaries))
 	freshDigests := make(map[*binary.Binary]string, len(binaries))
 	for _, b := range binaries {

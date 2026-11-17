@@ -78,12 +78,8 @@ func TestGitInstall_ReplacesTheBinaryInOneStep(t *testing.T) {
 	destDir := t.TempDir()
 	dest := filepath.Join(destDir, "tool")
 	link := oldBinary(t, dest)
-	path, err := (&Git{}).Install("git://"+repoDir+":tool", "", destDir)
-	if err != nil {
+	if err := (&Git{}).Install("git://"+repoDir+":tool", "", dest); err != nil {
 		t.Fatalf("Install: %v", err)
-	}
-	if path != dest {
-		t.Errorf("Install returned %s, want %s", path, dest)
 	}
 	checkReplaced(t, dest, link, "new")
 }

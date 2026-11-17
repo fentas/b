@@ -222,6 +222,19 @@ Aliases are useful when:
 - You need multiple versions of the same tool with different names
 - You want to maintain compatibility with existing scripts while using a different implementation
 
+For a provider ref, the name of the entry is the ref, and `alias` is the name of the file in `.bin`. Each provider writes the binary under this name: GitHub, GitLab, Gitea, `go://`, `git://`, `docker://` and `oci://`.
+
+```yaml
+binaries:
+  # installs .bin/imports, not .bin/goimports
+  go://golang.org/x/tools/cmd/goimports:
+    alias: imports
+  # installs .bin/helm3, not .bin/helm
+  oci://alpine/helm:
+    version: 3.14.0
+    alias: helm3
+```
+
 ### Custom File Paths
 
 You can specify custom file paths for binaries using the `file` field. This allows you to:
@@ -250,6 +263,7 @@ binaries:
 **Path Resolution:**
 - **Relative paths** (like `../bin/tool` or `./tools/binary`) are resolved relative to the config file's directory
 - **Absolute paths** (like `/usr/local/bin/tool`) are used exactly as specified (mind the permissions)
+- Each provider writes the binary to this path: GitHub, GitLab, Gitea, `go://`, `git://`, `docker://` and `oci://`. The name of the binary does not change the path.
 - This feature is particularly useful for pointing to pre-existing binaries or organizing tools in custom directory structures
 
 ## Uninstalling

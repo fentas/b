@@ -13,6 +13,13 @@ import (
 // installFile writes the binary file dest from r in one step
 // (atomicfile.Write), with mode 0755. When the write fails, the old file
 // stays as it was.
+//
+// The providers that install a file themselves (go, git, docker, oci) get
+// dest from the caller: the file that the b.yaml entry names
+// (binary.Binary.BinaryPath), its `file:`, else its alias or the binary
+// name in the binary directory. The release providers write the same
+// file. These providers use BinaryName only to find the binary in GOBIN
+// or in the image, not to name dest.
 func installFile(dest string, r io.Reader) error {
 	return atomicfile.Write(dest, 0755, func(w io.Writer) error {
 		_, err := io.Copy(w, r)
@@ -195,6 +202,7 @@ func IsProviderRef(s string) bool {
 // e.g. "github.com/derailed/k9s" → "k9s",
 //
 //	"go://github.com/jrhouston/tfk8s" → "tfk8s",
+//	"go://example.com/tool/v2" → "tool",
 //	"docker://hashicorp/terraform" → "terraform"
 //	"docker://docker@cli:/usr/local/bin/docker" → "docker"
 func BinaryName(ref string) string {
@@ -255,5 +263,26 @@ func BinaryName(ref string) string {
 	}
 	// Last path segment.
 	parts := strings.Split(r, "/")
-	return parts[len(parts)-1]
+	last := parts[len(parts)-1]
+	// The go command names a binary after the package path, but it skips
+	// a major version suffix: go install example.com/tool/v2 writes "tool".
+	if strings.HasPrefix(ref, "go://") && len(parts) > 1 && isMajorVersion(last) {
+		return parts[len(parts)-2]
+	}
+	return last
+}
+
+// isMajorVersion reports whether elem is a major version suffix of a Go
+// module path, v2 or higher (v2, v3, v10). This is the rule of the go
+// command for the name of a binary. v0, v1 and v01 are not.
+func isMajorVersion(elem string) bool {
+	if len(elem) < 2 || elem[0] != 'v' || elem[1] == '0' || elem == "v1" {
+		return false
+	}
+	for _, c := range elem[1:] {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }

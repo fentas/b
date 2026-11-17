@@ -48,17 +48,17 @@ func (g *Git) FetchRelease(ref, version string) (*Release, error) {
 	return nil, fmt.Errorf("git provider does not use FetchRelease; use Install()")
 }
 
-// Install extracts a single file from a git repo and copies it to destDir.
-func (g *Git) Install(ref, version, destDir string) (string, error) {
+// Install writes a single file of a git repo to the file dest
+// (installFile). The caller picks dest: the file that the b.yaml entry
+// names.
+func (g *Git) Install(ref, version, dest string) error {
 	repo, filePath, err := parseGitRef(ref)
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	name := filepath.Base(filePath)
-	dest := filepath.Join(destDir, name)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return "", err
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return err
 	}
 
 	if isLocalRepo(repo) {
@@ -68,7 +68,7 @@ func (g *Git) Install(ref, version, destDir string) (string, error) {
 }
 
 // installFromLocal extracts a file from a local git repo.
-func (g *Git) installFromLocal(repo, filePath, version, dest string) (string, error) {
+func (g *Git) installFromLocal(repo, filePath, version, dest string) error {
 	treeish := version
 	if treeish == "" {
 		treeish = "HEAD"
@@ -78,22 +78,19 @@ func (g *Git) installFromLocal(repo, filePath, version, dest string) (string, er
 	obj := treeish + ":" + filePath
 	data, err := exec.Command("git", "-C", repo, "show", obj).Output()
 	if err != nil {
-		return "", fmt.Errorf("git show %s in %s: %w", obj, repo, err)
+		return fmt.Errorf("git show %s in %s: %w", obj, repo, err)
 	}
 
-	if err := installFile(dest, bytes.NewReader(data)); err != nil {
-		return "", err
-	}
-	return dest, nil
+	return installFile(dest, bytes.NewReader(data))
 }
 
 // installFromRemote clones/caches a remote repo and extracts the file.
-func (g *Git) installFromRemote(repo, filePath, version, dest string) (string, error) {
+func (g *Git) installFromRemote(repo, filePath, version, dest string) error {
 	cacheRoot := gitcache.DefaultCacheRoot()
 	resolved := gitcache.ResolveGitURL(repo, "")
 
 	if err := gitcache.EnsureCloneAuth(cacheRoot, repo, resolved.URL, resolved.AuthHeader); err != nil {
-		return "", fmt.Errorf("cloning %s: %w", resolved.URL, err)
+		return fmt.Errorf("cloning %s: %w", resolved.URL, err)
 	}
 
 	commit := version
@@ -101,7 +98,7 @@ func (g *Git) installFromRemote(repo, filePath, version, dest string) (string, e
 		var err error
 		commit, err = gitcache.ResolveRefAuth(resolved.URL, "HEAD", resolved.AuthHeader)
 		if err != nil {
-			return "", err
+			return err
 		}
 	}
 
@@ -113,13 +110,10 @@ func (g *Git) installFromRemote(repo, filePath, version, dest string) (string, e
 
 	data, err := gitcache.ShowFile(cacheRoot, repo, commit, filePath)
 	if err != nil {
-		return "", fmt.Errorf("reading %s at %s from %s: %w", filePath, commit, repo, err)
+		return fmt.Errorf("reading %s at %s from %s: %w", filePath, commit, repo, err)
 	}
 
-	if err := installFile(dest, bytes.NewReader(data)); err != nil {
-		return "", err
-	}
-	return dest, nil
+	return installFile(dest, bytes.NewReader(data))
 }
 
 // parseGitRef splits "git://<repo>:<filepath>" into repo and file path.

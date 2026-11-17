@@ -213,18 +213,18 @@ func TestGitInstallLocal(t *testing.T) {
 	run("git", "add", "-A")
 	run("git", "commit", "-m", "initial")
 
-	// Test Install
+	// Install writes the file that the caller names (an alias here), not
+	// a file named after the file in the repo.
 	g := &Git{}
 	destDir := t.TempDir()
+	path := filepath.Join(destDir, "my-lo")
 	ref := "git://" + repoDir + ":.scripts/lo"
 
-	path, err := g.Install(ref, "", destDir)
-	if err != nil {
+	if err := g.Install(ref, "", path); err != nil {
 		t.Fatalf("Git.Install() error: %v", err)
 	}
-
-	if filepath.Base(path) != "lo" {
-		t.Errorf("installed binary name = %q, want %q", filepath.Base(path), "lo")
+	if _, err := os.Lstat(filepath.Join(destDir, "lo")); !os.IsNotExist(err) {
+		t.Errorf("Git.Install() wrote %s (%v), want only %s", filepath.Join(destDir, "lo"), err, path)
 	}
 
 	// Verify file content
@@ -299,11 +299,10 @@ func TestGitInstallLocalWithVersion(t *testing.T) {
 
 	// Install at v1.0 tag
 	g := &Git{}
-	destDir := t.TempDir()
+	path := filepath.Join(t.TempDir(), "tool")
 	ref := "git://" + repoDir + ":tool"
 
-	path, err := g.Install(ref, "v1.0", destDir)
-	if err != nil {
+	if err := g.Install(ref, "v1.0", path); err != nil {
 		t.Fatalf("Git.Install() at v1.0 error: %v", err)
 	}
 
@@ -316,9 +315,8 @@ func TestGitInstallLocalWithVersion(t *testing.T) {
 	}
 
 	// Install at HEAD (default)
-	destDir2 := t.TempDir()
-	path2, err := g.Install(ref, "", destDir2)
-	if err != nil {
+	path2 := filepath.Join(t.TempDir(), "tool")
+	if err := g.Install(ref, "", path2); err != nil {
 		t.Fatalf("Git.Install() at HEAD error: %v", err)
 	}
 
