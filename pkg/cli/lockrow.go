@@ -89,23 +89,56 @@ func within(dir, file string) bool {
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+// maxLinkHops is the number of symlinks that realDir follows past the part
+// of a path that exists, as the Linux kernel follows 40. So a symlink loop
+// ends.
+const maxLinkHops = 40
+
 // realDir is the absolute path of the directory dir with its symlinks
 // resolved: the longest part of it that exists, through
 // filepath.EvalSymlinks, and the rest as it is. The directory need not
 // exist. It works the same for the path of a file (entryPath).
+//
+// When the first part of the rest is a symlink whose target is not there
+// (a dangling symlink), realDir follows it too (os.Readlink; a relative
+// target is relative to the directory of the link), and resolves the
+// target in the same way. An install that writes through such a link
+// writes its target when the target is there. After maxLinkHops links (a
+// loop), realDir stops and keeps the path as it is.
 func realDir(dir string) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return dir
+		return filepath.Clean(dir)
 	}
-	rest := ""
-	for d := abs; ; {
-		if resolved, err := filepath.EvalSymlinks(d); err == nil {
+	for hops := 0; ; hops++ {
+		resolved, rest := evalPrefix(abs)
+		if rest == "" {
+			return resolved
+		}
+		first, tail, _ := strings.Cut(rest, string(filepath.Separator))
+		link := filepath.Join(resolved, first)
+		target, err := os.Readlink(link)
+		if err != nil || hops == maxLinkHops {
 			return filepath.Join(resolved, rest)
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(resolved, target)
+		}
+		abs = filepath.Join(target, tail)
+	}
+}
+
+// evalPrefix splits the absolute, clean path abs into the longest part of
+// it that filepath.EvalSymlinks resolves (resolved) and the rest, relative
+// to it ("" when all of abs resolves).
+func evalPrefix(abs string) (resolved, rest string) {
+	for d := abs; ; {
+		if r, err := filepath.EvalSymlinks(d); err == nil {
+			return r, rest
 		}
 		parent := filepath.Dir(d)
 		if parent == d {
-			return abs
+			return abs, ""
 		}
 		rest = filepath.Join(filepath.Base(d), rest)
 		d = parent
@@ -254,10 +287,12 @@ func entryFileName(e *binary.LocalBinary) string {
 // `file:` (LoadConfigFromPath joins a relative one to the directory of
 // b.yaml), else the file of its name (entryFileName) in the binary
 // directory, as BinaryPath gives it. The path is absolute and clean, with
-// its symlinks resolved (realDir): the install writes through a symlink to
-// the file that it points to (atomicfile), so a symlink and that file are
-// one file. Thus two entries that write one file in two forms, for example
-// ./tools/x and the absolute path of tools/x, have the same entryPath.
+// its symlinks resolved (realDir), also a symlink whose target is not there
+// yet: the install writes through a symlink to the file that it points to
+// (atomicfile), so a symlink and that file are one file. Thus two entries
+// that write one file in two forms, for example ../tools/x (relative to the
+// directory of b.yaml) and the absolute path of tools/x, have the same
+// entryPath.
 func entryPath(e *binary.LocalBinary) string {
 	file := e.File
 	if file == "" {

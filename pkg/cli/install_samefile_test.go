@@ -6,12 +6,17 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // sameFileFixture is a project for the duplicate check of b.yaml: b.yaml in
 // .bin (the binary directory), the directory tools, and, where the system
-// allows symlinks, tools-link (a symlink to tools) and tools/t2 (a symlink
-// to the file .bin/t2, which is there).
+// allows symlinks:
+//   - tools-link, a symlink to tools;
+//   - tools/t2, a symlink to the file .bin/t2, which is there;
+//   - tools/ta, a relative symlink to .bin/ta, which is not there;
+//   - tools/loop, a symlink to itself, and tools/loop-a and tools/loop-b,
+//     two symlinks to each other.
 type sameFileFixture struct {
 	project, binDir, config string
 	realProject             string // project with its symlinks resolved
@@ -25,10 +30,22 @@ func newSameFileFixture(t *testing.T, project, binDir string) *sameFileFixture {
 		t.Fatal(err)
 	}
 	f := &sameFileFixture{project: project, binDir: binDir, config: filepath.Join(binDir, "b.yaml"), realProject: resolved}
-	mustMkdir(t, filepath.Join(project, "tools"))
+	tools := filepath.Join(project, "tools")
+	mustMkdir(t, tools)
 	mustWriteExec(t, filepath.Join(binDir, "t2"), []byte("t2\n"))
-	f.links = os.Symlink(filepath.Join(project, "tools"), filepath.Join(project, "tools-link")) == nil &&
-		os.Symlink(filepath.Join(binDir, "t2"), filepath.Join(project, "tools", "t2")) == nil
+	f.links = true
+	for link, target := range map[string]string{
+		filepath.Join(project, "tools-link"): tools,
+		filepath.Join(tools, "t2"):           filepath.Join(binDir, "t2"),
+		filepath.Join(tools, "ta"):           filepath.Join("..", ".bin", "ta"),
+		filepath.Join(tools, "loop"):         "loop",
+		filepath.Join(tools, "loop-a"):       "loop-b",
+		filepath.Join(tools, "loop-b"):       "loop-a",
+	} {
+		if os.Symlink(target, link) != nil {
+			f.links = false
+		}
+	}
 	return f
 }
 
@@ -79,6 +96,21 @@ func sameFileCases(f *sameFileFixture) []struct {
 		want:   "b.yaml: the entries fakerel://a/tool and fakerel://b/tool install the same file " + f.resolved("tools/x") + ", written as ../tools-link/x and ../tools/x",
 		link:   true,
 	}, {
+		name:   "an alias entry and a dangling symlink to its file",
+		config: "binaries:\n  ta:\n    alias: tool\n  fakerel://x/y:\n    file: ../tools/ta\n",
+		want:   "b.yaml: the entries fakerel://x/y and ta install the same file " + f.resolved(".bin/ta") + ", written as ../tools/ta and ta",
+		link:   true,
+	}, {
+		name:   "two symlink loops",
+		config: "binaries:\n  fakerel://a/tool:\n    file: ../tools/loop\n  fakerel://b/tool:\n    file: ../tools/loop-a\n  fakerel://c/tool:\n    file: ../tools/loop-b\n",
+		link:   true,
+	}, {
+		name: "two groups of entries",
+		config: "binaries:\n  t2:\n    alias: tool\n  fakerel://x/y:\n    file: " + f.abs(".bin/t2") + "\n" +
+			"  fakerel://a/tool:\n    file: ../tools/x\n  fakerel://b/tool:\n    file: " + f.abs("tools/x") + "\n",
+		want: "b.yaml: the entries fakerel://a/tool and fakerel://b/tool install the same file " + f.resolved("tools/x") + ", written as ../tools/x and " + f.abs("tools/x") + "\n" +
+			"b.yaml: the entries fakerel://x/y and t2 install the same file t2\n",
+	}, {
 		name:   "two files of one name in two directories",
 		config: "binaries:\n  fakerel://a/tool:\n    file: ../a/x\n  fakerel://b/tool:\n    file: " + f.abs("b/x") + "\n",
 	}}
@@ -88,7 +120,10 @@ func sameFileCases(f *sameFileFixture) []struct {
 // when the paths of their files are the same, absolute and clean, with
 // their symlinks resolved, as the install writes them: also when b.yaml
 // writes the file in two forms (relative and absolute, untidy, through a
-// symlink). The error is the same in both orders of the entries.
+// symlink, also one whose target is not there yet). A symlink loop ends.
+// The error is the same in both orders of the entries, and in each run:
+// the check reads a map, so each order runs 20 times when there is an
+// error.
 func TestCheckConfigFiles_ResolvedPath(t *testing.T) {
 	project := t.TempDir()
 	binDir := filepath.Join(project, ".bin")
@@ -107,22 +142,30 @@ func TestCheckConfigFiles_ResolvedPath(t *testing.T) {
 			if err := shared.LoadConfig(); err != nil {
 				t.Fatal(err)
 			}
-			var errs []string
+			// The order of the lines of the error is the one to pin: run each
+			// order 20 times when there is an error.
+			runs := 20
+			if tc.want == "" {
+				runs = 1
+			}
+			first := ""
 			for _, order := range []string{"as loaded", "reversed"} {
-				err := checkConfigFiles(shared.Config)
-				switch {
-				case tc.want == "" && err != nil:
-					t.Errorf("%s: %v, want no error", order, err)
-				case tc.want != "" && (err == nil || !strings.Contains(err.Error()+"\n", tc.want)):
-					t.Errorf("%s: %v, want %q", order, err, tc.want)
-				}
-				if err != nil {
-					errs = append(errs, err.Error())
+				for range runs {
+					err := checkConfigFiles(shared.Config)
+					switch {
+					case tc.want == "" && err != nil:
+						t.Fatalf("%s: %v, want no error", order, err)
+					case tc.want == "":
+						continue
+					case err == nil || !strings.Contains(err.Error()+"\n", tc.want):
+						t.Fatalf("%s: %v, want %q", order, err, tc.want)
+					case first == "":
+						first = err.Error()
+					case err.Error() != first:
+						t.Fatalf("%s: the error changes from run to run:\n%s\n%s", order, first, err)
+					}
 				}
 				slices.Reverse(shared.Config.Binaries)
-			}
-			if len(errs) == 2 && errs[0] != errs[1] {
-				t.Errorf("the error depends on the order of the entries:\n%s\n%s", errs[0], errs[1])
 			}
 		})
 	}
@@ -205,5 +248,132 @@ func TestInstall_AddRefusesASymlinkToTheFileOfAnEntry(t *testing.T) {
 	}
 	if data, err := os.ReadFile(f.config); err != nil || string(data) != config {
 		t.Errorf("b.yaml: %q (%v), want it unchanged", data, err)
+	}
+}
+
+// TestInstall_RefusesADanglingSymlinkToTheFileOfAnEntry: the entry
+// fakerel://a/tool writes .bin/ta, which is not there yet. The `file:` of
+// fakerel://b/tool is tools/tb, a relative symlink to .bin/ta. The install
+// of a would make .bin/ta, and the install of b would then write over it
+// through the link. The first `b install` and `b update` refuse b.yaml
+// before any download, and .bin/ta stays absent.
+func TestInstall_RefusesADanglingSymlinkToTheFileOfAnEntry(t *testing.T) {
+	f := newPinsFixture(t)
+	f.serveRefs(t)
+	mustMkdir(t, filepath.Join(f.dir, "tools"))
+	if err := os.Symlink(filepath.Join("..", ".bin", "ta"), filepath.Join(f.dir, "tools", "tb")); err != nil {
+		t.Skipf("no symlinks on this system: %v", err)
+	}
+	realBin, err := filepath.EvalSymlinks(f.binDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, f.config, []byte("binaries:\n  fakerel://a/tool:\n    alias: ta\n  fakerel://b/tool:\n    file: ../tools/tb\n"))
+	want := "b.yaml: the entries fakerel://a/tool and fakerel://b/tool install the same file " + filepath.Join(realBin, "ta") + ", written as ../tools/tb and ta"
+	for _, cmd := range []string{"install", "update"} {
+		err := f.cmdErr(t, cmd, func(*UpdateOptions) {})
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("b %s: error %v, want %q", cmd, err, want)
+		}
+	}
+	if n := f.hits.Load(); n != 0 {
+		t.Errorf("%d downloads, want 0", n)
+	}
+	if _, err := os.Lstat(filepath.Join(f.binDir, "ta")); !os.IsNotExist(err) {
+		t.Errorf(".bin/ta: %v, want no file", err)
+	}
+}
+
+// TestRealDir_DanglingSymlinks: realDir follows a symlink whose target is
+// not there: a chain of relative links, an absolute link, a link with ".."
+// in its target, and a link in the middle of the path. It ends on a
+// symlink loop, and keeps the path of a link of the loop.
+func TestRealDir_DanglingSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustMkdir(t, filepath.Join(dir, "sub"))
+	for link, target := range map[string]string{
+		"a":       "b",
+		"b":       filepath.Join("missing", "c"),
+		"abs":     filepath.Join(dir, "elsewhere", "f"),
+		"sub/up":  filepath.Join("..", "up-target"),
+		"loop":    "loop",
+		"loop-a":  "loop-b",
+		"loop-b":  "loop-a",
+		"to-loop": "loop-a",
+	} {
+		if err := os.Symlink(target, filepath.Join(dir, filepath.FromSlash(link))); err != nil {
+			t.Skipf("no symlinks on this system: %v", err)
+		}
+	}
+	for _, tc := range []struct {
+		path string
+		want []string
+	}{
+		{"a", []string{filepath.Join(resolved, "missing", "c")}},
+		{"a/x", []string{filepath.Join(resolved, "missing", "c", "x")}},
+		{"abs", []string{filepath.Join(resolved, "elsewhere", "f")}},
+		{"sub/up", []string{filepath.Join(resolved, "up-target")}},
+		{"none/x", []string{filepath.Join(resolved, "none", "x")}},
+		{"loop", []string{filepath.Join(resolved, "loop")}},
+		{"loop-a", []string{filepath.Join(resolved, "loop-a"), filepath.Join(resolved, "loop-b")}},
+		{"to-loop/x", []string{filepath.Join(resolved, "loop-a", "x"), filepath.Join(resolved, "loop-b", "x")}},
+	} {
+		done := make(chan string, 1)
+		go func() { done <- realDir(filepath.Join(dir, filepath.FromSlash(tc.path))) }()
+		select {
+		case got := <-done:
+			if !slices.Contains(tc.want, got) {
+				t.Errorf("realDir(%s) = %s, want one of %v", tc.path, got, tc.want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("realDir(%s) did not return in 5 seconds", tc.path)
+		}
+	}
+}
+
+// TestEntryPath_IsTheBinaryPath: the path of the file of each b.yaml entry
+// (entryPath) is the file that the install writes (BinaryPath of the
+// binary of the entry), with its symlinks resolved: for a preset, an alias
+// entry of a preset, a provider ref with an alias and a version, a provider
+// ref with a version, and entries with `file:`. The test also checks the
+// expected path, so the two cannot be wrong in the same way.
+func TestEntryPath_IsTheBinaryPath(t *testing.T) {
+	f := newPinsFixture(t)
+	project, err := filepath.EvalSymlinks(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, f.config, []byte("binaries:\n  tool: {}\n  t2:\n    alias: other\n"+
+		"  fakerel://org/name@v1.0.0:\n    alias: na\n  fakerel://org/plain@v1.0.0: {}\n"+
+		"  fakerel://org/other:\n    file: ../tools/x\n  other:\n    file: ./o\n"))
+	want := map[string]string{
+		"tool":                       ".bin/tool",
+		"t2":                         ".bin/t2",
+		"fakerel://org/name@v1.0.0":  ".bin/na",
+		"fakerel://org/plain@v1.0.0": ".bin/plain",
+		"fakerel://org/other":        "tools/x",
+		"other":                      ".bin/o",
+	}
+	shared := NewSharedOptions(mkIO(), f.presets())
+	shared.ConfigPath = f.config
+	if err := shared.LoadConfig(); err != nil {
+		t.Fatal(err)
+	}
+	bins := shared.GetBinariesFromConfig()
+	if len(bins) != len(want) || len(shared.Config.Binaries) != len(want) {
+		t.Fatalf("%d binaries of %d entries, want %d", len(bins), len(shared.Config.Binaries), len(want))
+	}
+	for i, e := range shared.Config.Binaries {
+		got, file := entryPath(e), realDir(bins[i].BinaryPath())
+		if got != file {
+			t.Errorf("%s: entryPath %s, the install writes %s", e.Name, got, file)
+		}
+		if w := filepath.Join(project, filepath.FromSlash(want[e.Name])); got != w {
+			t.Errorf("%s: entryPath %s, want %s", e.Name, got, w)
+		}
 	}
 }
