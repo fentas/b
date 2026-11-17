@@ -1,10 +1,15 @@
 package cli
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/lock"
+	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/b/pkg/provider"
 	"github.com/fentas/b/pkg/state"
 )
@@ -97,4 +102,59 @@ func lockFileNames(cfg *state.State, binaries []*binary.Binary) map[string]bool 
 		names[lockName(b)] = true
 	}
 	return names
+}
+
+// pruneLock removes the b.lock rows that describe no file: no b.yaml entry
+// installs a file of that name, and the binary directory has no file of that
+// name. Such a row makes b verify fail, and no install writes it again: the
+// row of an entry that b.yaml does not have any more, or a row of an older b
+// under an old name. A row of a file that is there stays, also without an
+// entry: an install of a binary that is not in b.yaml, or an entry of another
+// b.yaml (b --config) that uses the same b.lock. It returns the names of the
+// rows that it removed.
+func (o *SharedOptions) pruneLock() ([]string, error) {
+	if o.Config == nil {
+		return nil, nil
+	}
+	binDir := path.GetBinaryPath()
+	if binDir == "" {
+		return nil, nil
+	}
+	lockDir := o.LockDir()
+	lk, err := lock.ReadLock(lockDir)
+	if err != nil {
+		return nil, err
+	}
+	installed := configFileNames(o.Config)
+	var removed []string
+	kept := lk.Binaries[:0]
+	for _, e := range lk.Binaries {
+		if _, ok := installed[e.Name]; !ok && e.Name != "" {
+			if _, err := os.Lstat(filepath.Join(binDir, e.Name)); os.IsNotExist(err) {
+				removed = append(removed, e.Name)
+				continue
+			}
+		}
+		kept = append(kept, e)
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	lk.Binaries = kept
+	if err := lock.WriteLock(lockDir, lk, o.bVersion); err != nil {
+		return nil, err
+	}
+	return removed, nil
+}
+
+// reportPruned tells which b.lock rows pruneLock removed, or warns when it
+// failed.
+func (o *SharedOptions) reportPruned(removed []string, err error) {
+	if err != nil {
+		fmt.Fprintf(o.IO.ErrOut, "Warning: failed to remove stale rows from b.lock: %v\n", err)
+		return
+	}
+	if len(removed) > 0 {
+		fmt.Fprintf(o.IO.ErrOut, "Removed from b.lock: %s (no b.yaml entry installs them, and their files are not there)\n", strings.Join(removed, ", "))
+	}
 }

@@ -71,6 +71,13 @@ func (f *pinsFixture) serveRefs(t *testing.T) {
 // update runs `b update <args>` in the fixture.
 func (f *pinsFixture) update(t *testing.T, args ...string) {
 	t.Helper()
+	f.updateWith(t, func(*UpdateOptions) {}, args...)
+}
+
+// updateWith runs `b update <args>` in the fixture with the flags that set
+// gives.
+func (f *pinsFixture) updateWith(t *testing.T, set func(*UpdateOptions), args ...string) {
+	t.Helper()
 	shared := NewSharedOptions(&streams.IO{
 		In:     strings.NewReader(""),
 		Out:    &syncWriter{w: &bytes.Buffer{}},
@@ -81,6 +88,7 @@ func (f *pinsFixture) update(t *testing.T, args ...string) {
 		t.Fatal(err)
 	}
 	o := &UpdateOptions{SharedOptions: shared}
+	set(o)
 	if err := o.Complete(args); err != nil {
 		t.Fatal(err)
 	}
@@ -333,5 +341,84 @@ func TestDigestMatchesLock_OldRowNeedsTheFile(t *testing.T) {
 		if got := digestMatchesLock(b, lk, "sha256:aaa"); got != tc.want {
 			t.Errorf("%s: digestMatchesLock = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// staleRowsFixture is a project with b.lock rows that no b.yaml entry
+// installs. b.yaml has an alias entry t2 of the preset tool, and an alias
+// entry t3 with its file outside the binary directory (b.yaml `file:`).
+// b.lock has the rows of t2 and t3; the row tool of an older b (before alias
+// rows) without a file .bin/tool; the row gone of an entry that b.yaml does
+// not have any more, without a file; and the row adhoc of a present file
+// that b.yaml does not install (`b install` of a binary without --add).
+func staleRowsFixture(t *testing.T) *pinsFixture {
+	t.Helper()
+	f := newPinsFixture(t)
+	mustWrite(t, f.config, []byte("binaries:\n  t2:\n    alias: tool\n    version: v3.0.0\n  t3:\n    alias: tool\n    version: v1.0.0\n    file: ../tools/t3\n"))
+	t2 := f.binFile(t, "t2", "tool v3.0.0\n")
+	adhoc := f.binFile(t, "adhoc", "other v2.0.0\n")
+	t3file := filepath.Join(f.dir, "tools", "t3")
+	mustMkdir(t, filepath.Dir(t3file))
+	mustWriteExec(t, t3file, []byte("tool v1.0.0\n"))
+	t3, err := lock.SHA256File(t3file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.writeLock(t,
+		lock.BinEntry{Name: "t2", Version: "v3.0.0", SHA256: t2, Preset: true},
+		lock.BinEntry{Name: "t3", Version: "v1.0.0", SHA256: t3, Preset: true},
+		lock.BinEntry{Name: "tool", Version: "v3.0.0", SHA256: t2, Preset: true},
+		lock.BinEntry{Name: "gone", Version: "v1.0.0", SHA256: "the sha256 of a removed file", Preset: true},
+		lock.BinEntry{Name: "adhoc", Version: "v2.0.0", SHA256: adhoc, Preset: true},
+	)
+	return f
+}
+
+// rowNames are the names of the binary rows in b.lock, in order.
+func (f *pinsFixture) rowNames(t *testing.T) string {
+	t.Helper()
+	var names []string
+	for _, e := range f.readLock(t).Binaries {
+		names = append(names, e.Name)
+	}
+	return strings.Join(names, " ")
+}
+
+// TestInstall_PrunesRowsThatDescribeNoFile: `b install` without arguments
+// removes the b.lock rows that no b.yaml entry installs and whose file is
+// not in the binary directory: b verify reports such a row as missing. The
+// rows of the entries stay (also t3, whose file is outside the binary
+// directory), and so does the row of a present file without an entry. A
+// named install removes nothing.
+func TestInstall_PrunesRowsThatDescribeNoFile(t *testing.T) {
+	f := staleRowsFixture(t)
+	f.install(t, false, "t2")
+	if got, want := f.rowNames(t), "t2 t3 tool gone adhoc"; got != want {
+		t.Errorf("b.lock rows after `b install t2`: %q, want %q", got, want)
+	}
+
+	f.install(t, false)
+	if n := f.hits.Load(); n != 0 {
+		t.Errorf("%d downloads, want 0", n)
+	}
+	if got, want := f.rowNames(t), "t2 t3 adhoc"; got != want {
+		t.Errorf("b.lock rows after `b install`: %q, want %q", got, want)
+	}
+}
+
+// TestUpdate_PrunesRowsThatDescribeNoFile: `b update` without arguments
+// removes the same rows as `b install`. `b update --dry-run` removes nothing.
+func TestUpdate_PrunesRowsThatDescribeNoFile(t *testing.T) {
+	f := staleRowsFixture(t)
+	f.updateWith(t, func(o *UpdateOptions) { o.DryRun = true })
+	if got, want := f.rowNames(t), "t2 t3 tool gone adhoc"; got != want {
+		t.Errorf("b.lock rows after `b update --dry-run`: %q, want %q", got, want)
+	}
+	f.update(t)
+	if got, want := f.rowNames(t), "t2 t3 adhoc"; got != want {
+		t.Errorf("b.lock rows after `b update`: %q, want %q", got, want)
+	}
+	if n := f.hits.Load(); n != 0 {
+		t.Errorf("%d downloads, want 0", n)
 	}
 }

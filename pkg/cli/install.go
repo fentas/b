@@ -408,10 +408,13 @@ func (o *InstallOptions) Run() error {
 
 	// Handle binary installs
 	var binariesToInstall []*binary.Binary
+	// A run without arguments installs all of b.yaml. It also removes the
+	// b.lock rows that describe no file (pruneLock).
+	all := len(o.specifiedBinaries) == 0 && len(o.envInstalls) == 0 && len(o.configEnvRefs) == 0
 
 	if len(o.specifiedBinaries) > 0 {
 		binariesToInstall = o.specifiedBinaries
-	} else if len(o.envInstalls) == 0 && len(o.configEnvRefs) == 0 {
+	} else if all {
 		// Install all from config (binaries + envs)
 		binariesToInstall = o.GetBinariesFromConfig()
 
@@ -424,6 +427,9 @@ func (o *InstallOptions) Run() error {
 	}
 
 	if len(binariesToInstall) == 0 && len(o.envInstalls) == 0 && len(o.configEnvRefs) == 0 {
+		if all {
+			o.reportPruned(o.pruneLock())
+		}
 		fmt.Fprintln(o.IO.Out, "No binaries or envs to install")
 		return nil
 	}
@@ -435,6 +441,9 @@ func (o *InstallOptions) Run() error {
 
 		if err := o.updateLock(binariesToInstall); err != nil {
 			fmt.Fprintf(o.IO.ErrOut, "Warning: failed to update b.lock: %v\n", err)
+		}
+		if all {
+			o.reportPruned(o.pruneLock())
 		}
 
 		if o.Add {

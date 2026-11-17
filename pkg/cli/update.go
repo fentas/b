@@ -510,6 +510,11 @@ func (o *UpdateOptions) runAll() error {
 				return err
 			}
 		}
+		// All binaries of b.yaml are in scope: remove the b.lock rows that
+		// describe no file, as `b install` without arguments does.
+		if !o.effectiveDryRun() {
+			o.reportPruned(o.pruneLock())
+		}
 	}
 
 	// Update envs
