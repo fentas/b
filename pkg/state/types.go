@@ -7,6 +7,7 @@ import (
 
 	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/envmatch"
+	"github.com/fentas/b/pkg/provider"
 )
 
 type State struct {
@@ -328,10 +329,7 @@ func (list *BinaryList) UnmarshalYAML(unmarshal func(interface{}) error) error {
 			b = &binary.LocalBinary{}
 		}
 		b.Name = name
-		// Detect provider refs: contains "/" or "://"
-		if strings.Contains(name, "/") || strings.Contains(name, "://") {
-			b.IsProviderRef = true
-		}
+		b.IsProviderRef = provider.IsProviderRef(name)
 		data = append(data, b)
 	}
 	*list = data

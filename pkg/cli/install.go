@@ -84,12 +84,18 @@ func planInstall(b *binary.Binary, prev *lock.BinEntry, force bool) installPlan 
 	return installPlan{keptVersion: known}
 }
 
+// isProviderRef reports whether b is the binary of a provider ref, not a
+// preset. (A b.yaml entry of a provider ref has IsProviderRef set.)
+func isProviderRef(b *binary.Binary) bool {
+	return b.AutoDetect && b.ProviderRef != ""
+}
+
 // lockName is the name of a binary's b.lock row. An alias entry of a preset
 // has its own row under the alias, so two b.yaml entries of one preset (each
 // with its own file and version) never share a row. The preset's own entry
 // and a provider ref keep the row under the binary's name, as before.
 func lockName(b *binary.Binary) string {
-	if b.Alias != "" && (!b.AutoDetect || b.ProviderRef == "") {
+	if b.Alias != "" && !isProviderRef(b) {
 		return b.Alias
 	}
 	return b.Name
@@ -207,7 +213,7 @@ func (o *InstallOptions) Complete(args []string) error {
 			if e := o.aliasOwner(b); e != nil {
 				return fmt.Errorf("--alias %s: the b.yaml entry %s is another binary, not %s\n  Hint: pick another alias, or install %s by its own name", o.Alias, e.Name, b.Name, e.Name)
 			}
-			if !b.AutoDetect || b.ProviderRef == "" {
+			if !isProviderRef(b) {
 				b.File = ""
 				if e := o.configEntry(o.Alias); e != nil {
 					if rb, ok := o.resolveBinary(e); ok {
@@ -257,7 +263,7 @@ func (o *InstallOptions) configEntry(name string) *binary.LocalBinary {
 // --add writes: the ref of a provider ref, the alias of a preset installed
 // under an alias, the preset's name otherwise.
 func configKey(b *binary.Binary) string {
-	if b.AutoDetect && b.ProviderRef != "" {
+	if isProviderRef(b) {
 		return b.ProviderRef
 	}
 	if b.Alias != "" {
@@ -284,15 +290,14 @@ func (o *InstallOptions) checkPin(b *binary.Binary) error {
 // already belongs to, nil when there is none. That is an entry of that name
 // which is not an entry of b's preset (for a provider ref b: any entry of
 // that name), or a provider-ref entry other than b's own whose binary has
-// that name: its alias, or the name from the ref. The name decides whether
-// an entry is a provider ref, as in the loader.
+// that name: its alias, or the name from the ref.
 func (o *InstallOptions) aliasOwner(b *binary.Binary) *binary.LocalBinary {
 	if o.Config == nil {
 		return nil
 	}
-	isRef := b.AutoDetect && b.ProviderRef != ""
+	isRef := isProviderRef(b)
 	for _, e := range o.Config.Binaries {
-		if !provider.IsProviderRef(e.Name) {
+		if !e.IsProviderRef {
 			if e.Name == o.Alias && (isRef || !entryOfPreset(e, b.Name)) {
 				return e
 			}
@@ -474,16 +479,10 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 
 	// Add binaries to config
 	for _, b := range binaries {
-		// Use provider ref as the config key if auto-detected
-		configName := b.Name
-		if b.AutoDetect && b.ProviderRef != "" {
-			configName = b.ProviderRef
-		}
-
 		// Check if already exists: a provider ref has one entry, under the
 		// ref, with the binary's name as its alias; an alias of a preset has
 		// its own entry under the alias (as a new entry below gets it)
-		isRef := b.AutoDetect && b.ProviderRef != ""
+		isRef := isProviderRef(b)
 		key := configKey(b)
 		found := false
 		for i, existing := range config.Binaries {
@@ -506,7 +505,8 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 
 		if !found {
 			entry := &binary.LocalBinary{
-				Name: configName,
+				Name:          key,
+				IsProviderRef: isRef,
 			}
 			// Only set version if it's not "latest" or empty
 			if b.Version != "" && b.Version != "latest" {
@@ -515,15 +515,13 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 					entry.Enforced = b.Version
 				}
 			}
-			if b.Alias != "" {
-				if isRef {
-					entry.Alias = b.Alias
-				} else {
-					entry.Name = b.Alias
-					if b.Alias != configName {
-						entry.Alias = configName
-					}
-				}
+			// A provider ref names its binary with the alias; an alias
+			// entry of a preset names the preset with it.
+			switch {
+			case isRef:
+				entry.Alias = b.Alias
+			case b.Alias != "" && b.Alias != b.Name:
+				entry.Alias = b.Name
 			}
 			if b.AssetFilter != "" {
 				entry.Asset = b.AssetFilter
