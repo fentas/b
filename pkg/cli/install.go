@@ -192,8 +192,14 @@ func (o *InstallOptions) Complete(args []string) error {
 		// its own file when there is none. A provider ref keeps its one
 		// entry, file included.
 		if o.Alias != "" {
-			if !(b.AutoDetect && b.ProviderRef != "") {
-				b.File = o.configFile(o.Alias)
+			if !b.AutoDetect || b.ProviderRef == "" {
+				b.File = ""
+				if e := o.configEntry(o.Alias); e != nil {
+					if !entryOfPreset(e, b.Name) {
+						return fmt.Errorf("--alias %s: the b.yaml entry %s is another binary, not %s\n  Hint: pick another alias, or install %s by its own name", o.Alias, e.Name, b.Name, e.Name)
+					}
+					b.File = e.File
+				}
 			}
 			b.Alias = o.Alias
 		}
@@ -209,18 +215,30 @@ func (o *InstallOptions) Complete(args []string) error {
 	return nil
 }
 
-// configFile is the file of the b.yaml entry of that name, "" when there is
-// no such entry or it names no file.
-func (o *InstallOptions) configFile(name string) string {
+// configEntry is the b.yaml entry of that name, nil when there is none.
+func (o *InstallOptions) configEntry(name string) *binary.LocalBinary {
 	if o.Config == nil {
-		return ""
+		return nil
 	}
 	for _, lb := range o.Config.Binaries {
 		if lb.Name == name {
-			return lb.File
+			return lb
 		}
 	}
-	return ""
+	return nil
+}
+
+// entryOfPreset reports whether a b.yaml entry is the binary of that preset:
+// the preset's own entry, or an alias entry of it. A provider ref's entry is
+// never a preset's.
+func entryOfPreset(e *binary.LocalBinary, preset string) bool {
+	if e.IsProviderRef || provider.IsProviderRef(e.Name) {
+		return false
+	}
+	if e.Alias == "" {
+		return e.Name == preset
+	}
+	return e.Alias == preset
 }
 
 // Validate checks if the install operation is valid
@@ -428,7 +446,9 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 					entry.Alias = b.Alias
 				} else {
 					entry.Name = b.Alias
-					entry.Alias = configName
+					if b.Alias != configName {
+						entry.Alias = configName
+					}
 				}
 			}
 			if b.AssetFilter != "" {

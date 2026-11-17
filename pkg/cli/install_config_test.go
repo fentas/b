@@ -5,6 +5,7 @@ import (
 	"context"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/fentas/b/pkg/binary"
@@ -316,31 +317,69 @@ func TestGetBinary_ProviderRefAliasIsNotAPreset(t *testing.T) {
 // TestComplete_AliasTakesTheFileOfItsEntry: a preset installed under --alias
 // is the binary of the b.yaml entry of that name, which --add writes. It
 // installs at that entry's file, or at its own file when there is no such
-// entry, and the written b.yaml resolves to the installed file.
+// entry, and the written b.yaml resolves to the installed file. An entry of
+// another binary under that name is refused, and nothing is installed.
 func TestComplete_AliasTakesTheFileOfItsEntry(t *testing.T) {
+	start := []*binary.LocalBinary{
+		{Name: "plain", Version: "v1.0.0", File: "/opt/plain"},
+		{Name: "x", Alias: "plain", Version: "v1.0.0", File: "/opt/x"},
+		{Name: "y", Alias: "other", Version: "v1.0.0", File: "/opt/y"},
+		{Name: "other", Version: "v1.0.0", File: "/opt/other"},
+		{Name: "github.com/org/plain", Alias: "plain", File: "/opt/rplain"},
+	}
+	onlyX := []*binary.LocalBinary{{Name: "x", Alias: "plain", Version: "v1.0.0", File: "/opt/x"}}
 	for _, tc := range []struct {
-		name, arg, flag, entry string
-		file                   string // "" = the default file, PATH_BIN/<alias>
+		name, arg, flag string
+		config          []*binary.LocalBinary // nil = start
+		file            string                // "" = the default file, PATH_BIN/<alias>
+		refused         bool
 	}{
-		{"its own name", "plain@v2.0.0", "plain", "plain", "/opt/plain"},
-		{"an alias entry with a file", "plain@v2.0.0", "x", "x", "/opt/x"},
-		{"a new name", "plain@v2.0.0", "p", "p", ""},
+		{name: "its own name", arg: "plain@v2.0.0", flag: "plain", file: "/opt/plain"},
+		{name: "an alias entry with a file", arg: "plain@v2.0.0", flag: "x", file: "/opt/x"},
+		{name: "a new name", arg: "plain@v2.0.0", flag: "p"},
+		{name: "its own name, only an alias entry of it", arg: "plain@v2.0.0", flag: "plain", config: onlyX},
+		{name: "an alias entry of another preset", arg: "plain@v2.0.0", flag: "y", refused: true},
+		{name: "the entry of another preset", arg: "plain@v2.0.0", flag: "other", refused: true},
+		{name: "the entry of a provider ref of that name", arg: "plain@v2.0.0", flag: "github.com/org/plain", refused: true},
+		{name: "an alias entry under a new name", arg: "x", flag: "p"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			binDir := t.TempDir()
 			t.Setenv("PATH_BIN", binDir)
 			configPath := filepath.Join(t.TempDir(), ".bin", "b.yaml")
-			presets := []*binary.Binary{{Name: "plain", Context: context.Background()}}
+			presets := []*binary.Binary{
+				{Name: "plain", Context: context.Background()},
+				{Name: "other", Context: context.Background()},
+			}
 			io := &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}
 			shared := NewSharedOptions(io, presets)
 			shared.ConfigPath = configPath
-			shared.Config = &state.State{Binaries: state.BinaryList{
-				&binary.LocalBinary{Name: "plain", Version: "v1.0.0", File: "/opt/plain"},
-				&binary.LocalBinary{Name: "x", Alias: "plain", Version: "v1.0.0", File: "/opt/x"},
-			}}
+			entries := tc.config
+			if entries == nil {
+				entries = start
+			}
+			list := state.BinaryList{}
+			for _, e := range entries {
+				c := *e
+				list = append(list, &c)
+			}
+			shared.Config = &state.State{Binaries: list}
 
 			o := &InstallOptions{SharedOptions: shared, Add: true, Alias: tc.flag}
-			if err := o.Complete([]string{tc.arg}); err != nil {
+			err := o.Complete([]string{tc.arg})
+			if tc.refused {
+				if err == nil {
+					t.Fatalf("b install %s --alias %s: no error, want a refusal (installs %q)", tc.arg, tc.flag, o.specifiedBinaries[0].BinaryPath())
+				}
+				if !strings.Contains(err.Error(), "is another binary") {
+					t.Errorf("b install %s --alias %s: error %q, want the other-binary refusal", tc.arg, tc.flag, err)
+				}
+				if len(o.specifiedBinaries) != 0 {
+					t.Errorf("b install %s --alias %s: %d binaries to install after the refusal, want 0", tc.arg, tc.flag, len(o.specifiedBinaries))
+				}
+				return
+			}
+			if err != nil {
 				t.Fatalf("Complete(%s): %v", tc.arg, err)
 			}
 			want := tc.file
@@ -358,14 +397,19 @@ func TestComplete_AliasTakesTheFileOfItsEntry(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LoadConfigFromPath: %v", err)
 			}
+			for _, e := range cfg.Binaries {
+				if e.Name == tc.flag && e.Alias == e.Name {
+					t.Errorf("the written entry %q aliases itself", e.Name)
+				}
+			}
 			reread := NewSharedOptions(io, presets)
 			reread.Config = cfg
-			b, ok := reread.GetBinary(tc.entry)
+			b, ok := reread.GetBinary(tc.flag)
 			if !ok {
-				t.Fatalf("the written b.yaml has no entry %q", tc.entry)
+				t.Fatalf("the written b.yaml has no entry %q", tc.flag)
 			}
 			if got := b.BinaryPath(); got != installed {
-				t.Errorf("entry %q resolves to %q, but the binary was installed at %q", tc.entry, got, installed)
+				t.Errorf("entry %q resolves to %q, but the binary was installed at %q", tc.flag, got, installed)
 			}
 		})
 	}
