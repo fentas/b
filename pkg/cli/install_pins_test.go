@@ -16,7 +16,8 @@ import (
 )
 
 // pinsFixture is a project with a .bin directory, a b.yaml, and a release
-// server for the preset "tool": GET /<version> answers "tool <version>\n",
+// server for the presets "tool" and "other": GET /<version> answers
+// "tool <version>\n" and GET /other/<version> answers "other <version>\n",
 // or 404 when the version is in missing. The latest version is v2.0.0.
 type pinsFixture struct {
 	dir, binDir, config string
@@ -36,23 +37,32 @@ func newPinsFixture(t *testing.T) *pinsFixture {
 	t.Setenv("PATH_BASE", f.dir)
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.hits.Add(1)
-		version := strings.TrimPrefix(r.URL.Path, "/")
+		name, version := "tool", strings.TrimPrefix(r.URL.Path, "/")
+		if v, ok := strings.CutPrefix(version, "other/"); ok {
+			name, version = "other", v
+		}
 		if f.missing[version] {
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = io.WriteString(w, "tool "+version+"\n")
+		_, _ = io.WriteString(w, name+" "+version+"\n")
 	}))
 	t.Cleanup(f.srv.Close)
 	return f
 }
 
 func (f *pinsFixture) presets() []*binary.Binary {
+	latest := func(*binary.Binary) (string, error) { return "v2.0.0", nil }
 	return []*binary.Binary{{
 		Name:     "tool",
 		Context:  context.Background(),
 		URLF:     func(b *binary.Binary) (string, error) { return f.srv.URL + "/" + b.Version, nil },
-		VersionF: func(*binary.Binary) (string, error) { return "v2.0.0", nil },
+		VersionF: latest,
+	}, {
+		Name:     "other",
+		Context:  context.Background(),
+		URLF:     func(b *binary.Binary) (string, error) { return f.srv.URL + "/other/" + b.Version, nil },
+		VersionF: latest,
 	}}
 }
 
@@ -316,5 +326,52 @@ func TestInstall_UnreadableLockIsAnError(t *testing.T) {
 				t.Errorf(".bin/tool is %q, want the v1.0.0 file, untouched", got)
 			}
 		})
+	}
+}
+
+// TestInstall_NoArgumentsInstallsTheConfigEntries: `b install` without an
+// argument installs the binaries of the b.yaml entries, each at its own file
+// and version, and no other preset. b.lock then describes each file, and a
+// second run downloads nothing.
+func TestInstall_NoArgumentsInstallsTheConfigEntries(t *testing.T) {
+	f := newPinsFixture(t)
+	mustWrite(t, f.config, []byte("binaries:\n  tool:\n    version: v1.0.0\n  o2:\n    alias: other\n"))
+	f.install(t, false)
+	if n := f.hits.Load(); n != 2 {
+		t.Errorf("the first install: %d downloads, want 2", n)
+	}
+	lk, err := lock.ReadLock(f.binDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ file, content, version string }{
+		{"tool", "tool v1.0.0\n", "v1.0.0"},
+		{"o2", "other v2.0.0\n", "v2.0.0"},
+	} {
+		path := filepath.Join(f.binDir, tc.file)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf(".bin/%s: %v", tc.file, err)
+			continue
+		}
+		if string(data) != tc.content {
+			t.Errorf(".bin/%s is %q, want %q", tc.file, data, tc.content)
+		}
+		hash, err := lock.SHA256File(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e := lk.FindBinary(tc.file); e == nil || e.Version != tc.version || e.SHA256 != hash {
+			t.Errorf("b.lock row %q: %+v, want version %s and the sha256 of .bin/%s", tc.file, e, tc.version, tc.file)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(f.binDir, "other")); !os.IsNotExist(err) {
+		t.Errorf(".bin/other: %v, want no file: the preset other has no entry of its own", err)
+	}
+
+	f.hits.Store(0)
+	f.install(t, false)
+	if n := f.hits.Load(); n != 0 {
+		t.Errorf("the second install: %d downloads, want 0", n)
 	}
 }
