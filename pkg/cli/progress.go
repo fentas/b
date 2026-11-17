@@ -42,7 +42,7 @@ func (r *progressRun) AddTracker(message string, total int64) *pretty.Tracker {
 	r.start.Do(func() {
 		go func() {
 			defer close(r.done)
-			r.Writer.Render()
+			r.Render()
 		}()
 	})
 	return t
