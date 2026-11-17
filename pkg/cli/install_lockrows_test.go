@@ -805,3 +805,47 @@ func TestOtherBinary(t *testing.T) {
 		}
 	}
 }
+
+// TestInstall_SymlinkedProjectHasOneRow: the name of the row of a file
+// outside the binary directory does not depend on the way to the project.
+// A b.yaml reached through a symlink, or a binary directory reached through
+// a symlink, gives the row the same name as the real paths: ../tools/t3.
+// So a run through the real paths finds the row, downloads nothing and adds
+// no second row.
+func TestInstall_SymlinkedProjectHasOneRow(t *testing.T) {
+	for _, viaLink := range []string{"b.yaml", "the binary directory"} {
+		t.Run(viaLink+" through a symlink", func(t *testing.T) {
+			f := newPinsFixture(t)
+			link := filepath.Join(t.TempDir(), "link")
+			if err := os.Symlink(f.dir, link); err != nil {
+				t.Skip(err)
+			}
+			mustMkdir(t, filepath.Join(f.dir, "tools"))
+			mustWrite(t, f.config, []byte("binaries:\n  t3:\n    alias: tool\n    version: v1.0.0\n    file: ../tools/t3\n"))
+			config := f.config
+			if viaLink == "b.yaml" {
+				f.config = filepath.Join(link, ".bin", "b.yaml")
+			} else {
+				t.Setenv("PATH_BIN", filepath.Join(link, ".bin"))
+			}
+			f.install(t, false)
+			if got := f.rowNames(t); got != "../tools/t3" {
+				t.Errorf("b.lock rows through the symlink: %q, want ../tools/t3", got)
+			}
+
+			f.config = config
+			t.Setenv("PATH_BIN", f.binDir)
+			f.hits.Store(0)
+			f.install(t, false)
+			if n := f.hits.Load(); n != 0 {
+				t.Errorf("the install through the real paths: %d downloads, want 0", n)
+			}
+			if got := f.rowNames(t); got != "../tools/t3" {
+				t.Errorf("b.lock rows: %q, want ../tools/t3", got)
+			}
+			if err := f.verify(t); err != nil {
+				t.Errorf("b verify: %v", err)
+			}
+		})
+	}
+}

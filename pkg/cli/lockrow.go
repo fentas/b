@@ -36,19 +36,45 @@ import (
 // fileName is the name of the b.lock row of the file at file: the path of
 // the file relative to the binary directory, with "/" as separator. For a
 // file in the binary directory that is its name. When file is "", the file
-// is the one of that name in the binary directory.
+// is the one of that name in the binary directory. The path is the one
+// between the real directories (realDir): a project reached through a
+// symlink gives the same name as through its real path.
 func fileName(file, name string) string {
 	if file == "" {
 		return name
 	}
-	if dir, err := filepath.Abs(path.GetBinaryPath()); err == nil {
-		if abs, err := filepath.Abs(file); err == nil {
-			if rel, err := filepath.Rel(dir, abs); err == nil {
-				return filepath.ToSlash(rel)
-			}
-		}
+	binDir := path.GetBinaryPath()
+	if filepath.Dir(filepath.Clean(file)) == filepath.Clean(binDir) {
+		return filepath.Base(file)
 	}
-	return filepath.ToSlash(file)
+	resolved := filepath.Join(realDir(filepath.Dir(file)), filepath.Base(file))
+	if rel, err := filepath.Rel(realDir(binDir), resolved); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(resolved)
+}
+
+// realDir is the absolute path of the directory dir with its symlinks
+// resolved: the longest part of it that exists, through
+// filepath.EvalSymlinks, and the rest as it is. The directory need not
+// exist.
+func realDir(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return dir
+	}
+	rest := ""
+	for d := abs; ; {
+		if resolved, err := filepath.EvalSymlinks(d); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return abs
+		}
+		rest = filepath.Join(filepath.Base(d), rest)
+		d = parent
+	}
 }
 
 // lockRowFile is the file of the b.lock row of that name (fileName) in the
@@ -58,7 +84,7 @@ func lockRowFile(binDir, name string) string {
 	if filepath.IsAbs(file) {
 		return file
 	}
-	return filepath.Join(binDir, file)
+	return filepath.Join(realDir(binDir), file)
 }
 
 // entryFileName is the name of the file that a b.yaml entry installs, the
