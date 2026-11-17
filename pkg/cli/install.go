@@ -194,18 +194,19 @@ func (o *InstallOptions) Complete(args []string) error {
 		}
 
 		// --alias overrides; without it, the alias of the b.yaml entry stays.
-		// A preset installed under --alias is the binary of the entry of
-		// that name (the one --add writes): it takes that entry's settings
-		// as the no-argument install does (version, enforced pin, file,
-		// onPost), or its own file when there is no such entry. A provider
-		// ref keeps its one entry, file included.
+		// An --alias that already names another binary is refused. A preset
+		// installed under --alias is the binary of the entry of that name
+		// (the one --add writes): it takes that entry's settings as the
+		// no-argument install does (version, enforced pin, file, onPost),
+		// or its own file when there is no such entry. A provider ref keeps
+		// its one entry, file included.
 		if o.Alias != "" {
+			if e := o.aliasOwner(b); e != nil {
+				return fmt.Errorf("--alias %s: the b.yaml entry %s is another binary, not %s\n  Hint: pick another alias, or install %s by its own name", o.Alias, e.Name, b.Name, e.Name)
+			}
 			if !b.AutoDetect || b.ProviderRef == "" {
 				b.File = ""
 				if e := o.configEntry(o.Alias); e != nil {
-					if !entryOfPreset(e, b.Name) {
-						return fmt.Errorf("--alias %s: the b.yaml entry %s is another binary, not %s\n  Hint: pick another alias, or install %s by its own name", o.Alias, e.Name, b.Name, e.Name)
-					}
 					if rb, ok := o.resolveBinary(e); ok {
 						b = rb
 					}
@@ -276,13 +277,41 @@ func (o *InstallOptions) checkPin(b *binary.Binary) error {
 	return fmt.Errorf("--add: the b.yaml entry %s is pinned to %s (enforced), not %s\n  Hint: add --fix to move the pin, or install without --add", e.Name, e.Enforced, b.Version)
 }
 
-// entryOfPreset reports whether a b.yaml entry is the binary of that preset:
-// the preset's own entry, or an alias entry of it. A provider ref's entry is
-// never a preset's.
-func entryOfPreset(e *binary.LocalBinary, preset string) bool {
-	if e.IsProviderRef || provider.IsProviderRef(e.Name) {
-		return false
+// aliasOwner is the b.yaml entry of another binary that the name --alias
+// already belongs to, nil when there is none. That is an entry of that name
+// which is not an entry of b's preset (for a provider ref b: any entry of
+// that name), or a provider-ref entry other than b's own whose binary has
+// that name: its alias, or the name from the ref. The name decides whether
+// an entry is a provider ref, as in the loader.
+func (o *InstallOptions) aliasOwner(b *binary.Binary) *binary.LocalBinary {
+	if o.Config == nil {
+		return nil
 	}
+	isRef := b.AutoDetect && b.ProviderRef != ""
+	for _, e := range o.Config.Binaries {
+		if !provider.IsProviderRef(e.Name) {
+			if e.Name == o.Alias && (isRef || !entryOfPreset(e, b.Name)) {
+				return e
+			}
+			continue
+		}
+		if e.Name == b.ProviderRef {
+			continue // b's own entry; a preset has no ref
+		}
+		name := e.Alias
+		if name == "" {
+			name = provider.BinaryName(e.Name)
+		}
+		if e.Name == o.Alias || name == o.Alias {
+			return e
+		}
+	}
+	return nil
+}
+
+// entryOfPreset reports whether a b.yaml entry that is not a provider ref is
+// the binary of that preset: the preset's own entry, or an alias entry of it.
+func entryOfPreset(e *binary.LocalBinary, preset string) bool {
 	if e.Alias == "" {
 		return e.Name == preset
 	}

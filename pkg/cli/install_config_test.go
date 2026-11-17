@@ -319,21 +319,28 @@ func TestGetBinary_ProviderRefAliasIsNotAPreset(t *testing.T) {
 // TestComplete_AliasTakesTheFileOfItsEntry: a preset installed under --alias
 // is the binary of the b.yaml entry of that name, which --add writes. It
 // installs at that entry's file, or at its own file when there is no such
-// entry, and the written b.yaml resolves to the installed file. An entry of
-// another binary under that name is refused, and nothing is installed.
+// entry, and the written b.yaml resolves to the installed file. An --alias
+// that already names another binary is refused, and nothing is installed:
+// an entry of that name of another binary, or a provider-ref entry whose
+// binary has that name (its alias, or the name from the ref). A provider
+// ref installed with --alias gets the same refusal; its own entry is not
+// another binary.
 func TestComplete_AliasTakesTheFileOfItsEntry(t *testing.T) {
 	start := []*binary.LocalBinary{
 		{Name: "plain", Version: "v1.0.0", File: "/opt/plain"},
 		{Name: "x", Alias: "plain", Version: "v1.0.0", File: "/opt/x"},
 		{Name: "y", Alias: "other", Version: "v1.0.0", File: "/opt/y"},
 		{Name: "other", Version: "v1.0.0", File: "/opt/other"},
-		{Name: "github.com/org/plain", Alias: "plain", File: "/opt/rplain"},
+		{Name: "github.com/org/plain", Alias: "rplain", File: "/opt/rplain"},
+		{Name: "github.com/org/tool", Alias: "tool"},
+		{Name: "github.com/org/bare"},
 	}
 	onlyX := []*binary.LocalBinary{{Name: "x", Alias: "plain", Version: "v1.0.0", File: "/opt/x"}}
 	for _, tc := range []struct {
 		name, arg, flag string
 		config          []*binary.LocalBinary // nil = start
 		file            string                // "" = the default file, PATH_BIN/<alias>
+		entry           string                // the entry --add writes; "" = the alias
 		refused         bool
 	}{
 		{name: "its own name", arg: "plain@v2.0.0", flag: "plain", file: "/opt/plain"},
@@ -344,6 +351,14 @@ func TestComplete_AliasTakesTheFileOfItsEntry(t *testing.T) {
 		{name: "the entry of another preset", arg: "plain@v2.0.0", flag: "other", refused: true},
 		{name: "the entry of a provider ref of that name", arg: "plain@v2.0.0", flag: "github.com/org/plain", refused: true},
 		{name: "an alias entry under a new name", arg: "x", flag: "p"},
+		{name: "the alias of a provider ref", arg: "plain@v2.0.0", flag: "tool", refused: true},
+		{name: "the binary name of a provider ref without an alias", arg: "plain@v2.0.0", flag: "bare", refused: true},
+		{name: "a provider ref under the alias of another ref", arg: "github.com/org/bare", flag: "tool", refused: true},
+		{name: "a provider ref under the entry of a preset", arg: "github.com/org/bare", flag: "other", refused: true},
+		{name: "a provider ref under an alias entry of a preset", arg: "github.com/org/bare", flag: "x", refused: true},
+		{name: "a provider ref under an alias entry of the preset of its name", arg: "github.com/org/plain", flag: "x", refused: true},
+		{name: "a provider ref under its own alias", arg: "github.com/org/tool", flag: "tool", entry: "github.com/org/tool"},
+		{name: "a provider ref under a new name", arg: "github.com/org/tool", flag: "t9", entry: "github.com/org/tool"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			binDir := t.TempDir()
@@ -363,6 +378,7 @@ func TestComplete_AliasTakesTheFileOfItsEntry(t *testing.T) {
 			list := state.BinaryList{}
 			for _, e := range entries {
 				c := *e
+				c.IsProviderRef = strings.Contains(c.Name, "/") // as the loader sets it
 				list = append(list, &c)
 			}
 			shared.Config = &state.State{Binaries: list}
@@ -404,11 +420,15 @@ func TestComplete_AliasTakesTheFileOfItsEntry(t *testing.T) {
 					t.Errorf("the written entry %q aliases itself", e.Name)
 				}
 			}
+			entry := tc.entry
+			if entry == "" {
+				entry = tc.flag
+			}
 			reread := NewSharedOptions(io, presets)
 			reread.Config = cfg
-			b, ok := reread.GetBinary(tc.flag)
+			b, ok := reread.GetBinary(entry)
 			if !ok {
-				t.Fatalf("the written b.yaml has no entry %q", tc.flag)
+				t.Fatalf("the written b.yaml has no entry %q", entry)
 			}
 			if got := b.BinaryPath(); got != installed {
 				t.Errorf("entry %q resolves to %q, but the binary was installed at %q", tc.flag, got, installed)
