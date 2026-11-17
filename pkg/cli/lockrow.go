@@ -365,7 +365,12 @@ func moveOldLockRows(lk *lock.Lock, binaries []*binary.Binary, stay map[string]b
 		}
 		moved := *e
 		moved.Name = lockName(b)
-		moved.Binary = lockBinary(b)
+		// A row that says that the file is another binary (otherBinary:
+		// the source of another preset) keeps what it says, so that the
+		// install downloads b (planInstall). Else it is b's row.
+		if !otherBinary(e, b) {
+			moved.Binary = lockBinary(b)
+		}
 		lk.UpsertBinary(moved)
 		old[rowName] = true
 	}

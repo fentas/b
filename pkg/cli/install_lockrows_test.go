@@ -827,6 +827,37 @@ func TestInstall_PresetDoesNotTakeTheRowOfARef(t *testing.T) {
 	f.checkRow(t, lk, "t2", "tool v3.0.0\n", "v3.0.0")
 }
 
+// TestInstall_OldRowOfAnotherPresetIsDownloaded: b.yaml changed the entry
+// x to `alias: other, file: ../tools/x`. An older b wrote the row x for the
+// file, with the source of the preset tool. b moves the row to the name of
+// the file, but the row still says that the file is tool (otherBinary): so
+// `b install` downloads other, and the row then has the source of other.
+func TestInstall_OldRowOfAnotherPresetIsDownloaded(t *testing.T) {
+	f := newPinsFixture(t)
+	mustMkdir(t, filepath.Join(f.dir, "tools"))
+	mustWrite(t, f.config, []byte("binaries:\n  x:\n    alias: other\n    file: ../tools/x\n"))
+	file := filepath.Join(f.dir, "tools", "x")
+	mustWriteExec(t, file, []byte("tool v2.0.0\n"))
+	hash, err := lock.SHA256File(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.writeLock(t, lock.BinEntry{Name: "x", Version: "v2.0.0", SHA256: hash, Source: "github.com/test/tool", Preset: true})
+	f.install(t, false)
+	if n := f.hits.Load(); n != 1 {
+		t.Errorf("%d downloads, want 1", n)
+	}
+	if data, _ := os.ReadFile(file); string(data) != "other v2.0.0\n" {
+		t.Errorf("tools/x is %q, want other v2.0.0", data)
+	}
+	if got := f.rowNames(t); got != "../tools/x" {
+		t.Errorf("b.lock rows: %q, want ../tools/x", got)
+	}
+	if e := f.readLock(t).FindBinary("../tools/x"); e == nil || e.Source != "github.com/test/other" || e.Binary != "other" {
+		t.Errorf("b.lock row ../tools/x: %+v, want the row of other", e)
+	}
+}
+
 // TestInstall_RowWrittenAgainByAnOlderB: `b install --alias other --force
 // tool` puts tool at .bin/other; its row names the binary tool. An older b
 // writes b.lock again without the binary field. The row of .bin/other then
