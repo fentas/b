@@ -1,9 +1,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -46,13 +46,11 @@ type InstallOptions struct {
 	envInstalls       []envInstall     // SCP-style env installs
 	configEnvRefs     []string         // env refs to sync from config
 
-	// Set by installBinaries for updateLock: what the install did to each
-	// binary's file, which downloads failed, and the files of failed
-	// downloads that were removed (discardPartial).
+	// Set by installBinaries for updateLock and Run: what the install did
+	// to each binary's file, and the error of each download that failed.
 	plans    map[*binary.Binary]installPlan
 	failedMu sync.Mutex
-	failed   map[*binary.Binary]bool
-	removed  []string
+	failed   map[*binary.Binary]error
 }
 
 // installPlan is what an install does to one binary's file, decided before
@@ -89,20 +87,6 @@ func planInstall(b *binary.Binary, prev *lock.BinEntry, force bool) installPlan 
 		return installPlan{download: true}
 	}
 	return installPlan{keptVersion: known}
-}
-
-// discardPartial removes what a failed download left at file. The download
-// writes the file in place, so it can leave a part of the new binary where
-// the old one was. A file that is not the one that was there before the
-// download (before is its sha256, "" when there was none) is removed, so
-// that no later install keeps it as installed. It reports whether it removed
-// the file. A file that the download did not change stays.
-func discardPartial(file, before string) bool {
-	after, err := lock.SHA256File(file)
-	if err != nil || after == before {
-		return false
-	}
-	return os.Remove(file) == nil
 }
 
 // isProviderRef reports whether b is the binary of a provider ref, not a
@@ -442,7 +426,9 @@ func (o *InstallOptions) Run() error {
 
 	if len(binariesToInstall) == 0 && len(o.envInstalls) == 0 && len(o.configEnvRefs) == 0 {
 		if all {
-			o.reportPruned(o.pruneLock())
+			if err := o.reportPruned(o.pruneLock()); err != nil {
+				return err
+			}
 		}
 		fmt.Fprintln(o.IO.Out, "No binaries or envs to install")
 		return nil
@@ -454,10 +440,21 @@ func (o *InstallOptions) Run() error {
 		}
 
 		if err := o.updateLock(binariesToInstall); err != nil {
+			if isLockReadError(err) {
+				return err
+			}
 			fmt.Fprintf(o.IO.ErrOut, "Warning: failed to update b.lock: %v\n", err)
 		}
 		if all {
-			o.reportPruned(o.pruneLock())
+			if err := o.reportPruned(o.pruneLock()); err != nil {
+				return err
+			}
+		}
+
+		// A failed download is an error. --add then writes no b.yaml: its
+		// entries would name binaries that are not installed.
+		if err := o.downloadError(binariesToInstall); err != nil {
+			return err
 		}
 
 		if o.Add {
@@ -468,6 +465,34 @@ func (o *InstallOptions) Run() error {
 	return nil
 }
 
+// downloadError is the error of the downloads that failed in
+// installBinaries, nil when none failed.
+func (o *InstallOptions) downloadError(binaries []*binary.Binary) error {
+	var lines []string
+	for _, b := range binaries {
+		if err := o.failed[b]; err != nil {
+			lines = append(lines, fmt.Sprintf("  %s: %v", displayName(b), err))
+		}
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	msg := "download failed:\n" + strings.Join(lines, "\n")
+	if o.Add {
+		msg += "\n  Hint: --add did not change b.yaml; run the install again"
+	}
+	return errors.New(msg)
+}
+
+// displayName is the name of a binary in the output of a command: its
+// alias with its name, or its name.
+func displayName(b *binary.Binary) string {
+	if b.Alias != "" && b.Alias != b.Name {
+		return b.Alias + " (" + b.Name + ")"
+	}
+	return b.Name
+}
+
 // installBinaries installs the specified binaries with progress tracking
 func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	// Decide per binary whether to download it or keep the present file
@@ -475,14 +500,13 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	// requested version is downloaded. A b.lock that is there but cannot be
 	// read is an error: taken as empty, it would make each run download every
 	// pinned binary again, and the install could not write it either.
-	lk, err := lock.ReadLock(o.LockDir())
+	lk, err := o.readLock()
 	if err != nil {
-		return fmt.Errorf("cannot read b.lock: %w\n  Hint: repair %s, or remove it; b then downloads each pinned binary once and writes a new b.lock", err, filepath.Join(o.LockDir(), "b.lock"))
+		return err
 	}
 	o.moveOldRows(lk, binaries)
 	o.plans = make(map[*binary.Binary]installPlan, len(binaries))
-	o.failed = make(map[*binary.Binary]bool)
-	o.removed = nil
+	o.failed = make(map[*binary.Binary]error)
 	var toDownload []*binary.Binary
 	for _, b := range binaries {
 		// moveOldRows moved the rows of an older b to these names.
@@ -521,19 +545,15 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 			b.Writer = pw.Writer
 
 			// Download or keep the file, as planned. The onPost hook runs
-			// only when a download happened, not when the file was kept.
+			// only when a download happened, not when the file was kept. A
+			// download that fails leaves the file as it was: the download
+			// replaces it in one step (atomicfile).
 			var err error
 			if o.plans[b].download {
-				file := b.BinaryPath()
-				before, _ := lock.SHA256File(file)
 				err = b.DownloadBinary()
 				if err != nil {
-					removed := discardPartial(file, before)
 					o.failedMu.Lock()
-					o.failed[b] = true
-					if removed {
-						o.removed = append(o.removed, file)
-					}
+					o.failed[b] = err
 					o.failedMu.Unlock()
 				}
 			}
@@ -561,10 +581,6 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	wg.Wait()
 	// Render the last frame
 	pw.Stop()
-	sort.Strings(o.removed)
-	for _, file := range o.removed {
-		fmt.Fprintf(o.IO.ErrOut, "Removed %s: its download failed and left an incomplete file\n", file)
-	}
 	return nil
 }
 
@@ -675,7 +691,7 @@ func (o *InstallOptions) addEntries(config *state.State, binaries []*binary.Bina
 // updateLock updates b.lock with installed binary checksums
 func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 	lockDir := o.LockDir()
-	lk, err := lock.ReadLock(lockDir)
+	lk, err := o.readLock()
 	if err != nil {
 		return err
 	}
@@ -692,12 +708,11 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			copied := *row
 			prev = &copied
 		}
-		// A failed download writes no entry. While a file is there (the file
-		// that the download did not change), its entry stays as it was. When
-		// no file is there (it was missing, or discardPartial removed what the
-		// download left), the entry goes: it would describe a file that is
-		// not there.
-		if o.failed[b] {
+		// A failed download writes no entry, and leaves the file as it was.
+		// While a file is there, its entry stays as it was. When no file is
+		// there (the binary was missing), the entry goes: it would describe
+		// a file that is not there.
+		if o.failed[b] != nil {
 			if _, err := os.Stat(b.File); os.IsNotExist(err) {
 				lk.RemoveBinary(name)
 			}
@@ -845,7 +860,7 @@ func parseSCPArg(arg string, remaining []string) (envInstall, int, bool) {
 func (o *InstallOptions) runEnvInstalls() error {
 	lockDir := o.LockDir()
 	projectRoot := o.ProjectRoot()
-	lk, err := lock.ReadLock(lockDir)
+	lk, err := o.readLock()
 	if err != nil {
 		return err
 	}
@@ -915,7 +930,7 @@ func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 
 	lockDir := o.LockDir()
 	projectRoot := o.ProjectRoot()
-	lk, err := lock.ReadLock(lockDir)
+	lk, err := o.readLock()
 	if err != nil {
 		return err
 	}

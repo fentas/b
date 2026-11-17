@@ -477,7 +477,7 @@ func (o *SharedOptions) pruneLock() ([]string, error) {
 		return nil, nil
 	}
 	lockDir := o.LockDir()
-	lk, err := lock.ReadLock(lockDir)
+	lk, err := o.readLock()
 	if err != nil {
 		return nil, err
 	}
@@ -503,13 +503,18 @@ func (o *SharedOptions) pruneLock() ([]string, error) {
 }
 
 // reportPruned tells which b.lock rows pruneLock removed, or warns when it
-// failed.
-func (o *SharedOptions) reportPruned(removed []string, err error) {
+// failed. It returns the error of a b.lock that cannot be read
+// (lockReadError): the command stops on it.
+func (o *SharedOptions) reportPruned(removed []string, err error) error {
+	if isLockReadError(err) {
+		return err
+	}
 	if err != nil {
 		fmt.Fprintf(o.IO.ErrOut, "Warning: failed to remove stale rows from b.lock: %v\n", err)
-		return
+		return nil
 	}
 	if len(removed) > 0 {
 		fmt.Fprintf(o.IO.ErrOut, "Removed from b.lock: %s (no b.yaml entry installs them, and their files are not there)\n", strings.Join(removed, ", "))
 	}
+	return nil
 }

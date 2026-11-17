@@ -16,6 +16,8 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+
+	"github.com/fentas/b/pkg/atomicfile"
 )
 
 // digestResolveTimeout bounds the single-manifest HEAD call in
@@ -167,9 +169,6 @@ func (o *OCI) Install(ref, version, destDir string) (string, error) {
 			return "", err
 		}
 		if found {
-			if err := os.Chmod(dest, 0755); err != nil {
-				return "", err
-			}
 			return dest, nil
 		}
 	}
@@ -205,13 +204,14 @@ func extractBinaryFromLayer(l v1.Layer, searchPaths []string, dest string, white
 
 	tr := tar.NewReader(rc)
 	bestPriority := len(searchPaths) // sentinel: nothing found yet
-	var tmpPath string
-	cleanup := func() {
-		if tmpPath != "" {
-			_ = os.Remove(tmpPath)
-			tmpPath = ""
+	// best is the best match so far, in a temp file beside dest. Abort does
+	// nothing after Commit.
+	var best *atomicfile.File
+	defer func() {
+		if best != nil {
+			best.Abort()
 		}
-	}
+	}()
 
 	for {
 		hdr, err := tr.Next()
@@ -219,7 +219,6 @@ func extractBinaryFromLayer(l v1.Layer, searchPaths []string, dest string, white
 			break
 		}
 		if err != nil {
-			cleanup()
 			return false, fmt.Errorf("reading tar: %w", err)
 		}
 
@@ -262,35 +261,28 @@ func extractBinaryFromLayer(l v1.Layer, searchPaths []string, dest string, white
 		// Write to a temp file first; rename once we're confident this is
 		// the best match (since an even-higher-priority path may appear
 		// later in the same tar stream).
-		tmp, err := os.CreateTemp(filepath.Dir(dest), ".oci-extract-*")
+		tmp, err := atomicfile.Create(dest)
 		if err != nil {
-			cleanup()
 			return false, fmt.Errorf("creating temp file: %w", err)
 		}
 		if _, err := io.Copy(tmp, tr); err != nil {
-			tmp.Close()
-			_ = os.Remove(tmp.Name())
-			cleanup()
+			tmp.Abort()
 			return false, fmt.Errorf("writing temp file: %w", err)
 		}
-		if err := tmp.Close(); err != nil {
-			_ = os.Remove(tmp.Name())
-			cleanup()
-			return false, fmt.Errorf("closing temp file: %w", err)
+		if best != nil {
+			best.Abort() // remove the previous lower-priority candidate
 		}
-		cleanup() // remove any previous lower-priority candidate
-		tmpPath = tmp.Name()
+		best = tmp
 		bestPriority = priority
 		if bestPriority == 0 {
 			break // can't do better than the highest-priority path
 		}
 	}
 
-	if tmpPath == "" {
+	if best == nil {
 		return false, nil
 	}
-	if err := os.Rename(tmpPath, dest); err != nil {
-		_ = os.Remove(tmpPath)
+	if err := best.Commit(0755); err != nil {
 		return false, fmt.Errorf("moving extracted file into place: %w", err)
 	}
 	return true, nil

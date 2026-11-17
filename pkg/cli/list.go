@@ -68,6 +68,16 @@ func (o *ListOptions) Run() error {
 		return o.IO.Print([]*binary.LocalBinary{})
 	}
 
+	// b.lock gives the state of the envs. Read it before any output: a
+	// b.lock that cannot be read is an error (readLock).
+	var lk *lock.Lock
+	if len(o.Config.Envs) > 0 {
+		var err error
+		if lk, err = o.readLock(); err != nil {
+			return err
+		}
+	}
+
 	// Get local binary information
 	locals, err := o.lookupLocals()
 	if err != nil {
@@ -79,17 +89,15 @@ func (o *ListOptions) Run() error {
 	}
 
 	// List envs
-	if len(o.Config.Envs) > 0 {
-		o.listEnvs()
+	if lk != nil {
+		o.listEnvs(lk)
 	}
 
 	return nil
 }
 
-// listEnvs lists configured envs with their lock status.
-func (o *ListOptions) listEnvs() {
-	lk, _ := lock.ReadLock(o.LockDir())
-
+// listEnvs lists configured envs with their state in lk, the b.lock.
+func (o *ListOptions) listEnvs(lk *lock.Lock) {
 	fmt.Fprintln(o.IO.Out, "\nEnvironments:")
 	for _, entry := range o.Config.Envs {
 		label := gitcache.RefLabel(entry.Key)

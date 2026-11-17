@@ -522,7 +522,7 @@ func TestListEnvs(t *testing.T) {
 		},
 	}
 
-	o.listEnvs()
+	o.listEnvs(lk)
 
 	output := buf.String()
 	if !bytes.Contains([]byte(output), []byte("github.com/org/infra")) {
@@ -556,7 +556,7 @@ func TestListEnvs_NotSynced(t *testing.T) {
 		},
 	}
 
-	o.listEnvs()
+	o.listEnvs(lk)
 
 	if !bytes.Contains(buf.Bytes(), []byte("not synced")) {
 		t.Errorf("expected 'not synced' in output: %s", buf.String())
@@ -624,7 +624,7 @@ func TestShowEnvVersions_Local(t *testing.T) {
 		Local: true,
 	}
 
-	o.showEnvVersions()
+	o.showEnvVersions(lk)
 
 	output := buf.String()
 	if !bytes.Contains([]byte(output), []byte("pinned")) {
@@ -656,7 +656,7 @@ func TestShowEnvVersions_NotSynced(t *testing.T) {
 		Local: true,
 	}
 
-	o.showEnvVersions()
+	o.showEnvVersions(lk)
 
 	if !bytes.Contains(buf.Bytes(), []byte("not synced")) {
 		t.Errorf("expected 'not synced': %s", buf.String())
@@ -1180,7 +1180,7 @@ func TestListEnvs_WithLabel(t *testing.T) {
 		},
 	}
 
-	o.listEnvs()
+	o.listEnvs(lk)
 
 	output := buf.String()
 	if !bytes.Contains([]byte(output), []byte("monitoring")) {
@@ -1217,7 +1217,7 @@ func TestListEnvs_WithGlobConfigNoLock(t *testing.T) {
 		},
 	}
 
-	o.listEnvs()
+	o.listEnvs(lk)
 
 	output := buf.String()
 	if !bytes.Contains([]byte(output), []byte("manifests/**")) {

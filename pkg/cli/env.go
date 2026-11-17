@@ -227,8 +227,7 @@ func (o *EnvStatusOptions) Run() error {
 		return nil
 	}
 
-	lockDir := o.LockDir()
-	lk, err := lock.ReadLock(lockDir)
+	lk, err := o.readLock()
 	if err != nil {
 		return err
 	}
@@ -416,7 +415,7 @@ func (o *EnvRemoveOptions) Run(key string) error {
 
 	// Delete synced files if requested
 	if o.DeleteFiles {
-		lk, err := lock.ReadLock(lockDir)
+		lk, err := o.readLock()
 		if err != nil {
 			return err
 		}
@@ -449,7 +448,7 @@ func (o *EnvRemoveOptions) Run(key string) error {
 	}
 
 	// Remove from lock
-	lk, err := lock.ReadLock(lockDir)
+	lk, err := o.readLock()
 	if err != nil {
 		return err
 	}

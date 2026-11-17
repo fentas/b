@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -80,7 +81,7 @@ func (g *Git) installFromLocal(repo, filePath, version, dest string) (string, er
 		return "", fmt.Errorf("git show %s in %s: %w", obj, repo, err)
 	}
 
-	if err := os.WriteFile(dest, data, 0755); err != nil {
+	if err := installFile(dest, bytes.NewReader(data)); err != nil {
 		return "", err
 	}
 	return dest, nil
@@ -115,7 +116,7 @@ func (g *Git) installFromRemote(repo, filePath, version, dest string) (string, e
 		return "", fmt.Errorf("reading %s at %s from %s: %w", filePath, commit, repo, err)
 	}
 
-	if err := os.WriteFile(dest, data, 0755); err != nil {
+	if err := installFile(dest, bytes.NewReader(data)); err != nil {
 		return "", err
 	}
 	return dest, nil

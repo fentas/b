@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/fentas/b/pkg/binary"
+	"github.com/fentas/b/pkg/lock"
 	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/b/pkg/provider"
 	"github.com/fentas/b/pkg/state"
@@ -242,6 +244,40 @@ func (o *SharedOptions) LockDir() string {
 		return filepath.Dir(p)
 	}
 	return filepath.Dir(path.GetDefaultConfigPath())
+}
+
+// readLock reads b.lock from LockDir. A missing b.lock is an empty lock: no
+// install has written one yet. A b.lock that is there but cannot be read
+// (it is not JSON, or it is not a file) is an error in every command
+// (lockReadError). Taken as empty, it would make an install download each
+// pinned binary again, and a write would replace the rows it holds.
+func (o *SharedOptions) readLock() (*lock.Lock, error) {
+	dir := o.LockDir()
+	lk, err := lock.ReadLock(dir)
+	if err != nil {
+		return nil, &lockReadError{file: filepath.Join(dir, "b.lock"), err: err}
+	}
+	return lk, nil
+}
+
+// lockReadError is the error of a b.lock that is there but cannot be read.
+// A command stops on it. A command that only warns when it cannot write
+// b.lock stops on this error too (isLockReadError).
+type lockReadError struct {
+	file string // the path of b.lock
+	err  error
+}
+
+func (e *lockReadError) Error() string {
+	return fmt.Sprintf("cannot read b.lock: %v\n  Hint: repair %s, or remove it; b then downloads each pinned binary once and writes a new b.lock", e.err, e.file)
+}
+
+func (e *lockReadError) Unwrap() error { return e.err }
+
+// isLockReadError reports whether err is (or wraps) a lockReadError.
+func isLockReadError(err error) bool {
+	var lre *lockReadError
+	return errors.As(err, &lre)
 }
 
 // ProjectRoot returns the project root directory for env file destinations.

@@ -1637,13 +1637,13 @@ func TestInteractiveResolver_NilStdinReader(t *testing.T) {
 	}
 }
 
-// --- checkEnvConflicts with corrupt lock (ReadLock returns nil) ---
+// --- checkEnvConflicts with a b.lock that cannot be read ---
 
 func TestCheckEnvConflicts_ReadLockError(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "b.yaml")
 	os.WriteFile(configPath, []byte("binaries: {}\n"), 0644)
-	// Corrupt lock → ReadLock returns nil, error
+	// A b.lock that is not JSON cannot be read.
 	os.WriteFile(filepath.Join(tmpDir, "b.lock"), []byte("not json"), 0644)
 
 	var errBuf bytes.Buffer
@@ -1661,8 +1661,19 @@ func TestCheckEnvConflicts_ReadLockError(t *testing.T) {
 		},
 	}
 
-	o.checkEnvConflicts(nil, "") // should not panic, silently exits
-	// No conflict output since lock is nil
+	// checkEnvConflicts stops with the error and the hint of every command.
+	err := o.checkEnvConflicts(nil, "")
+	if err == nil {
+		t.Fatal("checkEnvConflicts with a b.lock that is not JSON: no error")
+	}
+	for _, want := range []string{"cannot read b.lock", "Hint: repair " + filepath.Join(tmpDir, "b.lock")} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+	if errBuf.Len() != 0 {
+		t.Errorf("conflict output %q, want none", errBuf.String())
+	}
 }
 
 // --- printFileStatus ---
