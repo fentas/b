@@ -783,6 +783,50 @@ func TestInstall_AliasForceDoesNotTakeOverThePresetsRow(t *testing.T) {
 	}
 }
 
+// TestUpdate_PruneKeepsTheRowOfAnEntry: the prune keeps the row of a file
+// that a b.yaml entry installs, also while the file is not there: here the
+// download of `b update` fails. The row keeps the pin of the entry for the
+// next install.
+func TestUpdate_PruneKeepsTheRowOfAnEntry(t *testing.T) {
+	f := newPinsFixture(t)
+	mustWrite(t, f.config, []byte("binaries:\n  t2:\n    alias: tool\n    version: v3.0.0\n"))
+	f.writeLock(t, lock.BinEntry{Name: "t2", Version: "v3.0.0", SHA256: "the sha256 of .bin/t2", Preset: true})
+	f.missing["v3.0.0"] = true
+	f.update(t)
+	if f.hits.Load() == 0 {
+		t.Error("no download, want one that fails")
+	}
+	if _, err := os.Lstat(filepath.Join(f.binDir, "t2")); !os.IsNotExist(err) {
+		t.Fatalf(".bin/t2 after the failed download: %v, want no file", err)
+	}
+	if got := f.rowNames(t); got != "t2" {
+		t.Errorf("b.lock rows after a failed `b update`: %q, want t2", got)
+	}
+}
+
+// TestInstall_PresetDoesNotTakeTheRowOfARef: b.yaml has t2, an alias entry
+// of the preset tool. b.lock has the row tool of a provider ref, from an
+// older b, whose sha256 is the one of .bin/t2. It is not the row of t2: `b
+// install t2` does not move it, so it downloads t2 (no row gives its
+// version) and leaves the row tool as it is.
+func TestInstall_PresetDoesNotTakeTheRowOfARef(t *testing.T) {
+	f := newPinsFixture(t)
+	mustWrite(t, f.config, []byte("binaries:\n  t2:\n    alias: tool\n    version: v3.0.0\n"))
+	hash := f.binFile(t, "t2", "tool v3.0.0\n")
+	ref := lock.BinEntry{Name: "tool", Version: "v3.0.0", SHA256: hash, Source: "fakerel://a/tool", Provider: "fakerel"}
+	f.writeLock(t, ref)
+
+	f.install(t, false, "t2")
+	if n := f.hits.Load(); n != 1 {
+		t.Errorf("%d downloads, want 1", n)
+	}
+	lk := f.readLock(t)
+	if e := lk.FindBinary("tool"); e == nil || *e != ref {
+		t.Errorf("b.lock row tool: %+v, want it unchanged: %+v", e, ref)
+	}
+	f.checkRow(t, lk, "t2", "tool v3.0.0\n", "v3.0.0")
+}
+
 // TestInstall_RowWrittenAgainByAnOlderB: `b install --alias other --force
 // tool` puts tool at .bin/other; its row names the binary tool. An older b
 // writes b.lock again without the binary field. The row of .bin/other then

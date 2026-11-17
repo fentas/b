@@ -175,18 +175,16 @@ func regularFileSHA256(file string) (string, error) {
 }
 
 // entryFileName is the name of the file that a b.yaml entry installs, the
-// name of its b.lock row (fileName): the path of its `file:`, else for a
-// provider ref its alias or the binary name from the ref, and for a preset
-// entry its own name (the name of an alias entry is the alias).
+// name of its b.lock row: lockName of the entry's binary. A provider ref
+// has the binary name from the ref and its alias; a preset entry has its
+// own name as the alias (resolveBinary), the name of an alias entry is the
+// alias.
 func entryFileName(e *binary.LocalBinary) string {
-	name := e.Name
+	b := &binary.Binary{Alias: e.Name, File: e.File}
 	if e.IsProviderRef {
-		name = e.Alias
-		if name == "" {
-			name = provider.BinaryName(e.Name)
-		}
+		b.Name, b.Alias = provider.BinaryName(e.Name), e.Alias
 	}
-	return fileName(e.File, name)
+	return lockName(b)
 }
 
 // configFileNames maps the name of each file that b.yaml installs to the
@@ -325,15 +323,13 @@ func presetSource(b *binary.Binary) string {
 	return "github.com/" + b.GitHubRepo
 }
 
-// lockFileNames is the set of file names that the b.yaml entries and the
-// given binaries install: the names of the b.lock rows that stay.
-func lockFileNames(cfg *state.State, binaries []*binary.Binary) map[string]bool {
+// lockFileNames is the set of file names that the b.yaml entries install:
+// the names of the b.lock rows that stay, also while their files are not
+// there.
+func lockFileNames(cfg *state.State) map[string]bool {
 	names := map[string]bool{}
 	for file := range configFileNames(cfg) {
 		names[file] = true
-	}
-	for _, b := range binaries {
-		names[lockName(b)] = true
 	}
 	return names
 }
@@ -355,9 +351,11 @@ func (l lockFiles) describesNoFile(name string, keep map[string]bool) bool {
 // moveOldLockRows moves each row that an older b wrote for one of the
 // binaries under the name of its binary (findLockRow: only when the row
 // describes the binary's file) to the name of the file. The row under the
-// old name stays when it can also describe another file: a b.yaml entry or
-// a binary of this run installs a file of that name (stay), or the file is
-// there (describesNoFile). It reports whether it changed lk.
+// old name stays when it can also describe another file: a b.yaml entry
+// installs a file of that name (stay), or the file is there
+// (describesNoFile). (A binary of this run that installs a file of that
+// name, without an entry, writes its row again, or removes it after a
+// failed download.) It reports whether it changed lk.
 func moveOldLockRows(lk *lock.Lock, binaries []*binary.Binary, stay map[string]bool, files lockFiles) bool {
 	old := map[string]bool{}
 	for _, b := range binaries {
@@ -387,7 +385,7 @@ func moveOldLockRows(lk *lock.Lock, binaries []*binary.Binary, stay map[string]b
 // the files are the ones that the rows describe, and before any prune: a
 // row under an old name describes no file, and a prune would remove it.
 func (o *SharedOptions) moveOldRows(lk *lock.Lock, binaries []*binary.Binary) {
-	if !moveOldLockRows(lk, binaries, lockFileNames(o.Config, binaries), o.lockFiles()) {
+	if !moveOldLockRows(lk, binaries, lockFileNames(o.Config), o.lockFiles()) {
 		return
 	}
 	if err := lock.WriteLock(o.LockDir(), lk, o.bVersion); err != nil {
@@ -416,7 +414,7 @@ func (o *SharedOptions) pruneLock() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	installed := lockFileNames(o.Config, nil)
+	installed := lockFileNames(o.Config)
 	files := o.lockFiles()
 	var removed []string
 	kept := lk.Binaries[:0]

@@ -485,8 +485,8 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	o.removed = nil
 	var toDownload []*binary.Binary
 	for _, b := range binaries {
-		prev, _ := findLockRow(lk, b)
-		plan := planInstall(b, prev, o.Force)
+		// moveOldRows moved the rows of an older b to these names.
+		plan := planInstall(b, lk.FindBinary(lockName(b)), o.Force)
 		o.plans[b] = plan
 		if plan.download {
 			toDownload = append(toDownload, b)
