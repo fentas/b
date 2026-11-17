@@ -73,4 +73,9 @@ type LocalBinary struct {
 	OnPost string `json:"onPost,omitempty" yaml:"onPost,omitempty"`
 	// IsProviderRef is true when Name is a provider ref (e.g. github.com/derailed/k9s)
 	IsProviderRef bool `json:"-" yaml:"-"`
+	// FileAsWritten is File as b.yaml writes it: LoadConfigFromPath joins a
+	// relative File to the directory of b.yaml, and keeps the written value
+	// here. SaveConfig writes it back, and the name of the b.lock row of the
+	// file comes from it.
+	FileAsWritten string `json:"-" yaml:"-"`
 }

@@ -29,6 +29,10 @@ func LoadConfigFromPath(configPath string) (*State, error) {
 	// Resolve relative file paths relative to config file location
 	configDir := filepath.Dir(configPath)
 	for _, b := range state.Binaries {
+		if b == nil {
+			continue
+		}
+		b.FileAsWritten = b.File
 		if b.File != "" && !filepath.IsAbs(b.File) {
 			b.File = filepath.Join(configDir, b.File)
 		}
@@ -97,6 +101,14 @@ func relativizeFiles(config *State, configDir string) *State {
 	for i, b := range config.Binaries {
 		if b == nil || b.File == "" {
 			bins[i] = b
+			continue
+		}
+		// A relative `file:` as b.yaml writes it, also one outside the
+		// config dir (../tools/x), while it is still the file of the entry.
+		if w := b.FileAsWritten; w != "" && !filepath.IsAbs(w) && filepath.Join(configDir, w) == b.File {
+			clone := *b
+			clone.File = w
+			bins[i] = &clone
 			continue
 		}
 		rel, err := filepath.Rel(configDir, b.File)
