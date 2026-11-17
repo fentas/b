@@ -298,8 +298,10 @@ func lockBinary(b *binary.Binary) string {
 // binary than b. Then the file is not b, also when its sha256 is the one in
 // the row: `b install --alias <preset> --force` put another binary at the
 // file of that preset, or b.yaml now names another binary for the file. A
-// row of an older b has no Binary field; for it, only its kind (preset or
-// provider ref) and the source of a provider ref count.
+// row of an older b has no Binary field, also a row that an older b wrote
+// again; for it, its kind (preset or provider ref) and its source count:
+// the ref of a provider ref, and the repository of a preset when the row
+// and the preset have one (presetSource).
 func otherBinary(e *lock.BinEntry, b *binary.Binary) bool {
 	if e.Binary != "" && e.Binary != b.Name {
 		return true
@@ -307,7 +309,20 @@ func otherBinary(e *lock.BinEntry, b *binary.Binary) bool {
 	if isProviderRef(b) {
 		return e.Preset || (e.Source != "" && e.Source != b.ProviderRef)
 	}
-	return e.Provider != ""
+	if e.Provider != "" {
+		return true
+	}
+	src := presetSource(b)
+	return e.Binary == "" && src != "" && e.Source != "" && e.Source != src
+}
+
+// presetSource is the source of a preset in its b.lock row: its GitHub
+// repository, "" when it has none.
+func presetSource(b *binary.Binary) string {
+	if b.GitHubRepo == "" {
+		return ""
+	}
+	return "github.com/" + b.GitHubRepo
 }
 
 // lockFileNames is the set of file names that the b.yaml entries and the

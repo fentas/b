@@ -774,13 +774,42 @@ func TestInstall_AliasForceDoesNotTakeOverThePresetsRow(t *testing.T) {
 	}
 }
 
+// TestInstall_RowWrittenAgainByAnOlderB: `b install --alias other --force
+// tool` puts tool at .bin/other; its row names the binary tool. An older b
+// writes b.lock again without the binary field. The row of .bin/other then
+// has the source of tool, not the one of other: a later `b install other`
+// downloads other, and does not keep tool's binary as other.
+func TestInstall_RowWrittenAgainByAnOlderB(t *testing.T) {
+	f := newPinsFixture(t)
+	if err := f.runWith(t, func(o *InstallOptions) { o.Alias = "other"; o.Force = true }, "tool"); err != nil {
+		t.Fatalf("b install --alias other --force tool: %v", err)
+	}
+	rows := f.readLock(t).Binaries
+	for i := range rows {
+		rows[i].Binary = ""
+	}
+	f.writeLock(t, rows...)
+
+	f.hits.Store(0)
+	f.install(t, false, "other")
+	if n := f.hits.Load(); n != 1 {
+		t.Errorf("b install other: %d downloads, want 1", n)
+	}
+	lk := f.readLock(t)
+	f.checkRow(t, lk, "other", "other v2.0.0\n", "v2.0.0")
+	if e := lk.FindBinary("other"); e == nil || e.Source != "github.com/test/other" {
+		t.Errorf("b.lock row other: %+v, want the source of other", e)
+	}
+}
+
 // TestOtherBinary: a b.lock row says that its file is another binary when
 // its binary field names another binary, when it is the row of a provider
 // ref and b is a preset, or the row of a preset or of another ref and b is
 // a provider ref. A row without a binary field (from an older b) of the same
-// kind is not another binary.
+// kind is not another binary, unless it has the source of another preset.
 func TestOtherBinary(t *testing.T) {
 	preset := &binary.Binary{Name: "tool"}
+	repo := &binary.Binary{Name: "tool", GitHubRepo: "org/tool"}
 	alias := &binary.Binary{Name: "tool", Alias: "t2"}
 	ref := &binary.Binary{Name: "tool", AutoDetect: true, ProviderRef: "fakerel://a/tool"}
 	refAlias := &binary.Binary{Name: "tool", Alias: "ta", AutoDetect: true, ProviderRef: "fakerel://a/tool"}
@@ -799,6 +828,11 @@ func TestOtherBinary(t *testing.T) {
 		{"an alias row of the ref", lock.BinEntry{Name: "ta", Binary: "tool", Source: "fakerel://a/tool", Provider: "fakerel"}, refAlias, false},
 		{"a row of another ref", lock.BinEntry{Name: "tool", Source: "fakerel://b/tool", Provider: "fakerel"}, ref, true},
 		{"a preset row, b a provider ref", lock.BinEntry{Name: "tool", Preset: true}, ref, true},
+		{"a preset row of an older b with b's source", lock.BinEntry{Name: "tool", Preset: true, Source: "github.com/org/tool"}, repo, false},
+		{"a preset row of an older b with another source", lock.BinEntry{Name: "tool", Preset: true, Source: "github.com/org/other"}, repo, true},
+		{"a preset row of an older b without a source", lock.BinEntry{Name: "tool", Preset: true}, repo, false},
+		{"a preset row with another source, b without one", lock.BinEntry{Name: "tool", Preset: true, Source: "github.com/org/other"}, preset, false},
+		{"a row of b with another source", lock.BinEntry{Name: "tool", Binary: "tool", Preset: true, Source: "github.com/org/other"}, repo, false},
 	} {
 		if got := otherBinary(&tc.row, tc.b); got != tc.want {
 			t.Errorf("%s: otherBinary = %v, want %v", tc.name, got, tc.want)

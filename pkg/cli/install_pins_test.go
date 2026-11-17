@@ -65,18 +65,22 @@ func newPinsFixture(t *testing.T) *pinsFixture {
 	return f
 }
 
+// presets are the presets tool and other, which the server of the fixture
+// serves. Each has a GitHub repository: the source of its b.lock row.
 func (f *pinsFixture) presets() []*binary.Binary {
 	latest := func(*binary.Binary) (string, error) { return "v2.0.0", nil }
 	return []*binary.Binary{{
-		Name:     "tool",
-		Context:  context.Background(),
-		URLF:     func(b *binary.Binary) (string, error) { return f.srv.URL + "/" + b.Version, nil },
-		VersionF: latest,
+		Name:       "tool",
+		GitHubRepo: "test/tool",
+		Context:    context.Background(),
+		URLF:       func(b *binary.Binary) (string, error) { return f.srv.URL + "/" + b.Version, nil },
+		VersionF:   latest,
 	}, {
-		Name:     "other",
-		Context:  context.Background(),
-		URLF:     func(b *binary.Binary) (string, error) { return f.srv.URL + "/other/" + b.Version, nil },
-		VersionF: latest,
+		Name:       "other",
+		GitHubRepo: "test/other",
+		Context:    context.Background(),
+		URLF:       func(b *binary.Binary) (string, error) { return f.srv.URL + "/other/" + b.Version, nil },
+		VersionF:   latest,
 	}}
 }
 

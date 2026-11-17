@@ -761,9 +761,7 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			}
 		} else {
 			entry.Preset = true
-			if b.GitHubRepo != "" {
-				entry.Source = "github.com/" + b.GitHubRepo
-			}
+			entry.Source = presetSource(b)
 		}
 		lk.UpsertBinary(entry)
 	}
