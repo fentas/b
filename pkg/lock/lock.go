@@ -143,6 +143,18 @@ func (l *Lock) UpsertBinary(entry BinEntry) {
 	l.Binaries = append(l.Binaries, entry)
 }
 
+// RemoveBinary removes the binary entry of that name. It reports whether
+// there was one.
+func (l *Lock) RemoveBinary(name string) bool {
+	for i := range l.Binaries {
+		if l.Binaries[i].Name == name {
+			l.Binaries = append(l.Binaries[:i], l.Binaries[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
 // FindEnv returns the lock entry for a given env ref (and optional label), or nil.
 func (l *Lock) FindEnv(ref, label string) *EnvEntry {
 	for i := range l.Envs {

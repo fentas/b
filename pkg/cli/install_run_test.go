@@ -1,5 +1,3 @@
-//go:build !race
-
 package cli
 
 import (
@@ -14,6 +12,7 @@ func TestInstallOptions_Run_ExistingBinary(t *testing.T) {
 	mustWriteExec(t, filepath.Join(binDir, "jq"), []byte("#!/bin/sh\n"))
 	t.Setenv("PATH_BIN", binDir)
 	t.Setenv("PATH_BASE", dir)
+	t.Chdir(dir) // LockDir looks for a b.yaml from here: not the checkout's .bin
 
 	shared := NewSharedOptions(mkIO(), mkBinaries())
 	o := &InstallOptions{SharedOptions: shared}
@@ -59,6 +58,7 @@ func TestInstallOptions_Run_ForceMode(t *testing.T) {
 	mustWriteExec(t, filepath.Join(binDir, "jq"), []byte("#!/bin/sh\n"))
 	t.Setenv("PATH_BIN", binDir)
 	t.Setenv("PATH_BASE", dir)
+	t.Chdir(dir) // LockDir looks for a b.yaml from here: not the checkout's .bin
 
 	// Force mode exercises the DownloadBinary path. installBinaries reports
 	// per-binary errors via the progress writer, not the Run() return value,
@@ -81,6 +81,7 @@ func TestCmdBinaryOptions_Run_InstallExisting(t *testing.T) {
 	mustMkdir(t, binDir)
 	mustWriteExec(t, filepath.Join(binDir, "jq"), []byte("#!/bin/sh\n"))
 	t.Setenv("PATH_BIN", binDir)
+	t.Chdir(dir)
 
 	opts := &CmdBinaryOptions{IO: mkIO(), Binaries: mkBinaries()}
 	c := NewCmdBinary(opts)

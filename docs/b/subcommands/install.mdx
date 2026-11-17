@@ -62,6 +62,8 @@ Use the `--add` flag to install a binary and simultaneously add it to your `b.ya
 b install --add kubectl
 ```
 
+With `--add`, `--on-post` and `--asset` go into the b.yaml entry of the binary, also into an entry that is already there. An `enforced` pin holds only the version, so they also go into a pinned entry.
+
 ### Force an installation
 
 Use the `--force` flag to overwrite an existing binary.
@@ -97,9 +99,11 @@ b install --alias myenvsubst renvsubst@v0.10.0
 Rules for `--alias`:
 - It takes one binary argument. To give several binaries an alias, install each one on its own.
 - When the alias is the name of a b.yaml entry of the same binary, the install uses the settings of that entry (version, enforced pin, file, onPost). A version on the command line wins.
-- When the alias is already the name of another binary (another entry in b.yaml, or the binary of a provider ref), b refuses the install.
+- When the alias is a new name, the binary keeps the settings of the b.yaml entry of the binary argument: its version (its enforced pin, when it has one) and its onPost. It does not keep that entry's file: it installs at `.bin/<alias>`. A version on the command line and `--on-post` win. With `--add`, the new entry gets that version and onPost, without a pin.
+- When the alias is already the name of another binary, b refuses the install. That is another entry in b.yaml, the binary of a provider ref, or another preset (a built-in binary of that name), also when that preset has no entry in b.yaml.
+- For another preset without an entry, `--force` installs the binary under the alias anyway, and overwrites the file of that preset. For an entry of another binary, `--force` does not help: b.yaml would then give one name to two binaries.
 
-With `--add`, b does not write a version that the entry's `enforced` pin contradicts. Add `--fix` to move the pin as well.
+With `--add`, b does not write a version that the entry's `enforced` pin contradicts. Add `--fix` to move the pin as well. A version that is the pin without or with a leading `v` (`3.0.0` for a pin `v3.0.0`) is the pinned version: b installs it and writes it as the pin spells it.
 
 ### Sync environment files (SCP syntax)
 

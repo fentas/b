@@ -148,6 +148,26 @@ func TestFindBinary(t *testing.T) {
 	}
 }
 
+func TestRemoveBinary(t *testing.T) {
+	lk := &Lock{
+		Binaries: []BinEntry{
+			{Name: "fzf"},
+			{Name: "bat"},
+			{Name: "jq"},
+		},
+	}
+
+	if !lk.RemoveBinary("bat") {
+		t.Error("RemoveBinary(bat) = false, want true")
+	}
+	if lk.RemoveBinary("missing") {
+		t.Error("RemoveBinary(missing) = true, want false")
+	}
+	if len(lk.Binaries) != 2 || lk.Binaries[0].Name != "fzf" || lk.Binaries[1].Name != "jq" {
+		t.Errorf("binaries after the removal: %+v, want fzf and jq", lk.Binaries)
+	}
+}
+
 func TestFindEnv(t *testing.T) {
 	lk := &Lock{
 		Envs: []EnvEntry{

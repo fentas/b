@@ -39,9 +39,7 @@ func (o *CmdBinaryOptions) lookupLocals() ([]*binary.LocalBinary, error) {
 
 func (o *CmdBinaryOptions) installBinaries() error {
 	wg := sync.WaitGroup{}
-	pw := progress.NewWriter(progress.StyleDownload, o.IO.Out)
-	pw.Style().Visibility.Percentage = true
-	go pw.Render()
+	pw := newProgressRun(o.IO.Out)
 	defer pw.Stop()
 
 	for b, do := range o.ensure {
@@ -49,8 +47,8 @@ func (o *CmdBinaryOptions) installBinaries() error {
 			wg.Add(1)
 
 			go func(b *binary.Binary) {
-				b.Writer = pw
-				b.Tracker = b.Writer.AddTracker(fmt.Sprintf("Ensuring %s is installed", b.Name), 0)
+				b.Writer = pw.Writer
+				b.Tracker = pw.AddTracker(fmt.Sprintf("Ensuring %s is installed", b.Name), 0)
 
 				var err error
 				if o.force {

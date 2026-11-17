@@ -439,6 +439,74 @@ func TestComplete_AliasTakesTheFileOfItsEntry(t *testing.T) {
 	}
 }
 
+// TestComplete_AliasRefusesTheNameOfAnotherPreset: an --alias that is the
+// name of another preset is refused, also when that preset has no b.yaml
+// entry: the binary would take the preset's file. --force installs it
+// anyway; it does not lift the refusal of an entry of another binary. The
+// binary's own name is not another preset, and a b.yaml entry of that name
+// that is an alias of the binary's preset decides for it.
+func TestComplete_AliasRefusesTheNameOfAnotherPreset(t *testing.T) {
+	for _, tc := range []struct {
+		name, arg, flag string
+		config          []*binary.LocalBinary
+		force, refused  bool
+		refusal         string // "" = the refusal of the preset's name
+	}{
+		{name: "another preset", arg: "plain", flag: "other", refused: true},
+		{name: "another preset, with a version", arg: "plain@v2.0.0", flag: "other", refused: true},
+		{name: "another preset, beside an entry of the argument", arg: "plain", flag: "other",
+			config: []*binary.LocalBinary{{Name: "plain", Version: "v1.0.0"}}, refused: true},
+		{name: "a provider ref under the name of a preset", arg: "github.com/org/tool", flag: "other", refused: true},
+		{name: "a provider ref under the name of the preset of its name", arg: "github.com/org/plain", flag: "plain", refused: true},
+		{name: "another preset with --force", arg: "plain", flag: "other", force: true},
+		{name: "the entry of another preset with --force", arg: "plain", flag: "other",
+			config: []*binary.LocalBinary{{Name: "other", Version: "v1.0.0"}}, force: true, refused: true, refusal: "is another binary"},
+		{name: "its own name", arg: "plain", flag: "plain"},
+		{name: "an alias entry of its preset of that name", arg: "plain", flag: "other",
+			config: []*binary.LocalBinary{{Name: "other", Alias: "plain"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binDir := t.TempDir()
+			t.Setenv("PATH_BIN", binDir)
+			presets := []*binary.Binary{
+				{Name: "plain", Context: context.Background()},
+				{Name: "other", Context: context.Background()},
+			}
+			shared := NewSharedOptions(&streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, presets)
+			shared.Force = tc.force
+			list := state.BinaryList{}
+			for _, e := range tc.config {
+				c := *e
+				list = append(list, &c)
+			}
+			shared.Config = &state.State{Binaries: list}
+
+			o := &InstallOptions{SharedOptions: shared, Alias: tc.flag}
+			err := o.Complete([]string{tc.arg})
+			if tc.refused {
+				refusal := tc.refusal
+				if refusal == "" {
+					refusal = "is the preset " + tc.flag
+				}
+				if err == nil || !strings.Contains(err.Error(), refusal) {
+					t.Fatalf("b install %s --alias %s: error %v, want a refusal with %q", tc.arg, tc.flag, err, refusal)
+				}
+				if len(o.specifiedBinaries) != 0 {
+					t.Errorf("%d binaries to install after the refusal, want 0", len(o.specifiedBinaries))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("b install %s --alias %s: %v", tc.arg, tc.flag, err)
+			}
+			b := o.specifiedBinaries[0]
+			if want := filepath.Join(binDir, tc.flag); b.Alias != tc.flag || b.BinaryPath() != want {
+				t.Errorf("alias %q, file %q; want %s, %s", b.Alias, b.BinaryPath(), tc.flag, want)
+			}
+		})
+	}
+}
+
 // aliasSettingsConfig is a b.yaml with the own entry of the preset plain and
 // two alias entries of it, as the loader builds it.
 func aliasSettingsConfig(t *testing.T) *state.State {
@@ -466,7 +534,9 @@ func aliasSettingsConfig(t *testing.T) *state.State {
 // --alias that names an entry of the same preset is the binary of that
 // entry. It takes that entry's version, enforced pin, file and onPost, as
 // the no-argument install does; only a version on the command line wins.
-// The settings of the entry named by the argument do not carry over.
+// The settings of the entry named by the argument are replaced by them. (An
+// --alias that names no entry keeps them:
+// TestComplete_NewAliasKeepsTheSettingsOfTheArgument.)
 func TestComplete_AliasTakesTheSettingsOfItsEntry(t *testing.T) {
 	for _, tc := range []struct {
 		arg, flag, version, file, onPost string // file "" = PATH_BIN/<flag>
@@ -503,6 +573,64 @@ func TestComplete_AliasTakesTheSettingsOfItsEntry(t *testing.T) {
 	}
 }
 
+// TestComplete_NewAliasKeepsTheSettingsOfTheArgument: a binary installed
+// under an --alias that names no b.yaml entry keeps the settings of the entry
+// named by the argument: its version (its enforced pin, when it has one) and
+// its onPost. It does not keep that entry's file: it installs at
+// PATH_BIN/<alias>. A version on the command line and --on-post win. --add
+// writes the new entry with these settings, and without a pin or a file.
+func TestComplete_NewAliasKeepsTheSettingsOfTheArgument(t *testing.T) {
+	for _, tc := range []struct {
+		arg, onPostFlag, version, onPost string
+	}{
+		{"plain", "", "v1.0.0", "echo plain"},
+		{"x", "", "v3.0.0", "echo x"},
+		{"x@v2.0.0", "", "v2.0.0", "echo x"},
+		{"x", "echo flag", "v3.0.0", "echo flag"},
+		{"z", "", "v4.0.0", ""},
+	} {
+		t.Run(tc.arg+" "+tc.onPostFlag, func(t *testing.T) {
+			binDir := t.TempDir()
+			t.Setenv("PATH_BIN", binDir)
+			configPath := filepath.Join(t.TempDir(), ".bin", "b.yaml")
+			presets := []*binary.Binary{{Name: "plain", Context: context.Background()}}
+			shared := NewSharedOptions(&streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, presets)
+			shared.ConfigPath = configPath
+			shared.Config = aliasSettingsConfig(t)
+
+			o := &InstallOptions{SharedOptions: shared, Add: true, Alias: "p", OnPost: tc.onPostFlag}
+			if err := o.Complete([]string{tc.arg}); err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			b := o.specifiedBinaries[0]
+			file := filepath.Join(binDir, "p")
+			if b.Name != "plain" || b.Alias != "p" || b.Version != tc.version || b.BinaryPath() != file || b.OnPost != tc.onPost {
+				t.Errorf("name %q, alias %q, version %q, file %q, onPost %q; want plain, p, %s, %s, %q", b.Name, b.Alias, b.Version, b.BinaryPath(), b.OnPost, tc.version, file, tc.onPost)
+			}
+
+			if err := o.addToConfig(o.specifiedBinaries); err != nil {
+				t.Fatalf("addToConfig: %v", err)
+			}
+			cfg, err := state.LoadConfigFromPath(configPath)
+			if err != nil {
+				t.Fatalf("LoadConfigFromPath: %v", err)
+			}
+			var e *binary.LocalBinary
+			for _, c := range cfg.Binaries {
+				if c.Name == "p" {
+					e = c
+				}
+			}
+			if e == nil {
+				t.Fatalf("b.yaml has no entry p: %+v", cfg.Binaries)
+			}
+			if e.Alias != "plain" || e.Version != tc.version || e.Enforced != "" || e.File != "" || e.OnPost != tc.onPost {
+				t.Errorf("entry p: alias %q, version %q, enforced %q, file %q, onPost %q; want plain, %s, no pin, no file, %q", e.Alias, e.Version, e.Enforced, e.File, e.OnPost, tc.version, tc.onPost)
+			}
+		})
+	}
+}
+
 // TestCheckPin: only a version that --add writes can contradict a pin.
 func TestCheckPin(t *testing.T) {
 	shared := NewSharedOptions(&streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, nil)
@@ -513,6 +641,107 @@ func TestCheckPin(t *testing.T) {
 		if (err != nil) != refused {
 			t.Errorf("version %q: error %v, want refused %v", version, err, refused)
 		}
+	}
+}
+
+// TestCheckPin_LeadingV: a version with or without a leading "v" is the
+// version of the pin, in both directions. Another version is still refused.
+func TestCheckPin_LeadingV(t *testing.T) {
+	for _, tc := range []struct {
+		pin, version string
+		refused      bool
+	}{
+		{"v3.0.0", "3.0.0", false},
+		{"3.0.0", "v3.0.0", false},
+		{"v3.0.0", "v3.0.0", false},
+		{"3.0.0", "3.0.0", false},
+		{"v3.0.0", "3.0.1", true},
+		{"3.0.0", "v3.0.1", true},
+	} {
+		shared := NewSharedOptions(&streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, nil)
+		shared.Config = &state.State{Binaries: state.BinaryList{
+			&binary.LocalBinary{Name: "plain", Enforced: tc.pin},
+		}}
+		o := &InstallOptions{SharedOptions: shared}
+		err := o.checkPin(&binary.Binary{Name: "plain", Version: tc.version})
+		if (err != nil) != tc.refused {
+			t.Errorf("pin %s, version %s: error %v, want refused %v", tc.pin, tc.version, err, tc.refused)
+		}
+	}
+}
+
+// TestAddToConfig_FlagsUpdateTheFoundEntry: `b install --add` with
+// --on-post or --asset writes them into the b.yaml entry that it finds, as
+// it writes them into a new entry: the entry of a preset, a pinned alias
+// entry (the pin holds the version only, and stays), and a provider-ref
+// entry. Without the flags the entry keeps its values, and the no-argument
+// install does not spread the flags over the entries. The other entries do
+// not change, and --add adds no entry.
+func TestAddToConfig_FlagsUpdateTheFoundEntry(t *testing.T) {
+	type fields struct{ alias, version, enforced, file, onPost, asset string }
+	for _, tc := range []struct {
+		name          string
+		args          []string
+		onPost, asset string
+		entry         string // the entry that changes, "" = none
+		want          func(xFile string) fields
+	}{
+		{"the entry of a preset", []string{"tool"}, "echo new", "new-*", "tool",
+			func(string) fields { return fields{"", "v1.0.0", "", "", "echo new", "new-*"} }},
+		{"a pinned alias entry", []string{"x"}, "echo new", "", "x",
+			func(xFile string) fields { return fields{"tool", "v3.0.0", "v3.0.0", xFile, "echo new", ""} }},
+		{"a provider-ref entry", []string{"github.com/org/widget"}, "", "new-*", "github.com/org/widget",
+			func(string) fields { return fields{"w", "", "", "", "echo w", "new-*"} }},
+		{"no flags", []string{"tool"}, "", "", "", nil},
+		{"no argument", nil, "echo new", "new-*", "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPinsFixture(t)
+			xFile := filepath.Join(f.binDir, "x-file")
+			mustWrite(t, f.config, []byte("binaries:\n"+
+				"  tool:\n    version: v1.0.0\n    onPost: echo old\n    asset: old-*\n"+
+				"  x:\n    alias: tool\n    version: v3.0.0\n    enforced: v3.0.0\n    file: "+xFile+"\n    onPost: echo x\n"+
+				"  github.com/org/widget:\n    alias: w\n    asset: old-*\n    onPost: echo w\n"))
+			// The binary of the provider ref is there, at no version, so the
+			// install keeps it and asks no provider.
+			mustWriteExec(t, filepath.Join(f.binDir, "w"), []byte("widget\n"))
+			want := map[string]fields{
+				"tool":                  {"", "v1.0.0", "", "", "echo old", "old-*"},
+				"x":                     {"tool", "v3.0.0", "v3.0.0", xFile, "echo x", ""},
+				"github.com/org/widget": {"w", "", "", "", "echo w", "old-*"},
+			}
+			if tc.entry != "" {
+				want[tc.entry] = tc.want(xFile)
+			}
+
+			err := f.runWith(t, func(o *InstallOptions) {
+				o.Add, o.OnPost, o.Asset = true, tc.onPost, tc.asset
+			}, tc.args...)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			cfg, err := state.LoadConfigFromPath(f.config)
+			if err != nil {
+				t.Fatalf("LoadConfigFromPath: %v", err)
+			}
+			got := map[string]fields{}
+			for _, e := range cfg.Binaries {
+				got[e.Name] = fields{e.Alias, e.Version, e.Enforced, e.File, e.OnPost, e.Asset}
+			}
+			for name, w := range want {
+				g, ok := got[name]
+				if !ok {
+					t.Errorf("b.yaml has no entry %s: %+v", name, got)
+					continue
+				}
+				if g != w {
+					t.Errorf("entry %s: alias, version, enforced, file, onPost, asset = %+v, want %+v", name, g, w)
+				}
+			}
+			if len(got) != len(want) {
+				t.Errorf("b.yaml has the entries %+v, want only %v", got, want)
+			}
+		})
 	}
 }
 
