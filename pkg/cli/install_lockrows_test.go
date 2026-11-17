@@ -581,29 +581,41 @@ func TestInstall_TwoRefsWithTheirOwnFiles(t *testing.T) {
 	}
 }
 
-// completeErr runs Complete of `b install <args>` (install) or `b update
-// <args>` (update) in the fixture, with the flags that set gives to update,
-// and returns its error.
-func (f *pinsFixture) completeErr(t *testing.T, cmd string, set func(*UpdateOptions), args ...string) error {
+// cmdErr runs `b install <args>` (install) or `b update <args>` (update) in
+// the fixture, with the flags that set gives to update, and returns the
+// error of Complete, else the error of Run. A refusal in Complete stops the
+// command before any download.
+func (f *pinsFixture) cmdErr(t *testing.T, cmd string, set func(*UpdateOptions), args ...string) error {
 	t.Helper()
-	shared := NewSharedOptions(mkIO(), f.presets())
+	if cmd == "install" {
+		return f.installErr(t, func(*InstallOptions) {}, args...)
+	}
+	shared := NewSharedOptions(&streams.IO{
+		In:     strings.NewReader(""),
+		Out:    &syncWriter{w: &bytes.Buffer{}},
+		ErrOut: &syncWriter{w: &bytes.Buffer{}},
+	}, f.presets())
 	shared.ConfigPath = f.config
 	if err := shared.LoadConfig(); err != nil {
 		t.Fatal(err)
 	}
-	if cmd == "install" {
-		return (&InstallOptions{SharedOptions: shared}).Complete(args)
-	}
 	o := &UpdateOptions{SharedOptions: shared}
 	set(o)
-	return o.Complete(args)
+	if err := o.Complete(args); err != nil {
+		return err
+	}
+	if err := o.Validate(); err != nil {
+		return err
+	}
+	return o.Run()
 }
 
 // TestInstall_RefusesTwoEntriesOfOneFile: a b.yaml in which two entries
 // install the same file is refused by `b install` and `b update`, with or
-// without a binary argument, before any download. The error names the
-// entries and the file, and tells how to fix b.yaml. `b update --envs-only`
-// does not touch binaries, so it does not refuse.
+// without a binary argument, before any download: each command runs, and
+// without the refusal it downloads. The error names the entries and the
+// file, and tells how to fix b.yaml. `b update --envs-only` and `b update
+// --group <name>` do not touch binaries, so they do not refuse.
 func TestInstall_RefusesTwoEntriesOfOneFile(t *testing.T) {
 	for _, tc := range []struct {
 		name, config, want string
@@ -624,16 +636,19 @@ func TestInstall_RefusesTwoEntriesOfOneFile(t *testing.T) {
 				cmd  string
 				args []string
 			}{{"install", nil}, {"install", []string{"other"}}, {"update", nil}, {"update", []string{"other"}}} {
-				err := f.completeErr(t, run.cmd, func(*UpdateOptions) {}, run.args...)
+				err := f.cmdErr(t, run.cmd, func(*UpdateOptions) {}, run.args...)
 				if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "alias: <name>") {
 					t.Errorf("b %s %v: error %v, want %q and a hint", run.cmd, run.args, err, tc.want)
 				}
+				if n := f.hits.Swap(0); n != 0 {
+					t.Errorf("b %s %v: %d downloads, want 0", run.cmd, run.args, n)
+				}
 			}
-			if err := f.completeErr(t, "update", func(o *UpdateOptions) { o.EnvsOnly = true }); err != nil {
+			if err := f.cmdErr(t, "update", func(o *UpdateOptions) { o.EnvsOnly = true }); err != nil {
 				t.Errorf("b update --envs-only: %v, want no error", err)
 			}
-			if n := f.hits.Load(); n != 0 {
-				t.Errorf("%d downloads, want 0", n)
+			if err := f.cmdErr(t, "update", func(o *UpdateOptions) { o.Group = "g" }); err != nil {
+				t.Errorf("b update --group g: %v, want no error", err)
 			}
 		})
 	}
