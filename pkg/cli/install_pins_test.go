@@ -32,6 +32,8 @@ type pinsFixture struct {
 	missing, empty      map[string]bool
 	mu                  sync.Mutex
 	paths               []string
+	// onRequest, when set (under mu), runs at each request of a download.
+	onRequest func()
 }
 
 func newPinsFixture(t *testing.T) *pinsFixture {
@@ -47,7 +49,11 @@ func newPinsFixture(t *testing.T) *pinsFixture {
 		f.hits.Add(1)
 		f.mu.Lock()
 		f.paths = append(f.paths, r.URL.Path)
+		onRequest := f.onRequest
 		f.mu.Unlock()
+		if onRequest != nil {
+			onRequest()
+		}
 		name, version := "tool", strings.TrimPrefix(r.URL.Path, "/")
 		if v, ok := strings.CutPrefix(version, "other/"); ok {
 			name, version = "other", v

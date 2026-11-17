@@ -947,9 +947,14 @@ func TestUpdateBinaries_Force(t *testing.T) {
 		File:    binPath,
 	}
 
+	// The preset has no URL, so the forced download fails. updateBinaries
+	// returns the error, which names the binary, and the file stays.
 	err := o.updateBinaries([]*binary.Binary{b})
-	if err != nil {
-		t.Fatalf("updateBinaries error = %v", err)
+	if err == nil || !strings.HasPrefix(err.Error(), "download failed:\n  jq: ") {
+		t.Fatalf("updateBinaries error = %v, want the download error of jq", err)
+	}
+	if data, _ := os.ReadFile(binPath); string(data) != "binary" {
+		t.Errorf("jq is %q after the failed download, want the old file", data)
 	}
 }
 

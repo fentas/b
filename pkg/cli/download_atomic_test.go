@@ -91,7 +91,7 @@ func toolTarGz(t *testing.T, content []byte) []byte {
 // (an empty body, a connection that closes halfway, a tar.gz that ends
 // halfway, a zip with a bad checksum) leaves the old binary as it was, in
 // `b install --force` and in `b update --force`, and leaves no temp file.
-// b install returns the error.
+// b install and b update return the error, which names the binary.
 // A later `b install` without a version keeps that binary, and b.lock keeps
 // its version: it must never record an incomplete file.
 func TestInstallAndUpdate_FailedDownloadKeepsTheBinary(t *testing.T) {
@@ -184,8 +184,10 @@ func TestInstallAndUpdate_FailedDownloadKeepsTheBinary(t *testing.T) {
 			}
 			kept("b install --force")
 
-			// b update shows a failed download in its progress output.
-			_, _ = f.runB(t, presets(), "update", "--force", "tool")
+			// b update returns the error too: it exits 1.
+			if _, err := f.runB(t, presets(), "update", "--force", "tool"); err == nil || !strings.Contains(err.Error(), "download failed:\n  tool: ") {
+				t.Errorf("b update --force: error %v, want the error of the download that names tool", err)
+			}
 			kept("b update --force")
 			if hits.Load() == 0 {
 				t.Fatal("no download: the test checks nothing")
@@ -295,5 +297,78 @@ func TestInstallAdd_FailedDownloadWritesNoConfig(t *testing.T) {
 				f.checkRow(t, f.readLock(t), tc.ok, tc.ok+" v2.0.0\n", "v2.0.0")
 			}
 		})
+	}
+}
+
+// updateFixture is a pins fixture whose b.yaml has tool and other, both
+// not installed: b update without --force downloads them (EnsureBinary).
+// The server sends an empty body for tool, so its update fails, and other
+// v2.0.0.
+func updateFixture(t *testing.T) (*pinsFixture, func() []*binary.Binary) {
+	t.Helper()
+	f := newPinsFixture(t)
+	fastRetries(t)
+	mustWrite(t, f.config, []byte("binaries:\n  tool: {}\n  other: {}\n"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/tool/") {
+			return // an empty body
+		}
+		_, _ = w.Write([]byte("other v2.0.0\n"))
+	}))
+	t.Cleanup(srv.Close)
+	presets := func() []*binary.Binary {
+		var out []*binary.Binary
+		for _, name := range []string{"tool", "other"} {
+			out = append(out, &binary.Binary{
+				Name:       name,
+				GitHubRepo: "test/" + name,
+				Context:    context.Background(),
+				URLF:       func(b *binary.Binary) (string, error) { return srv.URL + "/" + b.Name + "/" + b.Version, nil },
+				VersionF:   func(*binary.Binary) (string, error) { return "v2.0.0", nil },
+			})
+		}
+		return out
+	}
+	return f, presets
+}
+
+// TestUpdate_FailedDownloadIsAnError: b update without --force (the
+// EnsureBinary path) returns an error that names each binary whose update
+// failed, and only those. The other binaries update, and the binary that
+// failed gets no file.
+func TestUpdate_FailedDownloadIsAnError(t *testing.T) {
+	f, presets := updateFixture(t)
+	_, err := f.runB(t, presets(), "update")
+	if err == nil {
+		t.Fatal("b update: no error, want the error of the failed download")
+	}
+	msg := err.Error()
+	if !strings.HasPrefix(msg, "download failed:\n  tool: ") || strings.Contains(msg, "other:") {
+		t.Errorf("b update: error %q, want one line for tool and none for other", msg)
+	}
+	if f.exists("tool") {
+		t.Error(".bin/tool is there after its failed download")
+	}
+	data, rerr := os.ReadFile(filepath.Join(f.binDir, "other"))
+	if rerr != nil || string(data) != "other v2.0.0\n" {
+		t.Errorf(".bin/other is %q (%v), want other v2.0.0", data, rerr)
+	}
+}
+
+// TestUpdateAll_FailedDownloadStillPrunes: a failed download stops nothing
+// else. b update without arguments still removes the b.lock rows that
+// describe no file, then returns the error.
+func TestUpdateAll_FailedDownloadStillPrunes(t *testing.T) {
+	f, presets := updateFixture(t)
+	f.writeLock(t, lock.BinEntry{Name: "gone", Version: "v1.0.0", SHA256: "00"})
+	stderr, err := f.runB(t, presets(), "update")
+	if err == nil || !strings.Contains(err.Error(), "download failed:\n  tool: ") {
+		t.Fatalf("b update: error %v, want the error of the failed download", err)
+	}
+	if !strings.Contains(stderr, "Removed from b.lock: gone") {
+		t.Errorf("no prune after the failed download; stderr:\n%s", stderr)
+	}
+	if f.readLock(t).FindBinary("gone") != nil {
+		t.Error("the b.lock row gone is still there")
 	}
 }

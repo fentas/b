@@ -794,7 +794,8 @@ func TestInstall_AliasForceDoesNotTakeOverThePresetsRow(t *testing.T) {
 // that a b.yaml entry installs, also while the file is not there: here the
 // download of `b update` fails. The row keeps the pin of the entry for the
 // next install. The prune of the same `b update` removes the row gone,
-// which no entry installs and whose file is not there.
+// which no entry installs and whose file is not there. Then `b update`
+// returns the error of the download.
 func TestUpdate_PruneKeepsTheRowOfAnEntry(t *testing.T) {
 	f := newPinsFixture(t)
 	mustWrite(t, f.config, []byte("binaries:\n  t2:\n    alias: tool\n    version: v3.0.0\n"))
@@ -803,7 +804,10 @@ func TestUpdate_PruneKeepsTheRowOfAnEntry(t *testing.T) {
 		lock.BinEntry{Name: "t2", Version: "v3.0.0", SHA256: "the sha256 of .bin/t2", Preset: true},
 	)
 	f.missing["v3.0.0"] = true
-	f.update(t)
+	want := "download failed:\n  t2 (tool): tool v3.0.0 not found (latest: v2.0.0)"
+	if err := f.cmdErr(t, "update", func(*UpdateOptions) {}); err == nil || err.Error() != want {
+		t.Errorf("b update: error %v, want %q", err, want)
+	}
 	if f.hits.Load() == 0 {
 		t.Error("no download, want one that fails")
 	}

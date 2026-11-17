@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -468,20 +467,11 @@ func (o *InstallOptions) Run() error {
 // downloadError is the error of the downloads that failed in
 // installBinaries, nil when none failed.
 func (o *InstallOptions) downloadError(binaries []*binary.Binary) error {
-	var lines []string
-	for _, b := range binaries {
-		if err := o.failed[b]; err != nil {
-			lines = append(lines, fmt.Sprintf("  %s: %v", displayName(b), err))
-		}
-	}
-	if len(lines) == 0 {
-		return nil
-	}
-	msg := "download failed:\n" + strings.Join(lines, "\n")
+	hint := ""
 	if o.Add {
-		msg += "\n  Hint: --add did not change b.yaml; run the install again"
+		hint = "--add did not change b.yaml; run the install again"
 	}
-	return errors.New(msg)
+	return failedDownloads(binaries, o.failed, hint)
 }
 
 // displayName is the name of a binary in the output of a command: its
@@ -505,6 +495,9 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 		return err
 	}
 	o.moveOldRows(lk, binaries)
+	// Remove the temp files that a stopped install or update of these
+	// binaries left, before the progress output starts.
+	o.removeStaleTemps(binaries)
 	o.plans = make(map[*binary.Binary]installPlan, len(binaries))
 	o.failed = make(map[*binary.Binary]error)
 	var toDownload []*binary.Binary
