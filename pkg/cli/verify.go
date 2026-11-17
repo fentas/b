@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/fentas/b/pkg/env"
-	"github.com/fentas/b/pkg/lock"
 	"github.com/fentas/b/pkg/path"
 	"github.com/fentas/goodies/templates"
 	"github.com/spf13/cobra"
@@ -45,11 +44,9 @@ const msgOutside = "outside the project, the b.yaml directory and the binary dir
 
 // Run executes the verify operation
 func (o *VerifyOptions) Run() error {
-	dir := o.LockDir()
-
-	lk, err := lock.ReadLock(dir)
+	lk, err := o.readLock()
 	if err != nil {
-		return fmt.Errorf("reading b.lock: %w", err)
+		return err
 	}
 
 	if len(lk.Binaries) == 0 && len(lk.Envs) == 0 {

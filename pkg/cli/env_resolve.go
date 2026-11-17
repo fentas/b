@@ -85,7 +85,7 @@ func (o *EnvResolveOptions) Run(envFilter []string) error {
 	}
 
 	lockDir := o.LockDir()
-	lk, err := lock.ReadLock(lockDir)
+	lk, err := o.readLock()
 	if err != nil {
 		return err
 	}

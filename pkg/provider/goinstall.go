@@ -77,12 +77,13 @@ func (g *GoInstall) Install(ref, version, destDir string) (string, error) {
 		return "", err
 	}
 
-	// Read and write (rename doesn't work across filesystems)
-	data, err := os.ReadFile(compiled)
+	// Copy, not rename: GOBIN can be on another filesystem.
+	src, err := os.Open(compiled)
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(dest, data, 0755); err != nil {
+	defer src.Close()
+	if err := installFile(dest, src); err != nil {
 		return "", err
 	}
 

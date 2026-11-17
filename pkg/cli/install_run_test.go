@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -60,18 +62,20 @@ func TestInstallOptions_Run_ForceMode(t *testing.T) {
 	t.Setenv("PATH_BASE", dir)
 	t.Chdir(dir) // LockDir looks for a b.yaml from here: not the checkout's .bin
 
-	// Force mode exercises the DownloadBinary path. installBinaries reports
-	// per-binary errors via the progress writer, not the Run() return value,
-	// so Run() is expected to succeed even when the underlying download fails
-	// (mkBinaries() jq has no URL). The smoke test is that it doesn't panic.
+	// Force mode exercises the DownloadBinary path. The download fails
+	// (mkBinaries() jq has no URL): Run returns its error, and the present
+	// file stays as it was.
 	shared := NewSharedOptions(mkIO(), mkBinaries())
 	shared.Force = true
 	o := &InstallOptions{SharedOptions: shared}
 	if err := o.Complete([]string{"jq"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := o.Run(); err != nil {
-		t.Errorf("Run: %v", err)
+	if err := o.Run(); err == nil || !strings.Contains(err.Error(), "jq: no URL provided") {
+		t.Errorf("Run: %v, want the error of the jq download", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(binDir, "jq")); err != nil || string(got) != "#!/bin/sh\n" {
+		t.Errorf(".bin/jq is %q (%v), want the present file", got, err)
 	}
 }
 

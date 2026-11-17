@@ -111,6 +111,16 @@ func (o *VersionOptions) Run() error {
 		}
 	}
 
+	// b.lock gives the state of the envs (showEnvVersions). Read it before
+	// any output: a b.lock that cannot be read is an error (readLock).
+	var lk *lock.Lock
+	if !o.Check && o.Config != nil && len(o.Config.Envs) > 0 && len(o.args) == 0 {
+		var err error
+		if lk, err = o.readLock(); err != nil {
+			return err
+		}
+	}
+
 	// Get version information
 	locals, err := o.getVersionInfo(binariesToCheck)
 	if err != nil {
@@ -144,18 +154,16 @@ func (o *VersionOptions) Run() error {
 	}
 
 	// Show env versions (when no specific args or args match envs)
-	if o.Config != nil && len(o.Config.Envs) > 0 && len(o.args) == 0 {
-		o.showEnvVersions()
+	if lk != nil {
+		o.showEnvVersions(lk)
 	}
 
 	return nil
 }
 
-// showEnvVersions displays version information for configured envs.
-// If Local is false, also checks remote for latest commit.
-func (o *VersionOptions) showEnvVersions() {
-	lk, _ := lock.ReadLock(o.LockDir())
-
+// showEnvVersions displays version information for configured envs, from
+// lk, the b.lock. If Local is false, also checks remote for latest commit.
+func (o *VersionOptions) showEnvVersions(lk *lock.Lock) {
 	fmt.Fprintln(o.IO.Out, "\nEnvironments:")
 	for _, entry := range o.Config.Envs {
 		label := gitcache.RefLabel(entry.Key)

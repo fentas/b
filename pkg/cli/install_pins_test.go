@@ -280,13 +280,15 @@ func TestInstall_AddOfThePinnedVersionTakesThePinsSpelling(t *testing.T) {
 	}
 }
 
-// TestInstall_FailedDownloadKeepsTheLockEntry: a download that fails leaves
-// the old file and its b.lock entry as they were.
+// TestInstall_FailedDownloadKeepsTheLockEntry: a download that fails is an
+// error, and leaves the old file and its b.lock entry as they were.
 func TestInstall_FailedDownloadKeepsTheLockEntry(t *testing.T) {
 	f := newPinsFixture(t)
 	f.present(t, "v1.0.0", true)
 	f.missing["v3.0.0"] = true
-	f.install(t, true, "tool@v3.0.0")
+	if err := f.run(t, true, "tool@v3.0.0"); err == nil || !strings.Contains(err.Error(), "tool v3.0.0 not found") {
+		t.Errorf("b install: error %v, want the error of the download", err)
+	}
 	if got := f.file(t); got != "tool v1.0.0\n" {
 		t.Errorf(".bin/tool is %q, want the old v1.0.0 file", got)
 	}
@@ -483,35 +485,34 @@ func TestInstall_NoArgumentsInstallsTheConfigEntries(t *testing.T) {
 	}
 }
 
-// TestInstall_FailedDownloadLeavesNoPartialFile: a download that fails after
-// it has written the file (here: an empty body, which the download rejects
-// after it has truncated the file) leaves no file and no b.lock entry. The
-// next install of the unpinned binary then downloads it again; it must not
-// keep the incomplete file and record it in b.lock as installed.
-func TestInstall_FailedDownloadLeavesNoPartialFile(t *testing.T) {
+// TestInstall_FailedDownloadKeepsTheOldBinary: a download that fails after
+// it has received the body (here: an empty body, which the download
+// rejects) is an error, and leaves the old binary and its b.lock entry as
+// they were: the download replaces the file in one step, after the checks.
+// The next install of the unpinned binary keeps that file and records its
+// version, not "" for an incomplete file.
+func TestInstall_FailedDownloadKeepsTheOldBinary(t *testing.T) {
 	f := newPinsFixture(t)
 	f.present(t, "v1.0.0", true)
 	f.empty["v2.0.0"] = true
-	f.install(t, true, "tool")
-	if _, err := os.Stat(filepath.Join(f.binDir, "tool")); !os.IsNotExist(err) {
-		t.Errorf(".bin/tool after the failed download: %v, want no file", err)
+	if err := f.run(t, true, "tool"); err == nil || !strings.Contains(err.Error(), "wrote 0 bytes") {
+		t.Errorf("b install: error %v, want the error of the empty download", err)
 	}
-	lk, err := lock.ReadLock(f.binDir)
-	if err != nil {
-		t.Fatal(err)
+	if got := f.file(t); got != "tool v1.0.0\n" {
+		t.Errorf(".bin/tool after the failed download is %q, want the old v1.0.0 file", got)
 	}
-	if e := lk.FindBinary("tool"); e != nil {
-		t.Errorf("b.lock entry after the failed download: %+v, want none", e)
+	if e, describes := f.entry(t); e.Version != "v1.0.0" || !describes {
+		t.Errorf("b.lock says %q and describes the file on disk = %v, want v1.0.0 and true", e.Version, describes)
 	}
 
 	f.empty = map[string]bool{}
 	f.hits.Store(0)
 	f.install(t, false, "tool")
-	if n := f.hits.Load(); n != 1 {
-		t.Errorf("the next install: %d downloads, want 1", n)
+	if n := f.hits.Load(); n != 0 {
+		t.Errorf("the next install: %d downloads, want 0", n)
 	}
-	if e, describes := f.entry(t); e.Version != "v2.0.0" || !describes {
-		t.Errorf("b.lock says %q and describes the file on disk = %v, want v2.0.0 and true", e.Version, describes)
+	if e, describes := f.entry(t); e.Version != "v1.0.0" || !describes {
+		t.Errorf("b.lock says %q and describes the file on disk = %v, want v1.0.0 and true", e.Version, describes)
 	}
 }
 
@@ -525,7 +526,9 @@ func TestInstall_FailedDownloadDropsTheEntryOfAMissingFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.missing["v3.0.0"] = true
-	f.install(t, false, "tool@v3.0.0")
+	if err := f.run(t, false, "tool@v3.0.0"); err == nil {
+		t.Error("b install: no error, want the error of the download")
+	}
 	lk, err := lock.ReadLock(f.binDir)
 	if err != nil {
 		t.Fatal(err)

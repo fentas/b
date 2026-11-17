@@ -76,6 +76,20 @@ binaries:
     version: "1.28.0"
 ```
 
+### b.lock Cannot Be Read
+
+**Problem**: A command stops with `cannot read b.lock`
+
+`b.lock` is there, but b cannot read it: it is not valid JSON (for example,
+after a merge conflict), or it is not a file. Each command that reads
+`b.lock` stops with this error before it downloads or writes anything:
+`install`, `update`, `list`, `version`, `verify`, `env status`, `env remove`
+and `env resolve`. A missing `b.lock` is not an error: b writes one at the
+first install.
+
+**Solution**: Repair `b.lock`, or remove it. Without `b.lock`, b downloads
+each pinned binary once and writes a new `b.lock`.
+
 ## Binary Installation Issues
 
 ### Download Failures
@@ -98,6 +112,12 @@ value gives the default of 60 seconds. The maximum is 24 hours.
 export B_DOWNLOAD_IDLE_TIMEOUT=5m
 b install
 ```
+
+A download that fails does not change the installed binary. b writes the new
+binary to a temp file in the same directory. It replaces the old binary only
+when the download is complete. When a download fails, `b install` stops with an
+error that names each binary whose download failed. With `--add`, it does not
+change `b.yaml`.
 
 **Solutions**:
 ```bash

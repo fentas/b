@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -95,7 +96,7 @@ func TestUpdateLock_FollowsThePlan(t *testing.T) {
 			downloaded: {download: true},
 			failed:     {download: true},
 		},
-		failed: map[*binary.Binary]bool{failed: true},
+		failed: map[*binary.Binary]error{failed: errors.New("the download failed")},
 	}
 	if err := o.updateLock([]*binary.Binary{kept, downloaded, failed}); err != nil {
 		t.Fatal(err)

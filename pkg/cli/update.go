@@ -523,7 +523,9 @@ func (o *UpdateOptions) runAll() error {
 		// All binaries of b.yaml are in scope: remove the b.lock rows that
 		// describe no file, as `b install` without arguments does.
 		if !o.effectiveDryRun() {
-			o.reportPruned(o.pruneLock())
+			if err := o.reportPruned(o.pruneLock()); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -594,11 +596,13 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 	}
 
 	// Check for dest path conflicts between envs (filtered by refs/group)
-	o.checkEnvConflicts(refs, o.Group)
+	if err := o.checkEnvConflicts(refs, o.Group); err != nil {
+		return err
+	}
 
 	lockDir := o.LockDir()
 	projectRoot := o.ProjectRoot()
-	lk, err := lock.ReadLock(lockDir)
+	lk, err := o.readLock()
 	if err != nil {
 		return err
 	}
@@ -1170,6 +1174,18 @@ func isTTY() bool {
 
 // updateBinaries updates the specified binaries with progress tracking
 func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
+	// Load the current lockfile so digest-resolver providers (docker://, oci://)
+	// can short-circuit when the tag's manifest digest hasn't changed upstream.
+	// readLock returns an empty Lock (not nil) when b.lock is missing, so a
+	// fresh project is the no-op case — every FindBinary returns nil and the
+	// digest-match check simply falls through. A b.lock that is there but
+	// cannot be read stops the update before any request, as it stops b
+	// install: taken as empty, it would download each binary again.
+	lk, err := o.readLock()
+	if err != nil {
+		return err
+	}
+
 	// Pre-resolve ambiguous assets before starting progress bars.
 	// Updates always attempt to check for newer versions, so always pre-resolve.
 	resolveAmbiguousAssets(binaries, o.Quiet, o.IO)
@@ -1182,21 +1198,10 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 		}
 	}
 
-	// Load the current lockfile so digest-resolver providers (docker://, oci://)
-	// can short-circuit when the tag's manifest digest hasn't changed upstream.
-	// ReadLock returns an empty Lock (not nil) when b.lock is missing, so a
-	// fresh project is the no-op case — every FindBinary returns nil and the
-	// digest-match check simply falls through. A real read/parse error is
-	// also non-fatal here: we drop to nil and fall through to the normal
-	// update path.
-	var lk *lock.Lock
-	if readLk, err := lock.ReadLock(o.LockDir()); err == nil {
-		lk = readLk
-		// Move the rows of an older b to the names of the files before any
-		// download and before the prune of runAll, as b install does.
-		if !o.effectiveDryRun() {
-			o.moveOldRows(lk, binaries)
-		}
+	// Move the rows of an older b to the names of the files before any
+	// download and before the prune of runAll, as b install does.
+	if !o.effectiveDryRun() {
+		o.moveOldRows(lk, binaries)
 	}
 
 	// Resolve digests once per digest-capable binary up-front. We reuse these
@@ -1367,7 +1372,7 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	// runs can skip when the tag hasn't moved. Only touches digest-resolver
 	// providers; non-digest entries and the rest of the lock are left alone.
 	if !o.effectiveDryRun() {
-		o.refreshLockDigests(binaries, freshDigests, preSHA, downloadFailed)
+		return o.refreshLockDigests(binaries, freshDigests, preSHA, downloadFailed)
 	}
 	return nil
 }
@@ -1380,13 +1385,13 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 // would wrongly skip.
 //
 // freshDigests is reused from updateBinaries so each registry is HEAD-ed
-// only once per run. Best-effort: any error is surfaced as a warning
-// without failing the update — the binaries are already on disk.
-func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDigests, preSHA map[*binary.Binary]string, downloadFailed map[*binary.Binary]bool) {
-	lk, err := lock.ReadLock(o.LockDir())
+// only once per run. A write error is surfaced as a warning without
+// failing the update — the binaries are already on disk. A b.lock that
+// cannot be read is an error (readLock), as in every command.
+func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDigests, preSHA map[*binary.Binary]string, downloadFailed map[*binary.Binary]bool) error {
+	lk, err := o.readLock()
 	if err != nil {
-		fmt.Fprintf(o.IO.ErrOut, "Warning: can't read b.lock to refresh digests: %v\n", err)
-		return
+		return err
 	}
 	changed := false
 	for _, b := range binaries {
@@ -1451,11 +1456,12 @@ func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDiges
 		}
 	}
 	if !changed {
-		return
+		return nil
 	}
 	if err := lock.WriteLock(o.LockDir(), lk, o.bVersion); err != nil {
 		fmt.Fprintf(o.IO.ErrOut, "Warning: can't write b.lock digest updates: %v\n", err)
 	}
+	return nil
 }
 
 // providerDigestResolver returns the provider behind ref as a
@@ -1502,14 +1508,15 @@ func digestMatchesLock(b *binary.Binary, lk *lock.Lock, fresh string) bool {
 
 // checkEnvConflicts detects when two env entries write to overlapping dest paths.
 // It checks the lock file for existing dest paths, filtered by refs and group.
-func (o *UpdateOptions) checkEnvConflicts(refs []string, group string) {
+// It returns the error of a b.lock that cannot be read (readLock).
+func (o *UpdateOptions) checkEnvConflicts(refs []string, group string) error {
 	if o.Config == nil || len(o.Config.Envs) < 2 {
-		return
+		return nil
 	}
 
-	lk, _ := lock.ReadLock(o.LockDir())
-	if lk == nil {
-		return
+	lk, err := o.readLock()
+	if err != nil {
+		return err
 	}
 
 	// Build set of active env keys (matching refs/group filter)
@@ -1563,4 +1570,5 @@ func (o *UpdateOptions) checkEnvConflicts(refs []string, group string) {
 			destMap[f.Dest] = destOwner{ref: key, path: f.Path}
 		}
 	}
+	return nil
 }

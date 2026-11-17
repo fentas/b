@@ -4,8 +4,21 @@ package provider
 
 import (
 	"fmt"
+	"io"
 	"strings"
+
+	"github.com/fentas/b/pkg/atomicfile"
 )
+
+// installFile writes the binary file dest from r in one step
+// (atomicfile.Write), with mode 0755. When the write fails, the old file
+// stays as it was.
+func installFile(dest string, r io.Reader) error {
+	return atomicfile.Write(dest, 0755, func(w io.Writer) error {
+		_, err := io.Copy(w, r)
+		return err
+	})
+}
 
 // Provider can fetch release information for a given ref.
 type Provider interface {

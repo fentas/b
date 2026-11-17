@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/fentas/b/pkg/atomicfile"
 	"github.com/fentas/b/pkg/fetch"
 	"github.com/fentas/b/pkg/provider"
 	"github.com/fentas/goodies/progress"
@@ -50,6 +51,20 @@ func verifyWritten(file string, written, contentLength int64) error {
 		return fmt.Errorf("download of %s is incomplete: wrote %d bytes, Content-Length is %d; retry the download", file, written, contentLength)
 	}
 	return nil
+}
+
+// writeFile writes the binary file b.File from r in one step
+// (atomicfile.Write), with mode 0755. check, if not nil, gets the number of
+// bytes and can refuse them before the new file replaces the old one. A
+// download or an extraction that fails leaves the old file as it was.
+func (b *Binary) writeFile(r io.Reader, check func(written int64) error) error {
+	return atomicfile.Write(b.File, 0755, func(w io.Writer) error {
+		n, err := io.Copy(w, r)
+		if err == nil && check != nil {
+			err = check(n)
+		}
+		return err
+	})
 }
 
 // ctx returns the context of b, or context.Background if it has none.
@@ -137,15 +152,7 @@ func (b *Binary) extractSingleFileFromTar(stream io.Reader, compression string) 
 			}
 		}
 
-		file, err := os.OpenFile(b.File, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-		if _, err = io.Copy(file, tarReader); err != nil {
-			return err
-		}
-		return os.Chmod(b.File, 0755)
+		return b.writeFile(tarReader, nil)
 	}
 
 	return fmt.Errorf("file %s not found", b.Name)
@@ -170,12 +177,6 @@ func (b *Binary) extractSingleFileFromZip(stream io.Reader) error {
 			}
 			defer zippedFile.Close()
 
-			bfile, err := os.OpenFile(b.File, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
-			if err != nil {
-				return err
-			}
-			defer bfile.Close()
-
 			var reader io.Reader = zippedFile
 			if b.Writer != nil {
 				b.Tracker = b.Writer.AddTracker(fmt.Sprintf("Extracting %s", b.Name), int64(file.UncompressedSize64))
@@ -183,10 +184,7 @@ func (b *Binary) extractSingleFileFromZip(stream io.Reader) error {
 				defer b.Tracker.MarkAsDone()
 			}
 
-			if _, err = io.Copy(bfile, reader); err != nil {
-				return err
-			}
-			return os.Chmod(b.File, 0755)
+			return b.writeFile(reader, nil)
 		}
 	}
 
@@ -314,22 +312,9 @@ func (b *Binary) downloadAsset(asset *provider.Asset) error {
 		return b.extractFromZipAuto(resp.Body)
 	default:
 		// Raw binary (no archive)
-		file, err := os.OpenFile(b.File, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
-		if err != nil {
-			return err
-		}
-		written, copyErr := io.Copy(file, resp.Body)
-		closeErr := file.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		if err := verifyWritten(b.File, written, resp.ContentLength); err != nil {
-			return err
-		}
-		return os.Chmod(b.File, 0755)
+		return b.writeFile(resp.Body, func(written int64) error {
+			return verifyWritten(b.File, written, resp.ContentLength)
+		})
 	}
 }
 
@@ -418,10 +403,7 @@ func (b *Binary) extractFromTarAuto(stream io.Reader, compression string) error 
 		return fmt.Errorf("no executable found in archive for %s", b.Name)
 	}
 
-	if err := os.WriteFile(b.File, chosen.data, 0755); err != nil {
-		return err
-	}
-	return nil
+	return b.writeFile(bytes.NewReader(chosen.data), nil)
 }
 
 // extractFromZipAuto extracts the best-matching binary from a zip archive.
@@ -482,19 +464,7 @@ func (b *Binary) extractFromZipAuto(stream io.Reader) error {
 	}
 	defer rc.Close()
 
-	outFile, err := os.OpenFile(b.File, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
-	if err != nil {
-		return err
-	}
-
-	if _, err := io.Copy(outFile, rc); err != nil {
-		outFile.Close()
-		return err
-	}
-	if err := outFile.Close(); err != nil {
-		return err
-	}
-	return os.Chmod(b.File, 0755)
+	return b.writeFile(rc, nil)
 }
 
 // downloadPreset is the original preset-based download path.
@@ -582,21 +552,7 @@ func (b *Binary) downloadPreset() error {
 		return b.extractSingleFileFromZip(resp.Body)
 	}
 
-	file, err := os.OpenFile(b.File, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
-	if err != nil {
-		return err
-	}
-	written, copyErr := io.Copy(file, resp.Body)
-	closeErr := file.Close()
-	if copyErr != nil {
-		return copyErr
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if err := verifyWritten(b.File, written, resp.ContentLength); err != nil {
-		return err
-	}
-
-	return os.Chmod(b.File, 0755)
+	return b.writeFile(resp.Body, func(written int64) error {
+		return verifyWritten(b.File, written, resp.ContentLength)
+	})
 }

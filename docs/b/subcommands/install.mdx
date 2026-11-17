@@ -64,6 +64,8 @@ b install --add kubectl
 
 With `--add`, `--on-post` and `--asset` go into the b.yaml entry of the binary, also into an entry that is already there. An `enforced` pin holds only the version, so they also go into a pinned entry.
 
+When a download fails, `b install --add` does not change b.yaml, also when other binaries of the same command install. The command stops with an error that names each binary whose download failed. Run it again when the download works.
+
 ### Force an installation
 
 Use the `--force` flag to overwrite an existing binary.
