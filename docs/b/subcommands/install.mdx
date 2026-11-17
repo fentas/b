@@ -103,7 +103,7 @@ Rules for `--alias`:
 - When the alias is already the name of another binary, b refuses the install. That is another entry in b.yaml, the binary of a provider ref, or another preset (a built-in binary of that name), also when that preset has no entry in b.yaml.
 - For another preset without an entry, `--force` installs the binary under the alias anyway, and overwrites the file of that preset. For an entry of another binary, `--force` does not help: b.yaml would then give one name to two binaries.
 
-With `--add`, b does not write a version that the entry's `enforced` pin contradicts. Add `--fix` to move the pin as well.
+With `--add`, b does not write a version that the entry's `enforced` pin contradicts. Add `--fix` to move the pin as well. A version that is the pin without or with a leading `v` (`3.0.0` for a pin `v3.0.0`) is the pinned version: b installs it and writes it as the pin spells it.
 
 ### Sync environment files (SCP syntax)
 

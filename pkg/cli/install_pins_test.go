@@ -8,23 +8,28 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/fentas/b/pkg/binary"
 	"github.com/fentas/b/pkg/lock"
+	"github.com/fentas/b/pkg/state"
 )
 
 // pinsFixture is a project with a .bin directory, a b.yaml, and a release
 // server for the presets "tool" and "other": GET /<version> answers
 // "tool <version>\n" and GET /other/<version> answers "other <version>\n",
 // or 404 when the version is in missing, or an empty body when the version
-// is in empty. The latest version is v2.0.0.
+// is in empty. The latest version is v2.0.0. paths are the paths of the
+// requests to the server.
 type pinsFixture struct {
 	dir, binDir, config string
 	srv                 *httptest.Server
 	hits                atomic.Int32
 	missing, empty      map[string]bool
+	mu                  sync.Mutex
+	paths               []string
 }
 
 func newPinsFixture(t *testing.T) *pinsFixture {
@@ -38,6 +43,9 @@ func newPinsFixture(t *testing.T) *pinsFixture {
 	t.Setenv("PATH_BASE", f.dir)
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.hits.Add(1)
+		f.mu.Lock()
+		f.paths = append(f.paths, r.URL.Path)
+		f.mu.Unlock()
 		name, version := "tool", strings.TrimPrefix(r.URL.Path, "/")
 		if v, ok := strings.CutPrefix(version, "other/"); ok {
 			name, version = "other", v
@@ -100,17 +108,31 @@ func (f *pinsFixture) install(t *testing.T, force bool, args ...string) {
 // run is install, and returns the error of Run.
 func (f *pinsFixture) run(t *testing.T, force bool, args ...string) error {
 	t.Helper()
+	return f.runWith(t, func(o *InstallOptions) { o.Force = force }, args...)
+}
+
+// runWith runs `b install <args>` in the fixture with the flags that set
+// gives (--add, --on-post, ...), and returns the error of Run.
+func (f *pinsFixture) runWith(t *testing.T, set func(*InstallOptions), args ...string) error {
+	t.Helper()
 	shared := NewSharedOptions(mkIO(), f.presets())
 	shared.ConfigPath = f.config
-	shared.Force = force
 	if err := shared.LoadConfig(); err != nil {
 		t.Fatal(err)
 	}
 	o := &InstallOptions{SharedOptions: shared}
+	set(o)
 	if err := o.Complete(args); err != nil {
 		t.Fatal(err)
 	}
 	return o.Run()
+}
+
+// requests are the paths of the requests to the release server.
+func (f *pinsFixture) requests() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.paths...)
 }
 
 // file is the content of .bin/tool. entry is its b.lock entry, and whether
@@ -174,6 +196,74 @@ func TestInstall_RequestedVersionAlreadyPresentIsKept(t *testing.T) {
 	}
 	if e, describes := f.entry(t); e.Version != "v3.0.0" || !describes {
 		t.Errorf("b.lock says %s and describes the file on disk = %v", e.Version, describes)
+	}
+}
+
+// TestInstall_AddOfThePinnedVersionTakesThePinsSpelling: `b install --add`
+// with the version of the enforced pin in another spelling (with or without
+// a leading "v") installs the version of the pin, under the pin's spelling.
+// An installed binary of that version is kept: no download, and b.lock stays
+// byte for byte. A missing binary is downloaded under the pin's spelling. The
+// b.yaml entry keeps the pin's spelling, and gets no second one.
+func TestInstall_AddOfThePinnedVersionTakesThePinsSpelling(t *testing.T) {
+	for _, tc := range []struct{ pin, arg string }{
+		{"v3.0.0", "3.0.0"},
+		{"3.0.0", "v3.0.0"},
+	} {
+		bYAML := "binaries:\n  tool:\n    version: " + tc.pin + "\n    enforced: " + tc.pin + "\n"
+		add := func(o *InstallOptions) { o.Add = true }
+		checkConfig := func(t *testing.T, f *pinsFixture) {
+			t.Helper()
+			cfg, err := state.LoadConfigFromPath(f.config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(cfg.Binaries) != 1 || cfg.Binaries[0].Name != "tool" {
+				t.Fatalf("b.yaml entries %+v, want the one entry tool", cfg.Binaries)
+			}
+			if e := cfg.Binaries[0]; e.Version != tc.pin || e.Enforced != tc.pin {
+				t.Errorf("entry tool: version %q, enforced %q; want %s, %s", e.Version, e.Enforced, tc.pin, tc.pin)
+			}
+		}
+
+		t.Run(tc.arg+" over an installed "+tc.pin, func(t *testing.T) {
+			f := newPinsFixture(t)
+			mustWrite(t, f.config, []byte(bYAML))
+			f.present(t, tc.pin, true)
+			lockFile := filepath.Join(f.binDir, "b.lock")
+			before, err := os.ReadFile(lockFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.runWith(t, add, "tool@"+tc.arg); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if got := f.requests(); len(got) != 0 {
+				t.Errorf("downloads %v, want none: %s is installed", got, tc.pin)
+			}
+			if got := f.file(t); got != "tool "+tc.pin+"\n" {
+				t.Errorf(".bin/tool is %q, want the %s file, untouched", got, tc.pin)
+			}
+			if after, _ := os.ReadFile(lockFile); string(after) != string(before) {
+				t.Errorf("b.lock changed on an install that changed nothing:\n%s\nwas:\n%s", after, before)
+			}
+			checkConfig(t, f)
+		})
+
+		t.Run(tc.arg+" over a missing "+tc.pin, func(t *testing.T) {
+			f := newPinsFixture(t)
+			mustWrite(t, f.config, []byte(bYAML))
+			if err := f.runWith(t, add, "tool@"+tc.arg); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if got := f.requests(); len(got) != 1 || got[0] != "/"+tc.pin {
+				t.Errorf("downloads %v, want one of /%s", got, tc.pin)
+			}
+			if e, describes := f.entry(t); e.Version != tc.pin || !describes {
+				t.Errorf("b.lock says %q and describes the file on disk = %v, want %s and true", e.Version, describes, tc.pin)
+			}
+			checkConfig(t, f)
+		})
 	}
 }
 

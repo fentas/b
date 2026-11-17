@@ -258,6 +258,16 @@ func (o *InstallOptions) Complete(args []string) error {
 			if err := o.checkPin(b); err != nil {
 				return err
 			}
+			// checkPin accepts the version of the pin also in another
+			// spelling (3.0.0 for v3.0.0). Install and record it under the
+			// pin's spelling: that is the version that b installs for the
+			// entry, and the one b.lock holds for its file. Another
+			// spelling would download the binary again (or ask the
+			// provider for a release that does not exist), and put a
+			// second spelling into b.yaml.
+			if pin := o.enforcedPin(b); pin != "" && sameVersion(pin, b.Version) {
+				b.Version = pin
+			}
 		}
 		if o.Asset != "" {
 			b.AssetFilter = o.Asset
@@ -310,6 +320,15 @@ func (o *InstallOptions) checkPin(b *binary.Binary) error {
 		return nil
 	}
 	return fmt.Errorf("--add: the b.yaml entry %s is pinned to %s (enforced), not %s\n  Hint: add --fix to move the pin, or install without --add", e.Name, e.Enforced, b.Version)
+}
+
+// enforcedPin is the enforced pin of the b.yaml entry that --add writes for
+// b, "" when that entry has no pin or there is no such entry.
+func (o *InstallOptions) enforcedPin(b *binary.Binary) string {
+	if e := o.configEntry(configKey(b)); e != nil {
+		return e.Enforced
+	}
+	return ""
 }
 
 // sameVersion reports whether two versions are the same, with or without a
