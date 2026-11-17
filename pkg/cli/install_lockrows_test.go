@@ -235,6 +235,9 @@ func TestInstall_RowOfAnOlderBMoves(t *testing.T) {
 				}
 				lk := f.readLock(t)
 				f.checkRow(t, lk, tc.file, tc.content, tc.version)
+				if e := lk.FindBinary(tc.file); e != nil && e.Binary != "tool" {
+					t.Errorf("b.lock row %s names the binary %q, want tool", tc.file, e.Binary)
+				}
 				if e := lk.FindBinary("tool"); e != nil {
 					t.Errorf("b.lock row under the old name: %+v, want none", e)
 				}
@@ -505,6 +508,69 @@ func TestCheckConfigFiles(t *testing.T) {
 			t.Errorf("%s: %v, want no error", tc.name, err)
 		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
 			t.Errorf("%s: %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
+
+// TestInstall_AliasForceDoesNotTakeOverThePresetsRow: `b install --alias
+// other --force tool` installs tool at .bin/other, the file of the preset
+// other. Its b.lock row says that the file is tool. A later `b install
+// other` then downloads other: it must not keep tool's binary as other, and
+// b.lock must not record tool's binary as other.
+func TestInstall_AliasForceDoesNotTakeOverThePresetsRow(t *testing.T) {
+	f := newPinsFixture(t)
+	if err := f.runWith(t, func(o *InstallOptions) { o.Alias = "other"; o.Force = true }, "tool"); err != nil {
+		t.Fatalf("b install --alias other --force tool: %v", err)
+	}
+	lk := f.readLock(t)
+	f.checkRow(t, lk, "other", "tool v2.0.0\n", "v2.0.0")
+	if e := lk.FindBinary("other"); e == nil || e.Binary != "tool" {
+		t.Errorf("b.lock row other: %+v, want the binary tool", e)
+	}
+
+	f.hits.Store(0)
+	f.install(t, false, "other")
+	if n := f.hits.Load(); n != 1 {
+		t.Errorf("b install other: %d downloads, want 1", n)
+	}
+	lk = f.readLock(t)
+	f.checkRow(t, lk, "other", "other v2.0.0\n", "v2.0.0")
+	if e := lk.FindBinary("other"); e == nil || e.Binary != "" {
+		t.Errorf("b.lock row other: %+v, want no binary field: the file is other", e)
+	}
+	if err := f.verify(t); err != nil {
+		t.Errorf("b verify: %v", err)
+	}
+}
+
+// TestOtherBinary: a b.lock row says that its file is another binary when
+// its binary field names another binary, when it is the row of a provider
+// ref and b is a preset, or the row of a preset or of another ref and b is
+// a provider ref. A row without a binary field (from an older b) of the same
+// kind is not another binary.
+func TestOtherBinary(t *testing.T) {
+	preset := &binary.Binary{Name: "tool"}
+	alias := &binary.Binary{Name: "tool", Alias: "t2"}
+	ref := &binary.Binary{Name: "tool", AutoDetect: true, ProviderRef: "fakerel://a/tool"}
+	refAlias := &binary.Binary{Name: "tool", Alias: "ta", AutoDetect: true, ProviderRef: "fakerel://a/tool"}
+	for _, tc := range []struct {
+		name string
+		row  lock.BinEntry
+		b    *binary.Binary
+		want bool
+	}{
+		{"a preset row of an older b", lock.BinEntry{Name: "tool", Preset: true}, preset, false},
+		{"an alias row of an older b", lock.BinEntry{Name: "t2", Preset: true}, alias, false},
+		{"an alias row", lock.BinEntry{Name: "t2", Binary: "tool", Preset: true}, alias, false},
+		{"a row of another preset", lock.BinEntry{Name: "tool", Binary: "other", Preset: true}, preset, true},
+		{"a row of a provider ref, b a preset", lock.BinEntry{Name: "tool", Source: "fakerel://a/tool", Provider: "fakerel"}, preset, true},
+		{"a row of the ref", lock.BinEntry{Name: "tool", Source: "fakerel://a/tool", Provider: "fakerel"}, ref, false},
+		{"an alias row of the ref", lock.BinEntry{Name: "ta", Binary: "tool", Source: "fakerel://a/tool", Provider: "fakerel"}, refAlias, false},
+		{"a row of another ref", lock.BinEntry{Name: "tool", Source: "fakerel://b/tool", Provider: "fakerel"}, ref, true},
+		{"a preset row, b a provider ref", lock.BinEntry{Name: "tool", Preset: true}, ref, true},
+	} {
+		if got := otherBinary(&tc.row, tc.b); got != tc.want {
+			t.Errorf("%s: otherBinary = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

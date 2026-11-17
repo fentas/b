@@ -1405,6 +1405,7 @@ func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDiges
 		if rowName != name {
 			moved := *entry
 			moved.Name = name
+			moved.Binary = lockBinary(b)
 			if !stay[rowName] {
 				lk.RemoveBinary(rowName)
 			}

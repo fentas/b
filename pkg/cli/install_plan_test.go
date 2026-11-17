@@ -28,6 +28,7 @@ func TestPlanInstall(t *testing.T) {
 	}
 	locked := &lock.BinEntry{Name: "tool", Version: "v1.0.0", SHA256: hash}
 	stale := &lock.BinEntry{Name: "tool", Version: "v1.0.0", SHA256: "another file"}
+	other := &lock.BinEntry{Name: "tool", Binary: "other", Version: "v1.0.0", SHA256: hash}
 
 	for _, tc := range []struct {
 		name     string
@@ -48,6 +49,8 @@ func TestPlanInstall(t *testing.T) {
 		{"another version asked", file, "v3.0.0", locked, false, true, ""},
 		{"a version asked, not locked", file, "v1.0.0", nil, false, true, ""},
 		{"a version asked, b.lock hashes another file", file, "v1.0.0", stale, false, true, ""},
+		{"no version asked, b.lock says the file is another binary", file, "", other, false, true, ""},
+		{"the locked version asked, b.lock says the file is another binary", file, "v1.0.0", other, false, true, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := &binary.Binary{Name: "tool", Version: tc.version, File: tc.file}

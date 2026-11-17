@@ -101,13 +101,15 @@ Rules for `--alias`:
 - When the alias is the name of a b.yaml entry of the same binary, the install uses the settings of that entry (version, enforced pin, file, onPost). A version on the command line wins.
 - When the alias is a new name, the binary keeps the settings of the b.yaml entry of the binary argument: its version (its enforced pin, when it has one) and its onPost. It does not keep that entry's file: it installs at `.bin/<alias>`. A version on the command line and `--on-post` win. With `--add`, the new entry gets that version and onPost, without a pin.
 - When the alias is already the name of another binary, b refuses the install. That is another entry in b.yaml, the binary of a provider ref, or another preset (a built-in binary of that name), also when that preset has no entry in b.yaml.
-- For another preset without an entry, `--force` installs the binary under the alias anyway, and overwrites the file of that preset. For an entry of another binary, `--force` does not help: b.yaml would then give one name to two binaries.
+- For another preset without an entry, `--force` installs the binary under the alias anyway, and overwrites the file of that preset. The b.lock row of that file then names the binary that is in it, so a later `b install <preset>` downloads the preset again. For an entry of another binary, `--force` does not help: b.yaml would then give one name to two binaries.
 
 With `--add`, b does not write a version that the entry's `enforced` pin contradicts. Add `--fix` to move the pin as well. A version that is the pin without or with a leading `v` (`3.0.0` for a pin `v3.0.0`) is the pinned version: b installs it and writes it as the pin spells it.
 
 ### The b.lock rows of binaries
 
 `b install` writes one row into `b.lock` for each file that it installs. The name of the row is the name of the file in `.bin`: the alias of the binary when it has one, else the name of the binary. So two b.yaml entries of one preset, or two provider refs with the same binary name under their own aliases, each have their own row. `b verify` checks the file `.bin/<name of the row>`.
+
+When the file has another name than its binary, the row names the binary in the field `binary`. When a row says that the file is another binary (another `binary`, a provider ref for a preset, a preset or another ref for a provider ref), `b install` downloads the binary again, also when no version is asked for.
 
 Older versions of b wrote some rows under the name of the binary: the row of a provider ref with an alias, and (before alias entries had their own rows) the row of an alias entry of a preset. `b install` and `b update` find such a row and write it under the name of the file. When the sha256 of the file is the one in the row, b does not download the binary again. The row under the old name goes, unless a b.yaml entry installs a file of that name.
 

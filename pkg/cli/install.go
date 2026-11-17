@@ -67,7 +67,9 @@ type installPlan struct {
 // file is kept when no version is asked for, or when b.lock says that file
 // (by its sha256) is the version asked for. When another version is asked
 // for, or b.lock does not describe the file, the binary is downloaded: a
-// kept file must never be recorded under a version it is not.
+// kept file must never be recorded under a version it is not. When b.lock
+// says that the file is another binary (otherBinary), the binary is
+// downloaded too, also when no version is asked for.
 func planInstall(b *binary.Binary, prev *lock.BinEntry, force bool) installPlan {
 	if force || !b.BinaryExists() {
 		return installPlan{download: true}
@@ -75,6 +77,9 @@ func planInstall(b *binary.Binary, prev *lock.BinEntry, force bool) installPlan 
 	known := ""
 	if prev != nil && prev.SHA256 != "" {
 		if hash, err := lock.SHA256File(b.BinaryPath()); err == nil && hash == prev.SHA256 {
+			if otherBinary(prev, b) {
+				return installPlan{download: true}
+			}
 			known = prev.Version
 		}
 	}
@@ -695,6 +700,7 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		}
 		entry := lock.BinEntry{
 			Name:    name,
+			Binary:  lockBinary(b),
 			Version: version,
 			SHA256:  hash,
 		}

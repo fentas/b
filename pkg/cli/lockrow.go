@@ -111,15 +111,43 @@ func findLockRow(lk *lock.Lock, b *binary.Binary) (*lock.BinEntry, string) {
 }
 
 // oldLockRow reports whether e, the row under the name of b's binary, can be
-// the row that an older b wrote for b's file: a row of a provider ref with
-// b's ref, or of a preset when b is a preset. It can also be the row of a
-// present file of that name. The caller must check the sha256 of b's file
-// against it before it trusts the version.
+// the row that an older b wrote for b's file: a row without a Binary field,
+// of a provider ref with b's ref, or of a preset when b is a preset. It can
+// also be the row of a present file of that name. The caller must check the
+// sha256 of b's file against it before it trusts the version.
 func oldLockRow(e *lock.BinEntry, b *binary.Binary) bool {
+	if e.Binary != "" {
+		return false
+	}
 	if isProviderRef(b) {
 		return !e.Preset && e.Source == b.ProviderRef
 	}
 	return e.Preset
+}
+
+// lockBinary is the Binary field of b's b.lock row: the name of b when its
+// file has another name, else "".
+func lockBinary(b *binary.Binary) string {
+	if lockName(b) != b.Name {
+		return b.Name
+	}
+	return ""
+}
+
+// otherBinary reports whether the b.lock row e says that its file is another
+// binary than b. Then the file is not b, also when its sha256 is the one in
+// the row: `b install --alias <preset> --force` put another binary at the
+// file of that preset, or b.yaml now names another binary for the file. A
+// row of an older b has no Binary field; for it, only its kind (preset or
+// provider ref) and the source of a provider ref count.
+func otherBinary(e *lock.BinEntry, b *binary.Binary) bool {
+	if e.Binary != "" && e.Binary != b.Name {
+		return true
+	}
+	if isProviderRef(b) {
+		return e.Preset || (e.Source != "" && e.Source != b.ProviderRef)
+	}
+	return e.Provider != ""
 }
 
 // lockFileNames is the set of file names that the b.yaml entries and the
