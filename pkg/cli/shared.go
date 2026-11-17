@@ -103,7 +103,7 @@ func (o *SharedOptions) resolveBinary(lb *binary.LocalBinary) (*binary.Binary, b
 			b.Version = lb.Enforced
 		}
 		if lb.File != "" {
-			b.File = lb.File
+			b.File, b.FileAsWritten = lb.File, lb.FileAsWritten
 		}
 		if lb.OnPost != "" {
 			b.OnPost = lb.OnPost
@@ -167,7 +167,7 @@ func (o *SharedOptions) GetBinary(name string) (*binary.Binary, bool) {
 				b.Version = configEntry.Enforced
 			}
 			if configEntry.File != "" {
-				b.File = configEntry.File
+				b.File, b.FileAsWritten = configEntry.File, configEntry.FileAsWritten
 			}
 			if configEntry.Alias != "" {
 				b.Alias = configEntry.Alias
@@ -208,7 +208,7 @@ func (o *SharedOptions) GetBinariesFromConfig() []*binary.Binary {
 				b.Version = lb.Enforced
 			}
 			if lb.File != "" {
-				b.File = lb.File
+				b.File, b.FileAsWritten = lb.File, lb.FileAsWritten
 			}
 			if lb.Alias != "" {
 				b.Alias = lb.Alias
@@ -248,8 +248,14 @@ func (o *SharedOptions) LockDir() string {
 // Priority: PATH_BASE > git root > CWD.
 // This is where synced env files are written (not .bin/).
 func (o *SharedOptions) ProjectRoot() string {
-	if p := projectRoot(); p != "" {
+	if p := os.Getenv("PATH_BASE"); p != "" {
 		return p
+	}
+	if gitRoot, err := path.GetGitRootDirectory(); err == nil {
+		return gitRoot
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
 	}
 	// Last resort: derive from lockDir
 	lockDir := o.LockDir()
@@ -260,22 +266,6 @@ func (o *SharedOptions) ProjectRoot() string {
 		return lockDir
 	}
 	return "."
-}
-
-// projectRoot is the root directory of the project: PATH_BASE, else the
-// root of the git repository, else the working directory. It is "" when b
-// cannot tell (no working directory).
-func projectRoot() string {
-	if p := os.Getenv("PATH_BASE"); p != "" {
-		return p
-	}
-	if gitRoot, err := path.GetGitRootDirectory(); err == nil {
-		return gitRoot
-	}
-	if cwd, err := os.Getwd(); err == nil {
-		return cwd
-	}
-	return ""
 }
 
 // ValidateBinaryPath ensures we have a valid binary installation path

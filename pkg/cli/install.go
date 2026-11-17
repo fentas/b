@@ -113,15 +113,15 @@ func isProviderRef(b *binary.Binary) bool {
 
 // lockName is the name of a binary's b.lock row: the name of the file that
 // it installs (fileName), its alias when it has one, else its name, or the
-// path of its file relative to the binary directory when b.yaml puts it
-// elsewhere. So two b.yaml entries of one preset, or two provider refs with
-// the same binary name, each have their own row (lockrow.go).
+// path of its `file:` as b.yaml writes it when b.yaml puts it elsewhere. So
+// two b.yaml entries of one preset, or two provider refs with the same
+// binary name, each have their own row (lockrow.go).
 func lockName(b *binary.Binary) string {
 	name := b.Name
 	if b.Alias != "" {
 		name = b.Alias
 	}
-	return fileName(b.File, name)
+	return fileName(b.File, b.FileAsWritten, name)
 }
 
 // NewInstallCmd creates the install subcommand
@@ -251,12 +251,12 @@ func (o *InstallOptions) Complete(args []string) error {
 				return fmt.Errorf("--alias %s: %s is the preset %s, another binary than %s\n  Hint: pick another alias, or add --force to install %s over the file of %s", o.Alias, o.Alias, o.Alias, b.Name, b.Name, o.Alias)
 			}
 			if !isProviderRef(b) {
-				b.File = ""
+				b.File, b.FileAsWritten = "", ""
 				if e := o.configEntry(o.Alias); e != nil {
 					if rb, ok := o.resolveBinary(e); ok {
 						b = rb
 					}
-					b.File = e.File
+					b.File, b.FileAsWritten = e.File, e.FileAsWritten
 				}
 			}
 			b.Alias = o.Alias

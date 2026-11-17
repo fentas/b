@@ -839,8 +839,8 @@ func TestInstall_PresetDoesNotTakeTheRowOfARef(t *testing.T) {
 }
 
 // TestInstall_AbsoluteFileHasOneRowInEachCheckout: a b.yaml entry with an
-// absolute `file:` outside the project has a row under the absolute path of
-// the file. The name does not depend on the directory of the checkout: a
+// absolute `file:` outside the project has a row under that path, as b.yaml
+// writes it. The name does not depend on the directory of the checkout: a
 // second checkout at another depth with the same b.yaml and b.lock finds
 // the row, downloads nothing and adds no row. b verify reads the file,
 // because b.yaml installs it. When the entry and the file are gone, the
@@ -852,11 +852,7 @@ func TestInstall_AbsoluteFileHasOneRowInEachCheckout(t *testing.T) {
 	cfg := []byte("binaries:\n  tool:\n    version: v2.0.0\n    file: " + file + "\n")
 	mustWrite(t, f.config, cfg)
 	f.install(t, false)
-	realOut, err := filepath.EvalSymlinks(outDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := filepath.ToSlash(filepath.Join(realOut, "custom-tool"))
+	want := filepath.ToSlash(file) // as b.yaml writes it
 	if got := f.rowNames(t); got != want {
 		t.Fatalf("b.lock rows: %q, want %q", got, want)
 	}
@@ -895,6 +891,101 @@ func TestInstall_AbsoluteFileHasOneRowInEachCheckout(t *testing.T) {
 	f.install(t, false)
 	if got := f.rowNames(t); got != "" {
 		t.Errorf("b.lock rows without the entry and the file: %q, want none", got)
+	}
+}
+
+// TestInstall_RelativeFileOutsideTheProjectHasOneRowInEachCheckout: a
+// b.yaml entry with a relative `file:` that leaves the project
+// (../../tools/x, a directory beside the project) has a row under that
+// path, not under an absolute path. A second checkout at another depth,
+// with the same layout, the same b.yaml and b.lock and the file in its own
+// tools directory, finds the row: one row, no download, and b verify
+// passes in both checkouts. No row holds the path of a checkout.
+func TestInstall_RelativeFileOutsideTheProjectHasOneRowInEachCheckout(t *testing.T) {
+	f := newPinsFixture(t)
+	cfg := []byte("binaries:\n  tool:\n    version: v2.0.0\n    file: ../../tools/x\n")
+	checkout := func(dir string) {
+		f.dir, f.binDir = dir, filepath.Join(dir, ".bin")
+		f.config = filepath.Join(f.binDir, "b.yaml")
+		mustMkdir(t, f.binDir)
+		mustWrite(t, f.config, cfg)
+		t.Setenv("PATH_BIN", f.binDir)
+		t.Setenv("PATH_BASE", f.dir)
+	}
+	noCheckoutPath := func(where string, roots ...string) {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(f.binDir, "b.lock"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, root := range roots {
+			if strings.Contains(string(data), filepath.ToSlash(root)) {
+				t.Errorf("%s: b.lock holds the path %s:\n%s", where, root, data)
+			}
+		}
+		for _, e := range f.readLock(t).Binaries {
+			if filepath.IsAbs(filepath.FromSlash(e.Name)) {
+				t.Errorf("%s: b.lock row %q is an absolute path", where, e.Name)
+			}
+		}
+	}
+
+	base := t.TempDir()
+	one := filepath.Join(base, "a", "proj")
+	checkout(one)
+	f.install(t, false)
+	if data, err := os.ReadFile(filepath.Join(base, "a", "tools", "x")); err != nil || string(data) != "tool v2.0.0\n" {
+		t.Fatalf("../../tools/x of the first checkout: %q, %v; want tool v2.0.0", data, err)
+	}
+	if got := f.rowNames(t); got != "../../tools/x" {
+		t.Errorf("b.lock rows: %q, want ../../tools/x", got)
+	}
+	if err := f.verify(t); err != nil {
+		t.Errorf("b verify: %v", err)
+	}
+	noCheckoutPath("the first checkout", base)
+	data, err := os.ReadFile(filepath.Join(f.binDir, "b.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	two := filepath.Join(base, "x", "y", "b", "proj")
+	checkout(two)
+	mustWrite(t, filepath.Join(f.binDir, "b.lock"), data)
+	mustMkdir(t, filepath.Join(base, "x", "y", "b", "tools"))
+	mustWriteExec(t, filepath.Join(base, "x", "y", "b", "tools", "x"), []byte("tool v2.0.0\n"))
+	f.hits.Store(0)
+	f.install(t, false)
+	if n := f.hits.Load(); n != 0 {
+		t.Errorf("the install in the second checkout: %d downloads, want 0", n)
+	}
+	if got := f.rowNames(t); got != "../../tools/x" {
+		t.Errorf("b.lock rows in the second checkout: %q, want ../../tools/x", got)
+	}
+	if err := f.verify(t); err != nil {
+		t.Errorf("b verify in the second checkout: %v", err)
+	}
+	noCheckoutPath("the second checkout", base)
+}
+
+// TestInstall_RelativeFileBesideBYaml: b.yaml is in the project directory,
+// not in the binary directory. The row of its entry with `file: tools/x`
+// is ./tools/x, relative to the directory of b.yaml (where b.lock is), and
+// b verify finds the file there.
+func TestInstall_RelativeFileBesideBYaml(t *testing.T) {
+	f := newPinsFixture(t)
+	f.config = filepath.Join(f.dir, "b.yaml")
+	mustWrite(t, f.config, []byte("binaries:\n  tool:\n    version: v2.0.0\n    file: tools/x\n"))
+	f.install(t, false)
+	lk, err := lock.ReadLock(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lk.Binaries) != 1 || lk.Binaries[0].Name != "./tools/x" {
+		t.Errorf("b.lock rows: %+v, want the one row ./tools/x", lk.Binaries)
+	}
+	if err := f.verify(t); err != nil {
+		t.Errorf("b verify: %v", err)
 	}
 }
 

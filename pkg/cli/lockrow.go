@@ -18,15 +18,21 @@ import (
 	"github.com/fentas/b/pkg/state"
 )
 
-// A b.lock row describes one installed file. Its name is the path of the
-// file relative to the binary directory (fileName, lockName): for a file in
-// that directory its name, the alias of the binary when it has one, else the
-// name of the binary; for a file that b.yaml puts elsewhere in the project
-// (`file:`) a path such as ../tools/x; for a file outside the project its
-// absolute path. So each b.yaml entry has its own row, also when two entries
-// install the same preset or two provider refs have the same binary name.
-// b verify and the prune find the file of each row by that name
-// (lockFiles).
+// A b.lock row describes one installed file. Its name identifies the file
+// (fileName, lockName):
+//   - a file in the binary directory: its name, the alias of the binary when
+//     it has one, else the name of the binary;
+//   - a file that b.yaml puts elsewhere with a relative `file:`: that path as
+//     b.yaml writes it, cleaned, relative to the directory of b.yaml (and of
+//     b.lock), with "./" or "../" in front, for example ../tools/x;
+//   - a file that b.yaml puts elsewhere with an absolute `file:`: that path
+//     as b.yaml writes it, cleaned.
+//
+// So the name is the same in each checkout of the project with the same
+// layout, and it holds no path of one machine that b.yaml does not hold.
+// Each b.yaml entry has its own row, also when two entries install the same
+// preset or two provider refs have the same binary name. b verify and the
+// prune find the file of each row by that name (lockFiles).
 //
 // Older versions of b wrote some rows under another name: the name of the
 // binary for an alias entry of a preset (before alias rows) and for a
@@ -39,37 +45,41 @@ import (
 // name stays while it can describe a file (describesNoFile).
 
 // fileName is the name of the b.lock row of the file at file, with "/" as
-// separator: the path of the file relative to the binary directory when the
-// file is in the binary directory, or when the file and the binary
-// directory are in the project (projectRoot); else the absolute path of the
-// file. So the name does not depend on the directory of a checkout of the
-// project: a relative path between two directories of the project, or the
-// path of a file outside it, is the same in each checkout. For a file in
-// the binary directory the name is its name. When file is "", the file is
-// the one of that name in the binary directory. The paths are the ones of
-// the real directories (realDir): a project reached through a symlink gives
-// the same name as through its real path.
-func fileName(file, name string) string {
+// separator. asWritten is the `file:` of the b.yaml entry as b.yaml writes
+// it ("" when b.yaml does not give the file). When file is "", the file is
+// the one of that name in the binary directory, and so is a file in the
+// binary directory (also through a symlink, realDir): the name is its name.
+// For a relative asWritten the name is asWritten, cleaned, with "./" or
+// "../" in front: a path relative to the directory of b.yaml, the same in
+// each checkout with the same layout. Else the name is the absolute path,
+// cleaned, as b.yaml writes it: b does not resolve its symlinks, because a
+// resolved path can be another one on each machine.
+func fileName(file, asWritten, name string) string {
 	if file == "" {
 		return name
 	}
 	binDir := path.GetBinaryPath()
-	if filepath.Dir(filepath.Clean(file)) == filepath.Clean(binDir) {
+	if dir := filepath.Dir(filepath.Clean(file)); dir == filepath.Clean(binDir) || realDir(dir) == realDir(binDir) {
 		return filepath.Base(file)
 	}
-	resolved := filepath.Join(realDir(filepath.Dir(file)), filepath.Base(file))
-	realBin := realDir(binDir)
-	inProject := false
-	if root := projectRoot(); root != "" {
-		root = realDir(root)
-		inProject = within(root, resolved) && within(root, realBin)
-	}
-	if within(realBin, resolved) || inProject {
-		if rel, err := filepath.Rel(realBin, resolved); err == nil {
-			return filepath.ToSlash(rel)
+	if asWritten != "" && !filepath.IsAbs(asWritten) {
+		rel := filepath.ToSlash(filepath.Clean(asWritten))
+		if rel != ".." && !strings.HasPrefix(rel, "../") {
+			rel = "./" + rel
 		}
+		return rel
 	}
-	return filepath.ToSlash(resolved)
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		abs = file
+	}
+	return filepath.ToSlash(abs)
+}
+
+// lockDirName reports whether the b.lock row name is a path relative to the
+// directory of b.yaml (fileName): it starts with "./" or "../".
+func lockDirName(name string) bool {
+	return name == ".." || strings.HasPrefix(name, "./") || strings.HasPrefix(name, "../")
 }
 
 // within reports whether file is dir or in dir. Both are absolute and clean.
@@ -101,22 +111,25 @@ func realDir(dir string) string {
 	}
 }
 
-// lockFiles finds the files of b.lock rows. The name of a row is the path
-// of its file relative to the binary directory, or an absolute path
-// (fileName). b reads the file of a row only inside the roots (the project,
-// the directory of b.yaml and the binary directory), or when a b.yaml entry
-// installs the file of that row (named: for example an absolute `file:`).
-// A crafted name can make b read no other file.
+// lockFiles finds the files of b.lock rows by their names (fileName): an
+// absolute name is the path of the file, a name with "./" or "../" in
+// front is relative to the directory of b.yaml, another name is relative
+// to the binary directory. b reads the file of a row only inside the roots
+// (the project, the directory of b.yaml and the binary directory), or when
+// a b.yaml entry installs the file of that row (named: for example a
+// `file:` outside the project). A crafted name can make b read no other
+// file.
 type lockFiles struct {
-	binDir string          // the binary directory, its symlinks resolved
-	roots  []string        // their symlinks resolved
-	named  map[string]bool // the rows of the files that b.yaml installs
+	binDir  string          // the binary directory, its symlinks resolved
+	lockDir string          // the directory of b.yaml and b.lock, its symlinks resolved
+	roots   []string        // their symlinks resolved
+	named   map[string]bool // the rows of the files that b.yaml installs
 }
 
 // lockFiles is the lockFiles of this project and its b.yaml.
 func (o *SharedOptions) lockFiles() lockFiles {
 	binDir := path.GetBinaryPath()
-	l := lockFiles{binDir: realDir(binDir), named: lockFileNames(o.Config)}
+	l := lockFiles{binDir: realDir(binDir), lockDir: realDir(o.LockDir()), named: lockFileNames(o.Config)}
 	for _, root := range []string{binDir, o.LockDir(), o.ProjectRoot()} {
 		if root != "" {
 			l.roots = append(l.roots, realDir(root))
@@ -143,7 +156,11 @@ const (
 // prune can find out whether the file of a row outside the roots is there.
 func (l lockFiles) find(name string) (string, rowFileState, error) {
 	file := filepath.FromSlash(name)
-	if !filepath.IsAbs(file) {
+	switch {
+	case filepath.IsAbs(file):
+	case lockDirName(name):
+		file = filepath.Join(l.lockDir, file)
+	default:
 		file = filepath.Join(l.binDir, file)
 	}
 	file = filepath.Clean(file)
@@ -224,7 +241,7 @@ func regularFileSHA256(file string) (string, error) {
 // own name as the alias (resolveBinary), the name of an alias entry is the
 // alias.
 func entryFileName(e *binary.LocalBinary) string {
-	b := &binary.Binary{Alias: e.Name, File: e.File}
+	b := &binary.Binary{Alias: e.Name, File: e.File, FileAsWritten: e.FileAsWritten}
 	if e.IsProviderRef {
 		b.Name, b.Alias = provider.BinaryName(e.Name), e.Alias
 	}
