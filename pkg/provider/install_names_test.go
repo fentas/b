@@ -32,7 +32,7 @@ const fakeGo = `#!/bin/sh
 [ "$1" = install ] || exit 2
 m=${2%@*}
 n=${m##*/}
-case $n in v[2-9]|v[1-9][0-9]) m=${m%/*}; n=${m##*/} ;; esac
+case $n in v1|v0*|v*[!0-9]*) ;; v?*) m=${m%/*}; n=${m##*/} ;; esac
 printf 'go %s\n' "$2" > "$GOBIN/$n"
 `
 
@@ -98,16 +98,26 @@ func TestGoInstall_WritesTheFileItIsGiven(t *testing.T) {
 	}
 }
 
+// fakeGoTwoFiles is fakeGo that also writes $GOBIN/other. With two files
+// in GOBIN, the provider finds the binary only by its name (BinaryName),
+// not as the only file in GOBIN.
+const fakeGoTwoFiles = fakeGo + `printf 'other\n' > "$GOBIN/other"
+`
+
 // TestGoInstall_MajorVersionModule: go install of example.com/tool/v2
 // writes the binary tool, and BinaryName names it tool. The provider
-// writes it to the file it is given.
+// writes it to the file it is given, also when GOBIN has another file.
 func TestGoInstall_MajorVersionModule(t *testing.T) {
-	fakeTools(t, map[string]string{"go": fakeGo})
-	dest := filepath.Join(t.TempDir(), "tool")
-	if err := (&GoInstall{}).Install("go://example.com/tool/v2", "", dest); err != nil {
-		t.Fatalf("Install: %v", err)
+	for name, goCmd := range map[string]string{"the binary only": fakeGo, "the binary and another file": fakeGoTwoFiles} {
+		t.Run(name, func(t *testing.T) {
+			fakeTools(t, map[string]string{"go": goCmd})
+			dest := filepath.Join(t.TempDir(), "tool")
+			if err := (&GoInstall{}).Install("go://example.com/tool/v2", "", dest); err != nil {
+				t.Fatalf("Install: %v", err)
+			}
+			checkOnlyFile(t, dest, "go example.com/tool/v2@latest\n", "v2")
+		})
 	}
-	checkOnlyFile(t, dest, "go example.com/tool/v2@latest\n", "v2")
 }
 
 // TestDocker_WritesTheFileItIsGiven: the provider copies /usr/local/bin/tool
