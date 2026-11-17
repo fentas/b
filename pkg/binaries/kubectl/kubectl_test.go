@@ -1,6 +1,8 @@
 package kubectl
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"runtime"
 	"testing"
 
@@ -41,5 +43,26 @@ func TestBinary_kubectlURLF(t *testing.T) {
 	want := "https://dl.k8s.io/release/v1.36.2/bin/" + runtime.GOOS + "/" + runtime.GOARCH + "/kubectl"
 	if got != want {
 		t.Errorf("URLF = %q, want %q", got, want)
+	}
+}
+
+// VersionF must read the version from kubectlLatestVersion and trim it, so a
+// trailing newline in stable.txt cannot reach the download URL.
+func TestBinary_kubectlVersionF(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("v1.36.2\n"))
+	}))
+	defer srv.Close()
+	old := kubectlLatestVersion
+	kubectlLatestVersion = srv.URL
+	t.Cleanup(func() { kubectlLatestVersion = old })
+
+	b := Binary(nil)
+	got, err := b.VersionF(b)
+	if err != nil {
+		t.Fatalf("VersionF: %v", err)
+	}
+	if got != "v1.36.2" {
+		t.Errorf("VersionF() = %q, want %q", got, "v1.36.2")
 	}
 }

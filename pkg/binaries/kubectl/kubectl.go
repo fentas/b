@@ -41,7 +41,10 @@ func Binary(options *binaries.BinaryOptions) *binary.Binary {
 			return kubectlURL(b.Version, runtime.GOOS, runtime.GOARCH), nil
 		},
 		VersionF: func(b *binary.Binary) (string, error) {
-			return binary.GetBody(kubectlLatestVersion)
+			// stable.txt has no trailing newline today; trim it anyway, so a
+			// newline can never end up in the download URL.
+			v, err := binary.GetBody(kubectlLatestVersion)
+			return strings.TrimSpace(v), err
 		},
 		VersionLocalF: func(b *binary.Binary) (string, error) {
 			s, err := b.Exec("version", "--client")
