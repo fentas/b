@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -286,25 +287,46 @@ func TestInstall_RefusesADanglingSymlinkToTheFileOfAnEntry(t *testing.T) {
 
 // TestRealDir_DanglingSymlinks: realDir follows a symlink whose target is
 // not there: a chain of relative links, an absolute link, a link with ".."
-// in its target, and a link in the middle of the path. It ends on a
-// symlink loop, and keeps the path of a link of the loop.
+// in its target, a link in the middle of the path, and a link in a
+// symlinked directory (its relative target is relative to the resolved
+// directory). It follows a chain of 40 links (maxLinkHops), and stops at
+// the 41st: it returns the path of that link. It ends on a symlink loop.
+// A ".." after a symlink in the target is cleaned as text (a limit of
+// realDir): the case pins that result.
 func TestRealDir_DanglingSymlinks(t *testing.T) {
 	dir := t.TempDir()
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustMkdir(t, filepath.Join(dir, "sub"))
-	for link, target := range map[string]string{
-		"a":       "b",
-		"b":       filepath.Join("missing", "c"),
-		"abs":     filepath.Join(dir, "elsewhere", "f"),
-		"sub/up":  filepath.Join("..", "up-target"),
-		"loop":    "loop",
-		"loop-a":  "loop-b",
-		"loop-b":  "loop-a",
-		"to-loop": "loop-a",
-	} {
+	for _, d := range []string{"sub", "far/real-dir", "deep/sub"} {
+		mustMkdir(t, filepath.Join(dir, filepath.FromSlash(d)))
+	}
+	links := map[string]string{
+		"a":               "b",
+		"b":               filepath.Join("missing", "c"),
+		"abs":             filepath.Join(dir, "elsewhere", "f"),
+		"sub/up":          filepath.Join("..", "up-target"),
+		"dir-link":        filepath.Join("far", "real-dir"),
+		"far/real-dir/dl": filepath.Join("..", "dl-target"),
+		"x":               filepath.Join("deep", "sub"),
+		"text-dots":       filepath.Join("x", "..", "y"),
+		"loop":            "loop",
+		"loop-a":          "loop-b",
+		"loop-b":          "loop-a",
+		"to-loop":         "loop-a",
+	}
+	// c1 -> c2 -> ... -> c40 -> c-end: 40 links. d1 -> ... -> d41 -> d-end:
+	// 41 links.
+	for i := 1; i <= 40; i++ {
+		links[fmt.Sprintf("c%d", i)] = fmt.Sprintf("c%d", i+1)
+	}
+	links["c40"] = "c-end"
+	for i := 1; i <= 41; i++ {
+		links[fmt.Sprintf("d%d", i)] = fmt.Sprintf("d%d", i+1)
+	}
+	links["d41"] = "d-end"
+	for link, target := range links {
 		if err := os.Symlink(target, filepath.Join(dir, filepath.FromSlash(link))); err != nil {
 			t.Skipf("no symlinks on this system: %v", err)
 		}
@@ -317,7 +339,12 @@ func TestRealDir_DanglingSymlinks(t *testing.T) {
 		{"a/x", []string{filepath.Join(resolved, "missing", "c", "x")}},
 		{"abs", []string{filepath.Join(resolved, "elsewhere", "f")}},
 		{"sub/up", []string{filepath.Join(resolved, "up-target")}},
+		{"dir-link/dl", []string{filepath.Join(resolved, "far", "dl-target")}},
 		{"none/x", []string{filepath.Join(resolved, "none", "x")}},
+		// The system resolves x/../y to deep/y; realDir gives y.
+		{"text-dots", []string{filepath.Join(resolved, "y")}},
+		{"c1", []string{filepath.Join(resolved, "c-end")}},
+		{"d1", []string{filepath.Join(resolved, "d41")}},
 		{"loop", []string{filepath.Join(resolved, "loop")}},
 		{"loop-a", []string{filepath.Join(resolved, "loop-a"), filepath.Join(resolved, "loop-b")}},
 		{"to-loop/x", []string{filepath.Join(resolved, "loop-a", "x"), filepath.Join(resolved, "loop-b", "x")}},

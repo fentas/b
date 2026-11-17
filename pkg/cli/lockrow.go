@@ -90,8 +90,9 @@ func within(dir, file string) bool {
 }
 
 // maxLinkHops is the number of symlinks that realDir follows past the part
-// of a path that exists, as the Linux kernel follows 40. So a symlink loop
-// ends.
+// of a path that exists, as the Linux kernel follows 40: a chain of 40
+// dangling links resolves, and realDir stops at the 41st link. So a symlink
+// loop ends.
 const maxLinkHops = 40
 
 // realDir is the absolute path of the directory dir with its symlinks
@@ -101,10 +102,20 @@ const maxLinkHops = 40
 //
 // When the first part of the rest is a symlink whose target is not there
 // (a dangling symlink), realDir follows it too (os.Readlink; a relative
-// target is relative to the directory of the link), and resolves the
-// target in the same way. An install that writes through such a link
-// writes its target when the target is there. After maxLinkHops links (a
-// loop), realDir stops and keeps the path as it is.
+// target is relative to the resolved directory of the link), and resolves
+// the target in the same way. An install that writes through such a link
+// writes its target when the target is there. realDir follows at most
+// maxLinkHops such links, for example in a loop. Then it stops and returns
+// the path that it got to: the resolved part, and the rest, which starts
+// with the link that it did not follow.
+//
+// Limits:
+//   - realDir cleans the target of a dangling link as text (filepath.Join).
+//     For the target x/../y, where x is a symlink to deep/sub, it gives y
+//     in the directory of the link; the system gives deep/y. Then the
+//     duplicate check can miss a duplicate.
+//   - On Windows, realDir does not resolve a rooted target such as \x or a
+//     volume GUID target. The tests do not run on Windows.
 func realDir(dir string) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
