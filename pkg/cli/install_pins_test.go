@@ -85,7 +85,7 @@ func (f *pinsFixture) presets() []*binary.Binary {
 }
 
 // present writes .bin/tool as the given version, and records it in b.lock
-// when locked is true.
+// when locked is true, in the row that b install writes for it.
 func (f *pinsFixture) present(t *testing.T, version string, locked bool) {
 	t.Helper()
 	file := filepath.Join(f.binDir, "tool")
@@ -97,7 +97,7 @@ func (f *pinsFixture) present(t *testing.T, version string, locked bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lk := &lock.Lock{Binaries: []lock.BinEntry{{Name: "tool", Version: version, SHA256: hash, Preset: true}}}
+	lk := &lock.Lock{Binaries: []lock.BinEntry{{Name: "tool", Version: version, SHA256: hash, Source: "github.com/test/tool", Preset: true}}}
 	if err := lock.WriteLock(f.binDir, lk, "test"); err != nil {
 		t.Fatal(err)
 	}
