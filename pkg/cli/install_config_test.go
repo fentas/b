@@ -670,6 +670,74 @@ func TestCheckPin_LeadingV(t *testing.T) {
 	}
 }
 
+// TestAddToConfig_FlagsUpdateTheFoundEntry: `b install --add` with
+// --on-post or --asset writes them into the b.yaml entry that it finds, as
+// it writes them into a new entry: the entry of a preset, a pinned alias
+// entry (the pin holds the version only, and stays), and a provider-ref
+// entry. Without the flags the entry keeps its values, and the no-argument
+// install does not spread the flags over the entries.
+func TestAddToConfig_FlagsUpdateTheFoundEntry(t *testing.T) {
+	start := func() state.BinaryList {
+		return state.BinaryList{
+			&binary.LocalBinary{Name: "plain", Version: "v1.0.0", OnPost: "echo old", Asset: "old-*"},
+			&binary.LocalBinary{Name: "x", Alias: "plain", Enforced: "v3.0.0", File: "/opt/x", OnPost: "echo x"},
+			&binary.LocalBinary{Name: "github.com/org/tool", Alias: "t", Asset: "old-*", OnPost: "echo t", IsProviderRef: true},
+		}
+	}
+	type want struct{ onPost, asset, version, enforced string }
+	for _, tc := range []struct {
+		name          string
+		args          []string
+		onPost, asset string
+		entry         string
+		want          want
+	}{
+		{"the entry of a preset", []string{"plain"}, "echo new", "new-*", "plain", want{"echo new", "new-*", "v1.0.0", ""}},
+		{"a pinned alias entry", []string{"x"}, "echo new", "", "x", want{"echo new", "", "v3.0.0", "v3.0.0"}},
+		{"a provider-ref entry", []string{"github.com/org/tool"}, "", "new-*", "github.com/org/tool", want{"echo t", "new-*", "", ""}},
+		{"no flags", []string{"plain"}, "", "", "plain", want{"echo old", "old-*", "v1.0.0", ""}},
+		{"no argument", nil, "echo new", "new-*", "plain", want{"echo old", "old-*", "v1.0.0", ""}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("PATH_BIN", t.TempDir())
+			configPath := filepath.Join(t.TempDir(), ".bin", "b.yaml")
+			presets := []*binary.Binary{{Name: "plain", Context: context.Background()}}
+			shared := NewSharedOptions(&streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, presets)
+			shared.ConfigPath = configPath
+			shared.Config = &state.State{Binaries: start()}
+
+			o := &InstallOptions{SharedOptions: shared, Add: true, OnPost: tc.onPost, Asset: tc.asset}
+			if err := o.Complete(tc.args); err != nil {
+				t.Fatalf("Complete(%v): %v", tc.args, err)
+			}
+			// As Run does: no argument installs (and adds) the b.yaml set
+			bins := o.specifiedBinaries
+			if len(tc.args) == 0 {
+				bins = o.GetBinariesFromConfig()
+			}
+			if err := o.addToConfig(bins); err != nil {
+				t.Fatalf("addToConfig: %v", err)
+			}
+			cfg, err := state.LoadConfigFromPath(configPath)
+			if err != nil {
+				t.Fatalf("LoadConfigFromPath: %v", err)
+			}
+			if len(cfg.Binaries) != 3 {
+				t.Fatalf("b.yaml has %d entries, want 3: %+v", len(cfg.Binaries), cfg.Binaries)
+			}
+			for _, e := range cfg.Binaries {
+				if e.Name != tc.entry {
+					continue
+				}
+				got := want{e.OnPost, e.Asset, e.Version, e.Enforced}
+				if got != tc.want {
+					t.Errorf("entry %s: onPost, asset, version, enforced = %+v, want %+v", e.Name, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
 // TestAddToConfig_KeepsTheEnforcedPin: --add does not set the version of a
 // b.yaml entry to a value its enforced pin contradicts. Without a version
 // on the command line the entry's pin is the version; another version is

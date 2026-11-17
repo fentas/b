@@ -62,6 +62,8 @@ Use the `--add` flag to install a binary and simultaneously add it to your `b.ya
 b install --add kubectl
 ```
 
+With `--add`, `--on-post` and `--asset` go into the b.yaml entry of the binary, also into an entry that is already there. An `enforced` pin holds only the version, so they also go into a pinned entry.
+
 ### Force an installation
 
 Use the `--force` flag to overwrite an existing binary.

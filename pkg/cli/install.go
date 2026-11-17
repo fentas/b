@@ -558,6 +558,17 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 				if isRef && o.Alias != "" {
 					config.Binaries[i].Alias = o.Alias
 				}
+				// --on-post and --asset (or an asset picked at the prompt)
+				// go into the entry, as they go into a new one. Without
+				// them, the binary has the entry's own values. An enforced
+				// pin holds the version only, so they apply to a pinned
+				// entry too.
+				if b.OnPost != "" {
+					config.Binaries[i].OnPost = b.OnPost
+				}
+				if b.AssetFilter != "" {
+					config.Binaries[i].Asset = b.AssetFilter
+				}
 				found = true
 				break
 			}
