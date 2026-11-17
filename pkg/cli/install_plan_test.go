@@ -112,3 +112,23 @@ func TestUpdateLock_FollowsThePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestLockName: an alias entry of a preset has its own b.lock row under the
+// alias. The preset's own entry and a provider ref keep the row under the
+// binary's name, so b.lock files written before still match them.
+func TestLockName(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		b    *binary.Binary
+		want string
+	}{
+		{"a preset", &binary.Binary{Name: "tool"}, "tool"},
+		{"an alias entry of a preset", &binary.Binary{Name: "tool", Alias: "t2"}, "t2"},
+		{"a provider ref", &binary.Binary{Name: "tool", AutoDetect: true, ProviderRef: "github.com/org/tool"}, "tool"},
+		{"a provider ref with an alias", &binary.Binary{Name: "tool", Alias: "t", AutoDetect: true, ProviderRef: "github.com/org/tool"}, "tool"},
+	} {
+		if got := lockName(tc.b); got != tc.want {
+			t.Errorf("%s: lockName = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

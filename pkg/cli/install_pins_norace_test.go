@@ -229,3 +229,51 @@ func TestInstall_ConfigVersionIsTheRequestedVersion(t *testing.T) {
 		}
 	}
 }
+
+// TestInstall_TwoEntriesOfOnePresetKeepTheirFiles: b.yaml has the preset's
+// own entry and an alias entry of the same preset, at other versions. Each
+// entry has its own b.lock row, so a second and a third `b install` keep
+// both files and download nothing. b verify finds each row's file.
+func TestInstall_TwoEntriesOfOnePresetKeepTheirFiles(t *testing.T) {
+	f := newPinsFixture(t)
+	mustWrite(t, f.config, []byte("binaries:\n  tool:\n    version: v1.0.0\n  t2:\n    alias: tool\n    version: v3.0.0\n"))
+	f.install(t, false)
+	if n := f.hits.Load(); n != 2 {
+		t.Fatalf("the first install: %d downloads, want 2", n)
+	}
+	for run := 2; run <= 3; run++ {
+		f.hits.Store(0)
+		f.install(t, false)
+		if n := f.hits.Load(); n != 0 {
+			t.Errorf("install %d: %d downloads, want 0", run, n)
+		}
+	}
+	lk, err := lock.ReadLock(f.binDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, version := range map[string]string{"tool": "v1.0.0", "t2": "v3.0.0"} {
+		file := filepath.Join(f.binDir, name)
+		data, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := string(data); got != "tool "+version+"\n" {
+			t.Errorf(".bin/%s is %q, want the %s binary", name, got, version)
+		}
+		hash, err := lock.SHA256File(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e := lk.FindBinary(name)
+		if e == nil || e.Version != version || e.SHA256 != hash {
+			t.Errorf("b.lock row %q: %+v, want version %s and the sha256 of .bin/%s", name, e, version, name)
+		}
+	}
+
+	shared := NewSharedOptions(mkIO(), f.presets())
+	shared.ConfigPath = f.config
+	if err := (&VerifyOptions{SharedOptions: shared}).Run(); err != nil {
+		t.Errorf("b verify: %v", err)
+	}
+}

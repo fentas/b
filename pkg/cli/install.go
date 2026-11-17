@@ -85,6 +85,17 @@ func planInstall(b *binary.Binary, prev *lock.BinEntry, force bool) installPlan 
 	return installPlan{keptVersion: known}
 }
 
+// lockName is the name of a binary's b.lock row. An alias entry of a preset
+// has its own row under the alias, so two b.yaml entries of one preset (each
+// with its own file and version) never share a row. The preset's own entry
+// and a provider ref keep the row under the binary's name, as before.
+func lockName(b *binary.Binary) string {
+	if b.Alias != "" && (!b.AutoDetect || b.ProviderRef == "") {
+		return b.Alias
+	}
+	return b.Name
+}
+
 // NewInstallCmd creates the install subcommand
 func NewInstallCmd(shared *SharedOptions) *cobra.Command {
 	o := &InstallOptions{
@@ -307,7 +318,7 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	o.failed = make(map[*binary.Binary]bool)
 	var toDownload []*binary.Binary
 	for _, b := range binaries {
-		plan := planInstall(b, lk.FindBinary(b.Name), o.Force)
+		plan := planInstall(b, lk.FindBinary(lockName(b)), o.Force)
 		o.plans[b] = plan
 		if plan.download {
 			toDownload = append(toDownload, b)
@@ -493,7 +504,7 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			version = plan.keptVersion
 		}
 		entry := lock.BinEntry{
-			Name:    b.Name,
+			Name:    lockName(b),
 			Version: version,
 			SHA256:  hash,
 		}
@@ -515,7 +526,7 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			// associate an old image's digest with a new Source, which
 			// could produce coincidental false "up to date" skips later.
 			preserveDigest := func() {
-				prev := lk.FindBinary(b.Name)
+				prev := lk.FindBinary(entry.Name)
 				if prev == nil || prev.Source != entry.Source {
 					return
 				}

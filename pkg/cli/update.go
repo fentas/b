@@ -1378,7 +1378,7 @@ func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDiges
 		if downloadFailed[b.Name] {
 			continue
 		}
-		entry := lk.FindBinary(b.Name)
+		entry := lk.FindBinary(lockName(b))
 		if entry == nil {
 			continue
 		}
@@ -1462,7 +1462,7 @@ func digestMatchesLock(b *binary.Binary, lk *lock.Lock, fresh string) bool {
 	if lk == nil || b.ProviderRef == "" || fresh == "" {
 		return false
 	}
-	entry := lk.FindBinary(b.Name)
+	entry := lk.FindBinary(lockName(b))
 	if entry == nil || entry.Digest == "" {
 		return false
 	}
