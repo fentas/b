@@ -614,8 +614,9 @@ func (f *pinsFixture) cmdErr(t *testing.T, cmd string, set func(*UpdateOptions),
 // install the same file is refused by `b install` and `b update`, with or
 // without a binary argument, before any download: each command runs, and
 // without the refusal it downloads. The error names the entries and the
-// file, and tells how to fix b.yaml. `b update --envs-only` and `b update
-// --group <name>` do not touch binaries, so they do not refuse.
+// file, and tells how to fix b.yaml. `b update --envs-only`, `b update
+// --group <name>` and `b update --plan-json` (also with a binary argument,
+// which it ignores) do not touch binaries, so they do not refuse.
 func TestInstall_RefusesTwoEntriesOfOneFile(t *testing.T) {
 	for _, tc := range []struct {
 		name, config, want string
@@ -649,6 +650,14 @@ func TestInstall_RefusesTwoEntriesOfOneFile(t *testing.T) {
 			}
 			if err := f.cmdErr(t, "update", func(o *UpdateOptions) { o.Group = "g" }); err != nil {
 				t.Errorf("b update --group g: %v, want no error", err)
+			}
+			for _, args := range [][]string{nil, {"other"}} {
+				if err := f.cmdErr(t, "update", func(o *UpdateOptions) { o.PlanJSON = true }, args...); err != nil {
+					t.Errorf("b update --plan-json %v: %v, want no error", args, err)
+				}
+			}
+			if n := f.hits.Load(); n != 0 {
+				t.Errorf("b update --envs-only, --group, --plan-json: %d downloads, want 0", n)
 			}
 		})
 	}

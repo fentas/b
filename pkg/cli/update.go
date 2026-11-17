@@ -137,8 +137,9 @@ func (o *UpdateOptions) Complete(args []string) error {
 			return fmt.Errorf("no b.yaml configuration found and no binaries specified")
 		}
 		// b.yaml must give each file one entry (checkConfigFiles), when
-		// the binaries are in scope (runAll).
-		if !o.EnvsOnly && o.Group == "" {
+		// the run touches binaries (runAll): not with --envs-only, --group
+		// or --plan-json (a plan of env changes).
+		if !o.EnvsOnly && o.Group == "" && !o.PlanJSON {
 			return checkConfigFiles(o.Config)
 		}
 		return nil
@@ -158,7 +159,8 @@ func (o *UpdateOptions) Complete(args []string) error {
 		}
 		o.specifiedBinaries = append(o.specifiedBinaries, b)
 	}
-	if len(o.specifiedBinaries) > 0 {
+	// --plan-json ignores binary arguments (runSpecified).
+	if len(o.specifiedBinaries) > 0 && !o.PlanJSON {
 		return checkConfigFiles(o.Config)
 	}
 
