@@ -113,6 +113,8 @@ Older versions of b wrote some rows under the name of the binary: the row of a p
 
 `b install` and `b update` without arguments also remove the rows that describe no file: no b.yaml entry installs a file of that name, and the file is not in `.bin`. Such a row is the row of an entry that you removed from b.yaml, or a row of an older b under an old name. `b verify` reports it as missing. A row of a file that is there stays, also without an entry in b.yaml: for example a binary that you installed without `--add`, or an entry of another configuration file (`--config`) that uses the same b.lock.
 
+Two b.yaml entries must not install the same file. That happens with two provider refs that have the same binary name, or with a provider ref whose alias (or binary name) is the name of another entry. The two binaries would replace each other at each install. `b install` and `b update` refuse such a b.yaml and name the entries and the file. Give a provider ref its own file name with `alias: <name>`, or remove one of the entries.
+
 ### Sync environment files (SCP syntax)
 
 Use SCP-style syntax to sync files from upstream git repositories:

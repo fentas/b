@@ -182,7 +182,7 @@ func (o *InstallOptions) Complete(args []string) error {
 		if o.Config == nil {
 			return fmt.Errorf("no b.yaml configuration found and no binaries specified")
 		}
-		return nil
+		return checkConfigFiles(o.Config)
 	}
 
 	// Parse args — detect SCP-style env installs vs binary installs
@@ -203,8 +203,14 @@ func (o *InstallOptions) Complete(args []string) error {
 			continue
 		}
 
-		// Binary install. --alias names the file of one binary, so it
+		// Binary install. b.yaml must give each file one entry
+		// (checkConfigFiles). --alias names the file of one binary, so it
 		// takes only one.
+		if len(o.specifiedBinaries) == 0 {
+			if err := checkConfigFiles(o.Config); err != nil {
+				return err
+			}
+		}
 		if o.Alias != "" && len(o.specifiedBinaries) > 0 {
 			return fmt.Errorf("--alias %s names one binary, but %s is a second one\n  Hint: install each binary on its own, with its own --alias", o.Alias, arg)
 		}

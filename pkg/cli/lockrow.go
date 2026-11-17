@@ -62,6 +62,37 @@ func configFileNames(cfg *state.State) map[string][]string {
 	return files
 }
 
+// checkConfigFiles refuses a b.yaml in which two entries install the same
+// file. The two binaries would replace each other at each install, and
+// b.lock has one row for the file. Two preset entries always have their own
+// names, so at least one of the entries is a provider ref.
+func checkConfigFiles(cfg *state.State) error {
+	files := configFileNames(cfg)
+	var dups []string
+	for file, names := range files {
+		if len(names) > 1 {
+			dups = append(dups, file)
+		}
+	}
+	if len(dups) == 0 {
+		return nil
+	}
+	sort.Strings(dups)
+	lines := make([]string, 0, len(dups))
+	for _, file := range dups {
+		lines = append(lines, fmt.Sprintf("b.yaml: the entries %s install the same file %s", joinNames(files[file]), file))
+	}
+	return fmt.Errorf("%s\n  Hint: give a provider ref its own file name with `alias: <name>`, or remove one of the entries", strings.Join(lines, "\n"))
+}
+
+// joinNames joins names as "a and b", or "a, b and c".
+func joinNames(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
 // findLockRow is b's b.lock row, and the name that it has in b.lock: the row
 // of b's file (lockName), or else a row that an older b wrote for b under the
 // binary's name (oldLockRow). It is nil when there is none.

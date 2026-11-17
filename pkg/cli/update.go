@@ -136,6 +136,11 @@ func (o *UpdateOptions) Complete(args []string) error {
 		if o.Config == nil {
 			return fmt.Errorf("no b.yaml configuration found and no binaries specified")
 		}
+		// b.yaml must give each file one entry (checkConfigFiles), when
+		// the binaries are in scope (runAll).
+		if !o.EnvsOnly && o.Group == "" {
+			return checkConfigFiles(o.Config)
+		}
 		return nil
 	}
 
@@ -152,6 +157,9 @@ func (o *UpdateOptions) Complete(args []string) error {
 			continue
 		}
 		o.specifiedBinaries = append(o.specifiedBinaries, b)
+	}
+	if len(o.specifiedBinaries) > 0 {
+		return checkConfigFiles(o.Config)
 	}
 
 	return nil

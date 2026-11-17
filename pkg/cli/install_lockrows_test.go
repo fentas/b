@@ -422,3 +422,89 @@ func TestUpdate_PrunesRowsThatDescribeNoFile(t *testing.T) {
 		t.Errorf("%d downloads, want 0", n)
 	}
 }
+
+// completeErr runs Complete of `b install <args>` (install) or `b update
+// <args>` (update) in the fixture, with the flags that set gives to update,
+// and returns its error.
+func (f *pinsFixture) completeErr(t *testing.T, cmd string, set func(*UpdateOptions), args ...string) error {
+	t.Helper()
+	shared := NewSharedOptions(mkIO(), f.presets())
+	shared.ConfigPath = f.config
+	if err := shared.LoadConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if cmd == "install" {
+		return (&InstallOptions{SharedOptions: shared}).Complete(args)
+	}
+	o := &UpdateOptions{SharedOptions: shared}
+	set(o)
+	return o.Complete(args)
+}
+
+// TestInstall_RefusesTwoEntriesOfOneFile: a b.yaml in which two entries
+// install the same file is refused by `b install` and `b update`, with or
+// without a binary argument, before any download. The error names the
+// entries and the file, and tells how to fix b.yaml. `b update --envs-only`
+// does not touch binaries, so it does not refuse.
+func TestInstall_RefusesTwoEntriesOfOneFile(t *testing.T) {
+	for _, tc := range []struct {
+		name, config, want string
+	}{{
+		name:   "two provider refs with the same binary name",
+		config: "binaries:\n  fakerel://a/tool:\n    version: v1.0.0\n  fakerel://b/tool: {}\n",
+		want:   "b.yaml: the entries fakerel://a/tool and fakerel://b/tool install the same file tool",
+	}, {
+		name:   "a preset entry and a provider ref with its name as alias",
+		config: "binaries:\n  tool: {}\n  fakerel://x/y:\n    alias: tool\n",
+		want:   "b.yaml: the entries fakerel://x/y and tool install the same file tool",
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPinsFixture(t)
+			f.serveRefs(t)
+			mustWrite(t, f.config, []byte(tc.config))
+			for _, run := range []struct {
+				cmd  string
+				args []string
+			}{{"install", nil}, {"install", []string{"other"}}, {"update", nil}, {"update", []string{"other"}}} {
+				err := f.completeErr(t, run.cmd, func(*UpdateOptions) {}, run.args...)
+				if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "alias: <name>") {
+					t.Errorf("b %s %v: error %v, want %q and a hint", run.cmd, run.args, err, tc.want)
+				}
+			}
+			if err := f.completeErr(t, "update", func(o *UpdateOptions) { o.EnvsOnly = true }); err != nil {
+				t.Errorf("b update --envs-only: %v, want no error", err)
+			}
+			if n := f.hits.Load(); n != 0 {
+				t.Errorf("%d downloads, want 0", n)
+			}
+		})
+	}
+}
+
+// TestCheckConfigFiles: each entry installs its own file, also two refs of
+// one repository (one under an alias) and an alias equal to the binary name.
+// All entries of one file are named, sorted.
+func TestCheckConfigFiles(t *testing.T) {
+	ok := "binaries:\n  tool: {}\n  t2:\n    alias: tool\n  github.com/org/repo: {}\n  github.com/org/repo/cli:\n    alias: cli\n  github.com/org/other:\n    alias: other2\n"
+	three := "binaries:\n  github.com/c/tool: {}\n  github.com/a/tool: {}\n  github.com/b/x:\n    alias: tool\n"
+	for _, tc := range []struct{ name, config, want string }{
+		{"one file per entry", ok, ""},
+		{"three entries of one file", three, "b.yaml: the entries github.com/a/tool, github.com/b/x and github.com/c/tool install the same file tool"},
+	} {
+		dir := t.TempDir()
+		config := filepath.Join(dir, "b.yaml")
+		mustWrite(t, config, []byte(tc.config))
+		shared := NewSharedOptions(mkIO(), nil)
+		shared.ConfigPath = config
+		if err := shared.LoadConfig(); err != nil {
+			t.Fatal(err)
+		}
+		err := checkConfigFiles(shared.Config)
+		switch {
+		case tc.want == "" && err != nil:
+			t.Errorf("%s: %v, want no error", tc.name, err)
+		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+			t.Errorf("%s: %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
