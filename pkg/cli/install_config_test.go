@@ -466,7 +466,9 @@ func aliasSettingsConfig(t *testing.T) *state.State {
 // --alias that names an entry of the same preset is the binary of that
 // entry. It takes that entry's version, enforced pin, file and onPost, as
 // the no-argument install does; only a version on the command line wins.
-// The settings of the entry named by the argument do not carry over.
+// The settings of the entry named by the argument are replaced by them. (An
+// --alias that names no entry keeps them:
+// TestComplete_NewAliasKeepsTheSettingsOfTheArgument.)
 func TestComplete_AliasTakesTheSettingsOfItsEntry(t *testing.T) {
 	for _, tc := range []struct {
 		arg, flag, version, file, onPost string // file "" = PATH_BIN/<flag>
@@ -498,6 +500,64 @@ func TestComplete_AliasTakesTheSettingsOfItsEntry(t *testing.T) {
 			}
 			if b.Name != "plain" || b.Alias != tc.flag || b.Version != tc.version || b.BinaryPath() != file || b.OnPost != tc.onPost {
 				t.Errorf("name %q, alias %q, version %q, file %q, onPost %q; want plain, %s, %s, %s, %q", b.Name, b.Alias, b.Version, b.BinaryPath(), b.OnPost, tc.flag, tc.version, file, tc.onPost)
+			}
+		})
+	}
+}
+
+// TestComplete_NewAliasKeepsTheSettingsOfTheArgument: a binary installed
+// under an --alias that names no b.yaml entry keeps the settings of the entry
+// named by the argument: its version (its enforced pin, when it has one) and
+// its onPost. It does not keep that entry's file: it installs at
+// PATH_BIN/<alias>. A version on the command line and --on-post win. --add
+// writes the new entry with these settings, and without a pin or a file.
+func TestComplete_NewAliasKeepsTheSettingsOfTheArgument(t *testing.T) {
+	for _, tc := range []struct {
+		arg, onPostFlag, version, onPost string
+	}{
+		{"plain", "", "v1.0.0", "echo plain"},
+		{"x", "", "v3.0.0", "echo x"},
+		{"x@v2.0.0", "", "v2.0.0", "echo x"},
+		{"x", "echo flag", "v3.0.0", "echo flag"},
+		{"z", "", "v4.0.0", ""},
+	} {
+		t.Run(tc.arg+" "+tc.onPostFlag, func(t *testing.T) {
+			binDir := t.TempDir()
+			t.Setenv("PATH_BIN", binDir)
+			configPath := filepath.Join(t.TempDir(), ".bin", "b.yaml")
+			presets := []*binary.Binary{{Name: "plain", Context: context.Background()}}
+			shared := NewSharedOptions(&streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, presets)
+			shared.ConfigPath = configPath
+			shared.Config = aliasSettingsConfig(t)
+
+			o := &InstallOptions{SharedOptions: shared, Add: true, Alias: "p", OnPost: tc.onPostFlag}
+			if err := o.Complete([]string{tc.arg}); err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			b := o.specifiedBinaries[0]
+			file := filepath.Join(binDir, "p")
+			if b.Name != "plain" || b.Alias != "p" || b.Version != tc.version || b.BinaryPath() != file || b.OnPost != tc.onPost {
+				t.Errorf("name %q, alias %q, version %q, file %q, onPost %q; want plain, p, %s, %s, %q", b.Name, b.Alias, b.Version, b.BinaryPath(), b.OnPost, tc.version, file, tc.onPost)
+			}
+
+			if err := o.addToConfig(o.specifiedBinaries); err != nil {
+				t.Fatalf("addToConfig: %v", err)
+			}
+			cfg, err := state.LoadConfigFromPath(configPath)
+			if err != nil {
+				t.Fatalf("LoadConfigFromPath: %v", err)
+			}
+			var e *binary.LocalBinary
+			for _, c := range cfg.Binaries {
+				if c.Name == "p" {
+					e = c
+				}
+			}
+			if e == nil {
+				t.Fatalf("b.yaml has no entry p: %+v", cfg.Binaries)
+			}
+			if e.Alias != "plain" || e.Version != tc.version || e.Enforced != "" || e.File != "" || e.OnPost != tc.onPost {
+				t.Errorf("entry p: alias %q, version %q, enforced %q, file %q, onPost %q; want plain, %s, no pin, no file, %q", e.Alias, e.Version, e.Enforced, e.File, e.OnPost, tc.version, tc.onPost)
 			}
 		})
 	}

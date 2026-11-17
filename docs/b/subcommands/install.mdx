@@ -97,6 +97,7 @@ b install --alias myenvsubst renvsubst@v0.10.0
 Rules for `--alias`:
 - It takes one binary argument. To give several binaries an alias, install each one on its own.
 - When the alias is the name of a b.yaml entry of the same binary, the install uses the settings of that entry (version, enforced pin, file, onPost). A version on the command line wins.
+- When the alias is a new name, the binary keeps the settings of the b.yaml entry of the binary argument: its version (its enforced pin, when it has one) and its onPost. It does not keep that entry's file: it installs at `.bin/<alias>`. A version on the command line and `--on-post` win. With `--add`, the new entry gets that version and onPost, without a pin.
 - When the alias is already the name of another binary (another entry in b.yaml, or the binary of a provider ref), b refuses the install.
 
 With `--add`, b does not write a version that the entry's `enforced` pin contradicts. Add `--fix` to move the pin as well.

@@ -224,9 +224,11 @@ func (o *InstallOptions) Complete(args []string) error {
 		// An --alias that already names another binary is refused. A preset
 		// installed under --alias is the binary of the entry of that name
 		// (the one --add writes): it takes that entry's settings as the
-		// no-argument install does (version, enforced pin, file, onPost),
-		// or its own file when there is no such entry. A provider ref keeps
-		// its one entry, file included.
+		// no-argument install does (version, enforced pin, file, onPost).
+		// When there is no such entry, it keeps the settings of the entry of
+		// the argument (version, enforced pin, onPost), but gets its own
+		// file. A version on the command line and --on-post win (below). A
+		// provider ref keeps its one entry, file included.
 		if o.Alias != "" {
 			if e := o.aliasOwner(b); e != nil {
 				return fmt.Errorf("--alias %s: the b.yaml entry %s is another binary, not %s\n  Hint: pick another alias, or install %s by its own name", o.Alias, e.Name, b.Name, e.Name)
