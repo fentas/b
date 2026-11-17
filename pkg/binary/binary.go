@@ -31,18 +31,26 @@ func (b *Binary) LocalBinary(remote bool) *LocalBinary {
 	}
 }
 
+// BinaryPath is the path of the binary's file (FilePath). It sets File to
+// it when File is empty.
 func (b *Binary) BinaryPath() string {
+	if b.File == "" {
+		b.File = b.FilePath()
+	}
+	return b.File
+}
+
+// FilePath is the path of the binary's file: File, else the alias or the
+// name in the binary directory. Unlike BinaryPath, it does not set File.
+func (b *Binary) FilePath() string {
 	if b.File != "" {
 		return b.File
 	}
-
 	name := b.Alias
 	if name == "" {
 		name = b.Name
 	}
-	path := path.GetBinaryPath()
-	b.File = filepath.Join(path, name)
-	return b.File
+	return filepath.Join(path.GetBinaryPath(), name)
 }
 
 func (b *Binary) BinaryExists() bool {

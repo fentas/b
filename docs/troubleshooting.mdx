@@ -115,9 +115,9 @@ b install
 
 A download that fails does not change the installed binary. b writes the new
 binary to a temp file in the same directory. It replaces the old binary only
-when the download is complete. When a download fails, `b install` stops with an
-error that names each binary whose download failed. With `--add`, it does not
-change `b.yaml`.
+when the download is complete. When a download fails, `b install` and
+`b update` stop with an error that names each binary whose download failed
+(exit code 1). With `--add`, `b install` does not change `b.yaml`.
 
 Because b replaces the binary with a new file:
 
@@ -130,6 +130,15 @@ Because b replaces the binary with a new file:
 
 b writes `b.lock` in the same way. The new `b.lock` keeps the mode of the old
 one.
+
+When b stops during a download (Ctrl-C, a kill, a crash), its temp file can
+stay: a hidden `.<name>.<number>.tmp` file beside the binary. The next
+`b install` or `b update` of that binary removes it and names it.
+
+b removes only regular files with exactly that name, and only when no other
+b process writes to them. `b update --dry-run` removes nothing, and `b verify`
+ignores these files. On platforms other than Linux, macOS, the BSDs and
+Windows, b leaves them.
 
 **Solutions**:
 ```bash

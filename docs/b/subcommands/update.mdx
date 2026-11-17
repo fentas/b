@@ -177,6 +177,13 @@ binaries:
 See [b install — Post-install hooks](/b/subcommands/install#post-install-hooks) for
 the full list of environment variables and examples.
 
+### Failed downloads
+
+When the download of a binary fails, `b update` keeps the old binary and
+continues with the other binaries and the envs. Then it stops with an error
+that names each binary whose download failed (exit code 1), as `b install`
+does. When an env also fails, the error names both.
+
 ## Flags
 
 | Flag              | Description                               |

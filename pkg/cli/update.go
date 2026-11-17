@@ -511,20 +511,26 @@ func (o *UpdateOptions) runAll() error {
 	doEnvs := !o.BinariesOnly
 
 	// Update binaries — but NOT in plan-json mode, where binary
-	// progress output would corrupt the JSON document on stdout.
+	// progress output would corrupt the JSON document on stdout. A failed
+	// download (downloadFailure) stops nothing else: the prune and the envs
+	// still run, and the command returns the error at the end.
 	var binariesToUpdate []*binary.Binary
+	var downloadErr error
 	if doBinaries {
 		binariesToUpdate = o.GetBinariesFromConfig()
 		if len(binariesToUpdate) > 0 && !o.PlanJSON {
 			if err := o.callUpdateBinaries(binariesToUpdate); err != nil {
-				return err
+				if !isDownloadFailure(err) {
+					return err
+				}
+				downloadErr = err
 			}
 		}
 		// All binaries of b.yaml are in scope: remove the b.lock rows that
 		// describe no file, as `b install` without arguments does.
 		if !o.effectiveDryRun() {
 			if err := o.reportPruned(o.pruneLock()); err != nil {
-				return err
+				return withDownloadErr(downloadErr, err)
 			}
 		}
 	}
@@ -533,7 +539,7 @@ func (o *UpdateOptions) runAll() error {
 	hasEnvs := o.Config != nil && len(o.Config.Envs) > 0
 	if doEnvs && hasEnvs {
 		if err := o.updateEnvs(nil); err != nil {
-			return err
+			return withDownloadErr(downloadErr, err)
 		}
 	}
 
@@ -553,11 +559,14 @@ func (o *UpdateOptions) runAll() error {
 		fmt.Fprintln(o.IO.Out, "No binaries or envs to update")
 	}
 
-	return nil
+	return downloadErr
 }
 
-// runSpecified updates only the specified binaries/envs.
+// runSpecified updates only the specified binaries/envs. A failed download
+// (downloadFailure) does not stop the envs: the command returns the error at
+// the end, as runAll does.
 func (o *UpdateOptions) runSpecified() error {
+	var downloadErr error
 	if len(o.specifiedBinaries) > 0 {
 		// Same as runAll: in plan-json mode binary progress would
 		// corrupt stdout. Skip binaries entirely; if the user
@@ -568,17 +577,20 @@ func (o *UpdateOptions) runSpecified() error {
 				"  warning: --plan-json suppresses binary updates; %d binary arg(s) ignored\n",
 				len(o.specifiedBinaries))
 		} else if err := o.callUpdateBinaries(o.specifiedBinaries); err != nil {
-			return err
+			if !isDownloadFailure(err) {
+				return err
+			}
+			downloadErr = err
 		}
 	}
 
 	if len(o.specifiedEnvRefs) > 0 {
 		if err := o.updateEnvs(o.specifiedEnvRefs); err != nil {
-			return err
+			return withDownloadErr(downloadErr, err)
 		}
 	}
 
-	return nil
+	return downloadErr
 }
 
 // callUpdateBinaries delegates to the test hook or the real implementation.
@@ -1199,9 +1211,12 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	}
 
 	// Move the rows of an older b to the names of the files before any
-	// download and before the prune of runAll, as b install does.
+	// download and before the prune of runAll, as b install does. Remove
+	// the temp files that a stopped install or update of these binaries
+	// left, before the progress output starts.
 	if !o.effectiveDryRun() {
 		o.moveOldRows(lk, binaries)
+		o.removeStaleTemps(binaries)
 	}
 
 	// Resolve digests once per digest-capable binary up-front. We reuse these
@@ -1262,6 +1277,9 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	// on-disk bytes didn't actually update.
 	var outcomeMu sync.Mutex
 	downloadFailed := make(map[*binary.Binary]bool, len(binaries))
+	// The error of each binary whose update failed: b update returns them
+	// (failedDownloads) after the b.lock refresh.
+	failed := make(map[*binary.Binary]error, len(binaries))
 
 	wg := sync.WaitGroup{}
 	pw := newProgressRun(o.IO.Out)
@@ -1341,6 +1359,9 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 			}
 			outcomeMu.Lock()
 			downloadFailed[b] = attempted && err != nil
+			if err != nil {
+				failed[b] = err
+			}
 			outcomeMu.Unlock()
 
 			// Run onPost hook only when a download actually changed the
@@ -1370,9 +1391,13 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	// runs can skip when the tag hasn't moved. Only touches digest-resolver
 	// providers; non-digest entries and the rest of the lock are left alone.
 	if !o.effectiveDryRun() {
-		return o.refreshLockDigests(binaries, freshDigests, preSHA, downloadFailed)
+		if err := o.refreshLockDigests(binaries, freshDigests, preSHA, downloadFailed); err != nil {
+			return err
+		}
 	}
-	return nil
+	// A failed update is an error, as in b install. Each binary that failed
+	// keeps its old file: a download replaces it in one step (atomicfile).
+	return failedDownloads(binaries, failed, "")
 }
 
 // refreshLockDigests re-reads b.lock and updates the Digest + SHA256 for

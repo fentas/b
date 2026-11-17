@@ -9,14 +9,20 @@
 //   - The new file belongs to the user who runs the program, with the mode
 //     that Commit gives. The owner of the old file does not carry over.
 //   - A hard link to the old file keeps the old content.
+//
+// A write that is stopped before Commit or Abort (Ctrl-C, a kill, a crash)
+// leaves its temp file beside the file. RemoveStale removes such temp files
+// of a file.
 package atomicfile
 
 import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // errDone is the error of a Commit after Commit or Abort.
@@ -37,18 +43,115 @@ type File struct {
 // filesystem. The directory must exist. When path is a symlink that does not
 // resolve (its target is missing, or the links make a loop), Create returns
 // an error and writes nothing, because the rename would replace the link.
+//
+// While the temp file is open, Create holds a lock on it where the platform
+// has one (lockTemp), so that RemoveStale of another process leaves it.
+// When a RemoveStale took the new temp file before the lock, Create makes
+// another one (createTries in all).
 func Create(path string) (*File, error) {
-	target, err := filepath.EvalSymlinks(path)
-	if err == nil {
-		path = target
-	} else if fi, lerr := os.Lstat(path); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("cannot replace %s: it is a symlink that does not resolve (a missing target or a loop): %w", path, err)
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	path, err := resolve(path)
 	if err != nil {
 		return nil, err
 	}
-	return &File{tmp: tmp, path: path}, nil
+	pattern := "." + filepath.Base(path) + ".*.tmp"
+	for range createTries {
+		tmp, err := createTemp(filepath.Dir(path), pattern)
+		if err != nil {
+			return nil, err
+		}
+		if lockTemp(tmp) {
+			return &File{tmp: tmp, path: path}, nil
+		}
+		// A RemoveStale of another process holds this temp file, or
+		// removed it: it is not this write's file.
+		_ = tmp.Close()
+	}
+	return nil, fmt.Errorf("cannot make a temp file for %s: a cleanup of another process took each one", path)
+}
+
+// createTries is how many temp files Create makes before it fails.
+const createTries = 5
+
+// createTemp is os.CreateTemp; a test replaces it.
+var createTemp = os.CreateTemp
+
+// resolve is the file that a replace of path writes: the target of a
+// symlink at path, else path. A symlink that does not resolve is an error.
+func resolve(path string) (string, error) {
+	target, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return target, nil
+	}
+	if fi, lerr := os.Lstat(path); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("cannot replace %s: it is a symlink that does not resolve (a missing target or a loop): %w", path, err)
+	}
+	return path, nil
+}
+
+// isTemp reports whether name is the name of a temp file that Create makes
+// for a file named base: "." + base + "." + a number + ".tmp" (os.CreateTemp
+// puts a random decimal number in place of the * of the pattern). The temp
+// files of other files do not match, also when their names start alike: the
+// temp file of "tool.1" is ".tool.1.<number>.tmp", which is not a temp file
+// of "tool".
+func isTemp(name, base string) bool {
+	rest, ok := strings.CutPrefix(name, "."+base+".")
+	if !ok {
+		return false
+	}
+	number, ok := strings.CutSuffix(rest, ".tmp")
+	if !ok || number == "" {
+		return false
+	}
+	for _, c := range number {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// RemoveStale removes the temp files of the file at path that a stopped
+// write left (Ctrl-C, a kill, a crash), and returns their paths. It looks in
+// the directory where Create puts them (the directory of the target of a
+// symlink at path). It removes a file only when:
+//   - its name is a temp file name of this file (isTemp);
+//   - it is a regular file;
+//   - no process uses it: no process holds the lock of Create on it
+//     (removeIfStale). Where b cannot find this out, the file stays.
+//
+// A missing directory, or a symlink at path that does not resolve, is no
+// error: Create cannot have made a temp file there.
+func RemoveStale(path string) ([]string, error) {
+	target, err := resolve(path)
+	if err != nil {
+		return nil, nil
+	}
+	dir, base := filepath.Dir(target), filepath.Base(target)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var removed []string
+	var errs []error
+	for _, e := range entries {
+		if !isTemp(e.Name(), base) {
+			continue
+		}
+		file := filepath.Join(dir, e.Name())
+		ok, err := removeIfStale(file)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if ok {
+			removed = append(removed, file)
+		}
+	}
+	return removed, errors.Join(errs...)
 }
 
 // Write writes p to the temp file.
