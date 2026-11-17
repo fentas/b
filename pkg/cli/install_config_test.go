@@ -578,3 +578,40 @@ func TestAddToConfig_KeepsTheEnforcedPin(t *testing.T) {
 		})
 	}
 }
+
+// TestComplete_AliasNamesOneBinary: --alias names the file of one binary.
+// With more than one binary argument it is refused, and nothing is
+// installed; one binary beside an env install is accepted, and so are
+// several binaries without --alias.
+func TestComplete_AliasNamesOneBinary(t *testing.T) {
+	for _, tc := range []struct {
+		args     []string
+		alias    string
+		binaries int // the binaries to install; -1 = refused
+	}{
+		{[]string{"plain", "other"}, "p", -1},
+		{[]string{"plain", "github.com/org/tool"}, "p", -1},
+		{[]string{"plain", "github.com/org/infra:/manifests/**", "/dest"}, "p", 1},
+		{[]string{"plain"}, "p", 1},
+		{[]string{"plain", "other"}, "", 2},
+	} {
+		t.Setenv("PATH_BIN", t.TempDir())
+		presets := []*binary.Binary{
+			{Name: "plain", Context: context.Background()},
+			{Name: "other", Context: context.Background()},
+		}
+		shared := NewSharedOptions(&streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, presets)
+		shared.Config = &state.State{}
+		o := &InstallOptions{SharedOptions: shared, Alias: tc.alias}
+		err := o.Complete(tc.args)
+		if tc.binaries >= 0 {
+			if err != nil || len(o.specifiedBinaries) != tc.binaries {
+				t.Errorf("b install %v --alias %q: error %v, %d binaries; want %d binaries", tc.args, tc.alias, err, len(o.specifiedBinaries), tc.binaries)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), "one binary") {
+			t.Errorf("b install %v --alias %q: error %v, want the one-binary refusal", tc.args, tc.alias, err)
+		}
+	}
+}

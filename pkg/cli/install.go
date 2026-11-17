@@ -142,7 +142,7 @@ func NewInstallCmd(shared *SharedOptions) *cobra.Command {
 
 	cmd.Flags().BoolVar(&o.Add, "add", false, "Add binary to b.yaml during install")
 	cmd.Flags().BoolVar(&o.Fix, "fix", false, "Pin the specified version in b.yaml")
-	cmd.Flags().StringVar(&o.Alias, "alias", "", "Alias for the binary")
+	cmd.Flags().StringVar(&o.Alias, "alias", "", "Alias for the binary (one binary argument only)")
 	cmd.Flags().StringVar(&o.Asset, "asset", "", "Glob pattern to filter release assets (e.g. \"argsh-so-*\")")
 	cmd.Flags().StringVar(&o.OnPost, "on-post", "", "Shell command to run after install/update (saved to b.yaml with --add)")
 	return cmd
@@ -180,7 +180,11 @@ func (o *InstallOptions) Complete(args []string) error {
 			continue
 		}
 
-		// Binary install
+		// Binary install. --alias names the file of one binary, so it
+		// takes only one.
+		if o.Alias != "" && len(o.specifiedBinaries) > 0 {
+			return fmt.Errorf("--alias %s names one binary, but %s is a second one\n  Hint: install each binary on its own, with its own --alias", o.Alias, arg)
+		}
 		name, version := parseBinaryArg(arg)
 		b, ok := o.GetBinary(name)
 		if !ok {
