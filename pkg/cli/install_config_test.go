@@ -675,64 +675,71 @@ func TestCheckPin_LeadingV(t *testing.T) {
 // it writes them into a new entry: the entry of a preset, a pinned alias
 // entry (the pin holds the version only, and stays), and a provider-ref
 // entry. Without the flags the entry keeps its values, and the no-argument
-// install does not spread the flags over the entries.
+// install does not spread the flags over the entries. The other entries do
+// not change, and --add adds no entry.
 func TestAddToConfig_FlagsUpdateTheFoundEntry(t *testing.T) {
-	start := func() state.BinaryList {
-		return state.BinaryList{
-			&binary.LocalBinary{Name: "plain", Version: "v1.0.0", OnPost: "echo old", Asset: "old-*"},
-			&binary.LocalBinary{Name: "x", Alias: "plain", Enforced: "v3.0.0", File: "/opt/x", OnPost: "echo x"},
-			&binary.LocalBinary{Name: "github.com/org/tool", Alias: "t", Asset: "old-*", OnPost: "echo t", IsProviderRef: true},
-		}
-	}
-	type want struct{ onPost, asset, version, enforced string }
+	type fields struct{ alias, version, enforced, file, onPost, asset string }
 	for _, tc := range []struct {
 		name          string
 		args          []string
 		onPost, asset string
-		entry         string
-		want          want
+		entry         string // the entry that changes, "" = none
+		want          func(xFile string) fields
 	}{
-		{"the entry of a preset", []string{"plain"}, "echo new", "new-*", "plain", want{"echo new", "new-*", "v1.0.0", ""}},
-		{"a pinned alias entry", []string{"x"}, "echo new", "", "x", want{"echo new", "", "v3.0.0", "v3.0.0"}},
-		{"a provider-ref entry", []string{"github.com/org/tool"}, "", "new-*", "github.com/org/tool", want{"echo t", "new-*", "", ""}},
-		{"no flags", []string{"plain"}, "", "", "plain", want{"echo old", "old-*", "v1.0.0", ""}},
-		{"no argument", nil, "echo new", "new-*", "plain", want{"echo old", "old-*", "v1.0.0", ""}},
+		{"the entry of a preset", []string{"tool"}, "echo new", "new-*", "tool",
+			func(string) fields { return fields{"", "v1.0.0", "", "", "echo new", "new-*"} }},
+		{"a pinned alias entry", []string{"x"}, "echo new", "", "x",
+			func(xFile string) fields { return fields{"tool", "v3.0.0", "v3.0.0", xFile, "echo new", ""} }},
+		{"a provider-ref entry", []string{"github.com/org/widget"}, "", "new-*", "github.com/org/widget",
+			func(string) fields { return fields{"w", "", "", "", "echo w", "new-*"} }},
+		{"no flags", []string{"tool"}, "", "", "", nil},
+		{"no argument", nil, "echo new", "new-*", "", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("PATH_BIN", t.TempDir())
-			configPath := filepath.Join(t.TempDir(), ".bin", "b.yaml")
-			presets := []*binary.Binary{{Name: "plain", Context: context.Background()}}
-			shared := NewSharedOptions(&streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}}, presets)
-			shared.ConfigPath = configPath
-			shared.Config = &state.State{Binaries: start()}
+			f := newPinsFixture(t)
+			xFile := filepath.Join(f.binDir, "x-file")
+			mustWrite(t, f.config, []byte("binaries:\n"+
+				"  tool:\n    version: v1.0.0\n    onPost: echo old\n    asset: old-*\n"+
+				"  x:\n    alias: tool\n    version: v3.0.0\n    enforced: v3.0.0\n    file: "+xFile+"\n    onPost: echo x\n"+
+				"  github.com/org/widget:\n    alias: w\n    asset: old-*\n    onPost: echo w\n"))
+			// The binary of the provider ref is there, at no version, so the
+			// install keeps it and asks no provider.
+			mustWriteExec(t, filepath.Join(f.binDir, "w"), []byte("widget\n"))
+			want := map[string]fields{
+				"tool":                  {"", "v1.0.0", "", "", "echo old", "old-*"},
+				"x":                     {"tool", "v3.0.0", "v3.0.0", xFile, "echo x", ""},
+				"github.com/org/widget": {"w", "", "", "", "echo w", "old-*"},
+			}
+			if tc.entry != "" {
+				want[tc.entry] = tc.want(xFile)
+			}
 
-			o := &InstallOptions{SharedOptions: shared, Add: true, OnPost: tc.onPost, Asset: tc.asset}
-			if err := o.Complete(tc.args); err != nil {
-				t.Fatalf("Complete(%v): %v", tc.args, err)
+			err := f.runWith(t, func(o *InstallOptions) {
+				o.Add, o.OnPost, o.Asset = true, tc.onPost, tc.asset
+			}, tc.args...)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
 			}
-			// As Run does: no argument installs (and adds) the b.yaml set
-			bins := o.specifiedBinaries
-			if len(tc.args) == 0 {
-				bins = o.GetBinariesFromConfig()
-			}
-			if err := o.addToConfig(bins); err != nil {
-				t.Fatalf("addToConfig: %v", err)
-			}
-			cfg, err := state.LoadConfigFromPath(configPath)
+			cfg, err := state.LoadConfigFromPath(f.config)
 			if err != nil {
 				t.Fatalf("LoadConfigFromPath: %v", err)
 			}
-			if len(cfg.Binaries) != 3 {
-				t.Fatalf("b.yaml has %d entries, want 3: %+v", len(cfg.Binaries), cfg.Binaries)
-			}
+			got := map[string]fields{}
 			for _, e := range cfg.Binaries {
-				if e.Name != tc.entry {
+				got[e.Name] = fields{e.Alias, e.Version, e.Enforced, e.File, e.OnPost, e.Asset}
+			}
+			for name, w := range want {
+				g, ok := got[name]
+				if !ok {
+					t.Errorf("b.yaml has no entry %s: %+v", name, got)
 					continue
 				}
-				got := want{e.OnPost, e.Asset, e.Version, e.Enforced}
-				if got != tc.want {
-					t.Errorf("entry %s: onPost, asset, version, enforced = %+v, want %+v", e.Name, got, tc.want)
+				if g != w {
+					t.Errorf("entry %s: alias, version, enforced, file, onPost, asset = %+v, want %+v", name, g, w)
 				}
+			}
+			if len(got) != len(want) {
+				t.Errorf("b.yaml has the entries %+v, want only %v", got, want)
 			}
 		})
 	}
