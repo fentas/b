@@ -38,7 +38,7 @@ const fakeGoCmd = `#!/bin/sh
 [ "$1" = install ] || exit 2
 m=${2%@*}
 n=${m##*/}
-case $n in v[2-9]|v[1-9][0-9]) m=${m%/*}; n=${m##*/} ;; esac
+case $n in v1|v0*|v*[!0-9]*) ;; v?*) m=${m%/*}; n=${m##*/} ;; esac
 printf 'go %s\n' "$2" > "$GOBIN/$n"
 `
 
