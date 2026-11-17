@@ -351,6 +351,8 @@ func TestComplete_AliasTakesTheFileOfItsEntry(t *testing.T) {
 		{name: "the entry of another preset", arg: "plain@v2.0.0", flag: "other", refused: true},
 		{name: "the entry of a provider ref of that name", arg: "plain@v2.0.0", flag: "github.com/org/plain", refused: true},
 		{name: "an alias entry under a new name", arg: "x", flag: "p"},
+		{name: "an alias entry under its own name", arg: "x", flag: "x", file: "/opt/x"},
+		{name: "an alias entry under the name of its preset", arg: "x", flag: "plain", file: "/opt/plain"},
 		{name: "the alias of a provider ref", arg: "plain@v2.0.0", flag: "tool", refused: true},
 		{name: "the binary name of a provider ref without an alias", arg: "plain@v2.0.0", flag: "bare", refused: true},
 		{name: "a provider ref under the alias of another ref", arg: "github.com/org/bare", flag: "tool", refused: true},
