@@ -639,6 +639,60 @@ func TestInstall_RefusesTwoEntriesOfOneFile(t *testing.T) {
 	}
 }
 
+// installErr runs `b install <args>` in the fixture with the flags that set
+// gives, and returns the error of Complete, else the error of Run.
+func (f *pinsFixture) installErr(t *testing.T, set func(*InstallOptions), args ...string) error {
+	t.Helper()
+	shared := NewSharedOptions(&streams.IO{
+		In:     strings.NewReader(""),
+		Out:    &syncWriter{w: &bytes.Buffer{}},
+		ErrOut: &syncWriter{w: &bytes.Buffer{}},
+	}, f.presets())
+	shared.ConfigPath = f.config
+	if err := shared.LoadConfig(); err != nil {
+		t.Fatal(err)
+	}
+	o := &InstallOptions{SharedOptions: shared}
+	set(o)
+	if err := o.Complete(args); err != nil {
+		return err
+	}
+	return o.Run()
+}
+
+// TestInstall_AddRefusesASecondEntryOfOneFile: b.yaml has the provider ref
+// fakerel://a/tool. `b install --add fakerel://b/tool@v3.0.0` adds a second
+// entry of the file tool, a b.yaml that the next run refuses. It is refused
+// before any download, with the message of the duplicate check, and b.yaml
+// does not change. With `--alias tb`, the new entry has its own file, and
+// the --add works.
+func TestInstall_AddRefusesASecondEntryOfOneFile(t *testing.T) {
+	f := newPinsFixture(t)
+	f.serveRefs(t)
+	config := "binaries:\n  fakerel://a/tool:\n    version: v1.0.0\n"
+	mustWrite(t, f.config, []byte(config))
+
+	err := f.installErr(t, func(o *InstallOptions) { o.Add = true }, "fakerel://b/tool@v3.0.0")
+	want := "b.yaml: the entries fakerel://a/tool and fakerel://b/tool install the same file tool"
+	if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "alias: <name>") {
+		t.Errorf("b install --add fakerel://b/tool@v3.0.0: error %v, want %q and a hint", err, want)
+	}
+	if n := f.hits.Load(); n != 0 {
+		t.Errorf("%d downloads, want 0", n)
+	}
+	if data, err := os.ReadFile(f.config); err != nil || string(data) != config {
+		t.Errorf("b.yaml: %q (%v), want it unchanged", data, err)
+	}
+
+	if err := f.installErr(t, func(o *InstallOptions) { o.Add = true; o.Alias = "tb" }, "fakerel://b/tool@v3.0.0"); err != nil {
+		t.Fatalf("b install --add --alias tb fakerel://b/tool@v3.0.0: %v", err)
+	}
+	f.install(t, false)
+	lk := f.readLock(t)
+	f.checkRow(t, lk, "tool", "tool a/v1.0.0\n", "v1.0.0")
+	f.checkRow(t, lk, "tb", "tool b/v3.0.0\n", "v3.0.0")
+}
+
 // TestCheckConfigFiles: each entry installs its own file, also two refs of
 // one repository (one under an alias), an alias equal to the binary name,
 // and two refs of one binary name with their own `file:`. All entries of one

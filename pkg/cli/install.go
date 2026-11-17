@@ -209,9 +209,10 @@ func (o *InstallOptions) Complete(args []string) error {
 		}
 
 		// Binary install. b.yaml must give each file one entry
-		// (checkConfigFiles). --alias names the file of one binary, so it
-		// takes only one.
-		if len(o.specifiedBinaries) == 0 {
+		// (checkConfigFiles); with --add, the b.yaml that --add writes
+		// (below). --alias names the file of one binary, so it takes only
+		// one.
+		if len(o.specifiedBinaries) == 0 && !o.Add {
 			if err := checkConfigFiles(o.Config); err != nil {
 				return err
 			}
@@ -289,6 +290,12 @@ func (o *InstallOptions) Complete(args []string) error {
 		o.specifiedBinaries = append(o.specifiedBinaries, b)
 	}
 
+	// Refuse an --add that would write a b.yaml in which two entries
+	// install the same file, before any download: the next run would
+	// refuse that b.yaml.
+	if o.Add && len(o.specifiedBinaries) > 0 {
+		return checkConfigFiles(o.withAdded(o.specifiedBinaries))
+	}
 	return nil
 }
 
@@ -573,8 +580,31 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 	if config == nil {
 		config = &state.State{}
 	}
+	o.addEntries(config, binaries)
+	return state.SaveConfig(config, configPath)
+}
 
-	// Add binaries to config
+// withAdded is a copy of b.yaml with the entries that --add writes for
+// binaries (addEntries). o.Config does not change.
+func (o *InstallOptions) withAdded(binaries []*binary.Binary) *state.State {
+	config := &state.State{}
+	if o.Config != nil {
+		*config = *o.Config
+		config.Binaries = make(state.BinaryList, len(o.Config.Binaries))
+		for i, e := range o.Config.Binaries {
+			if e != nil {
+				copied := *e
+				e = &copied
+			}
+			config.Binaries[i] = e
+		}
+	}
+	o.addEntries(config, binaries)
+	return config
+}
+
+// addEntries writes the entries that --add writes for binaries into config.
+func (o *InstallOptions) addEntries(config *state.State, binaries []*binary.Binary) {
 	for _, b := range binaries {
 		// Check if already exists: a provider ref has one entry, under the
 		// ref, with the binary's name as its alias; an alias of a preset has
@@ -640,8 +670,6 @@ func (o *InstallOptions) addToConfig(binaries []*binary.Binary) error {
 			config.Binaries = append(config.Binaries, entry)
 		}
 	}
-
-	return state.SaveConfig(config, configPath)
 }
 
 // updateLock updates b.lock with installed binary checksums
