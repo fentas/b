@@ -1190,6 +1190,11 @@ func (o *UpdateOptions) updateBinaries(binaries []*binary.Binary) error {
 	var lk *lock.Lock
 	if readLk, err := lock.ReadLock(o.LockDir()); err == nil {
 		lk = readLk
+		// Move the rows of an older b to the names of the files before any
+		// download and before the prune of runAll, as b install does.
+		if !o.effectiveDryRun() {
+			o.moveOldRows(lk, binaries)
+		}
 	}
 
 	// Resolve digests once per digest-capable binary up-front. We reuse these
@@ -1380,7 +1385,6 @@ func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDiges
 		return
 	}
 	changed := false
-	stay := lockFileNames(o.Config, binaries)
 	for _, b := range binaries {
 		if !b.AutoDetect || b.ProviderRef == "" || b.File == "" {
 			continue
@@ -1395,23 +1399,11 @@ func (o *UpdateOptions) refreshLockDigests(binaries []*binary.Binary, freshDiges
 		if downloadFailed[name] {
 			continue
 		}
-		entry, rowName := findLockRow(lk, b)
+		// updateBinaries moved the rows of an older b to the names of the
+		// files (moveOldRows) before the downloads.
+		entry := lk.FindBinary(name)
 		if entry == nil {
 			continue
-		}
-		// A row that an older b wrote under the binary's name moves to the
-		// name of the file (lockrow.go). The old row stays when its name is
-		// also the file of a b.yaml entry or of a binary of this update.
-		if rowName != name {
-			moved := *entry
-			moved.Name = name
-			moved.Binary = lockBinary(b)
-			if !stay[rowName] {
-				lk.RemoveBinary(rowName)
-			}
-			lk.UpsertBinary(moved)
-			entry = lk.FindBinary(name)
-			changed = true
 		}
 		// If the lock entry's Source drifted from the configured
 		// ProviderRef (e.g. the user edited b.yaml in place and changed
@@ -1489,24 +1481,18 @@ func isDigestProvider(ref string) bool {
 // in-container path but kept the derived binary name), no fresh
 // digest, non-digest provider, absent ProviderRef — so the caller
 // still attempts an update. A row that an older b wrote under the binary's
-// name (findLockRow) counts only when its sha256 is the sha256 of b's file:
-// under that name it can also describe another file.
+// name counts only when it describes b's file (findLockRow): under that name
+// it can also describe another file.
 func digestMatchesLock(b *binary.Binary, lk *lock.Lock, fresh string) bool {
 	if lk == nil || b.ProviderRef == "" || fresh == "" {
 		return false
 	}
-	entry, rowName := findLockRow(lk, b)
+	entry, _ := findLockRow(lk, b)
 	if entry == nil || entry.Digest == "" {
 		return false
 	}
 	if entry.Source != b.ProviderRef {
 		return false
-	}
-	if rowName != lockName(b) {
-		hash, err := lock.SHA256File(b.BinaryPath())
-		if err != nil || entry.SHA256 == "" || hash != entry.SHA256 {
-			return false
-		}
 	}
 	return entry.Digest == fresh
 }

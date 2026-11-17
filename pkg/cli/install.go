@@ -75,13 +75,11 @@ func planInstall(b *binary.Binary, prev *lock.BinEntry, force bool) installPlan 
 		return installPlan{download: true}
 	}
 	known := ""
-	if prev != nil && prev.SHA256 != "" {
-		if hash, err := lock.SHA256File(b.BinaryPath()); err == nil && hash == prev.SHA256 {
-			if otherBinary(prev, b) {
-				return installPlan{download: true}
-			}
-			known = prev.Version
+	if describesFile(prev, b.BinaryPath()) {
+		if otherBinary(prev, b) {
+			return installPlan{download: true}
 		}
+		known = prev.Version
 	}
 	requested := b.Version
 	if requested == "latest" {
@@ -351,8 +349,8 @@ func sameVersion(a, b string) bool {
 // aliasOwner is the b.yaml entry of another binary that the name --alias
 // already belongs to, nil when there is none. That is an entry of that name
 // which is not an entry of b's preset (for a provider ref b: any entry of
-// that name), or a provider-ref entry other than b's own whose binary has
-// that name: its alias, or the name from the ref.
+// that name), or a provider-ref entry other than b's own that installs the
+// file of that name (entryFileName).
 func (o *InstallOptions) aliasOwner(b *binary.Binary) *binary.LocalBinary {
 	if o.Config == nil {
 		return nil
@@ -368,11 +366,7 @@ func (o *InstallOptions) aliasOwner(b *binary.Binary) *binary.LocalBinary {
 		if e.Name == b.ProviderRef {
 			continue // b's own entry; a preset has no ref
 		}
-		name := e.Alias
-		if name == "" {
-			name = provider.BinaryName(e.Name)
-		}
-		if e.Name == o.Alias || name == o.Alias {
+		if e.Name == o.Alias || entryFileName(e) == o.Alias {
 			return e
 		}
 	}
@@ -476,6 +470,7 @@ func (o *InstallOptions) installBinaries(binaries []*binary.Binary) error {
 	if err != nil {
 		return fmt.Errorf("cannot read b.lock: %w\n  Hint: repair %s, or remove it; b then downloads each pinned binary once and writes a new b.lock", err, filepath.Join(o.LockDir(), "b.lock"))
 	}
+	o.moveOldRows(lk, binaries)
 	o.plans = make(map[*binary.Binary]installPlan, len(binaries))
 	o.failed = make(map[*binary.Binary]bool)
 	o.removed = nil
@@ -655,26 +650,17 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		return err
 	}
 
-	// The rows of these names stay. A row that an older b wrote for a binary
-	// under the binary's name moves to the name of the file, unless the old
-	// name is also the file of a b.yaml entry or of a binary of this install.
-	stay := lockFileNames(o.Config, binaries)
-
+	// installBinaries moved the rows of an older b to the names of the files
+	// (moveOldRows) before the downloads.
 	for _, b := range binaries {
 		if b.File == "" {
 			continue
 		}
 		name := lockName(b)
 		var prev *lock.BinEntry
-		row, rowName := findLockRow(lk, b)
-		if row != nil {
+		if row := lk.FindBinary(name); row != nil {
 			copied := *row
 			prev = &copied
-		}
-		dropOldRow := func() {
-			if prev != nil && rowName != name && !stay[rowName] {
-				lk.RemoveBinary(rowName)
-			}
 		}
 		// A failed download writes no entry. While a file is there (the file
 		// that the download did not change), its entry stays as it was. When
@@ -684,7 +670,6 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 		if o.failed[b] {
 			if _, err := os.Stat(b.File); os.IsNotExist(err) {
 				lk.RemoveBinary(name)
-				dropOldRow()
 			}
 			continue
 		}
@@ -751,7 +736,6 @@ func (o *InstallOptions) updateLock(binaries []*binary.Binary) error {
 			}
 		}
 		lk.UpsertBinary(entry)
-		dropOldRow()
 	}
 
 	return lock.WriteLock(lockDir, lk, o.bVersion)

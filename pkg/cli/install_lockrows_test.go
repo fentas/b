@@ -300,25 +300,116 @@ func TestUpdate_TwoRefsOfOneNameHaveTheirOwnDigests(t *testing.T) {
 // TestUpdate_RowOfAnOlderBMoves: b.lock from an older b has the row of a
 // provider ref with an alias under the binary's name. b update finds it: the
 // digest and the file match, so it downloads nothing, and it writes the row
-// under the alias.
+// under the alias. The row under the old name goes, also in a named update,
+// which removes no other rows.
 func TestUpdate_RowOfAnOlderBMoves(t *testing.T) {
-	f := newPinsFixture(t)
-	f.serveRefs(t)
-	mustWrite(t, f.config, []byte("binaries:\n  fakereld://a/tool:\n    alias: ta\n"))
-	hash := f.binFile(t, "ta", "tool a/v2.0.0\n")
-	f.writeLock(t, lock.BinEntry{Name: "tool", Version: "v2.0.0", SHA256: hash, Source: "fakereld://a/tool", Provider: "fakereld", Digest: "sha256:a"})
+	for _, args := range [][]string{nil, {"fakereld://a/tool"}} {
+		t.Run("b update "+strings.Join(args, " "), func(t *testing.T) {
+			f := newPinsFixture(t)
+			f.serveRefs(t)
+			mustWrite(t, f.config, []byte("binaries:\n  fakereld://a/tool:\n    alias: ta\n"))
+			hash := f.binFile(t, "ta", "tool a/v2.0.0\n")
+			f.writeLock(t, lock.BinEntry{Name: "tool", Version: "v2.0.0", SHA256: hash, Source: "fakereld://a/tool", Provider: "fakereld", Digest: "sha256:a"})
 
-	f.update(t)
-	if n := f.hits.Load(); n != 0 {
-		t.Errorf("%d downloads, want 0: the digest and the file match the row", n)
+			f.update(t, args...)
+			if n := f.hits.Load(); n != 0 {
+				t.Errorf("%d downloads, want 0: the digest and the file match the row", n)
+			}
+			lk := f.readLock(t)
+			if e := lk.FindBinary("ta"); e == nil || e.Digest != "sha256:a" || e.SHA256 != hash || e.Binary != "tool" {
+				t.Errorf("b.lock row ta: %+v, want the row of .bin/ta", e)
+			}
+			if got := f.rowNames(t); got != "ta" {
+				t.Errorf("b.lock rows: %q, want only ta", got)
+			}
+		})
 	}
-	lk := f.readLock(t)
-	if e := lk.FindBinary("ta"); e == nil || e.Digest != "sha256:a" || e.SHA256 != hash {
-		t.Errorf("b.lock row ta: %+v, want the row of .bin/ta", e)
+}
+
+// TestUpdate_FirstRunAfterAnOlderB: the first command after an upgrade of b
+// is `b update`. It moves the row that an older b wrote under the binary's
+// name to the name of the file before it removes the rows that describe no
+// file, so the later `b install` keeps the file. This holds for a provider
+// ref with an alias and for an alias entry of a preset.
+func TestUpdate_FirstRunAfterAnOlderB(t *testing.T) {
+	for _, tc := range []struct {
+		name, config, file, content string
+		old                         lock.BinEntry
+	}{{
+		name:    "a provider ref with an alias",
+		config:  "binaries:\n  fakerel://a/tool:\n    alias: ta\n    version: v1.0.0\n",
+		file:    "ta",
+		content: "tool a/v1.0.0\n",
+		old:     lock.BinEntry{Name: "tool", Version: "v1.0.0", Source: "fakerel://a/tool", Provider: "fakerel"},
+	}, {
+		name:    "an alias entry of a preset",
+		config:  "binaries:\n  t2:\n    alias: tool\n    version: v3.0.0\n",
+		file:    "t2",
+		content: "tool v3.0.0\n",
+		old:     lock.BinEntry{Name: "tool", Version: "v3.0.0", Preset: true},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPinsFixture(t)
+			f.serveRefs(t)
+			mustWrite(t, f.config, []byte(tc.config))
+			old := tc.old
+			old.SHA256 = f.binFile(t, tc.file, tc.content)
+			f.writeLock(t, old)
+
+			f.update(t)
+			if got := f.rowNames(t); got != tc.file {
+				t.Errorf("b.lock rows after `b update`: %q, want %q", got, tc.file)
+			}
+			f.install(t, false)
+			if n := f.hits.Load(); n != 0 {
+				t.Errorf("b update, then b install: %d downloads, want 0", n)
+			}
+			f.checkRow(t, f.readLock(t), tc.file, tc.content, tc.old.Version)
+		})
 	}
-	if e := lk.FindBinary("tool"); e != nil {
-		t.Errorf("b.lock row under the old name: %+v, want none", e)
-	}
+}
+
+// TestInstall_OldRowOfAPresentFileStays: a row under the name of a binary
+// stays while the file of that name is there. (1) `b install tool@v1.0.0`,
+// then `b install --alias foo tool@v3.0.0`: the row tool stays, so a later
+// `b install tool@v1.0.0` keeps .bin/tool. (2) b.lock of an older b has one
+// row tool for .bin/tool and for .bin/t2 (an alias entry of tool), which
+// have the same content: `b install t2` writes the row t2 from it, and the
+// row tool stays.
+func TestInstall_OldRowOfAPresentFileStays(t *testing.T) {
+	t.Run("b install --alias foo tool", func(t *testing.T) {
+		f := newPinsFixture(t)
+		f.install(t, false, "tool@v1.0.0")
+		if err := f.runWith(t, func(o *InstallOptions) { o.Alias = "foo" }, "tool@v3.0.0"); err != nil {
+			t.Fatalf("b install --alias foo tool@v3.0.0: %v", err)
+		}
+		f.hits.Store(0)
+		f.install(t, false, "tool@v1.0.0")
+		if n := f.hits.Load(); n != 0 {
+			t.Errorf("the second b install tool@v1.0.0: %d downloads, want 0", n)
+		}
+		lk := f.readLock(t)
+		f.checkRow(t, lk, "tool", "tool v1.0.0\n", "v1.0.0")
+		f.checkRow(t, lk, "foo", "tool v3.0.0\n", "v3.0.0")
+	})
+	t.Run("one old row of two files", func(t *testing.T) {
+		f := newPinsFixture(t)
+		mustWrite(t, f.config, []byte("binaries:\n  t2:\n    alias: tool\n    version: v3.0.0\n"))
+		hash := f.binFile(t, "tool", "tool v3.0.0\n")
+		f.binFile(t, "t2", "tool v3.0.0\n")
+		f.writeLock(t, lock.BinEntry{Name: "tool", Version: "v3.0.0", SHA256: hash, Preset: true})
+
+		f.install(t, false, "t2")
+		if n := f.hits.Load(); n != 0 {
+			t.Errorf("%d downloads, want 0: the row describes .bin/t2", n)
+		}
+		lk := f.readLock(t)
+		f.checkRow(t, lk, "tool", "tool v3.0.0\n", "v3.0.0")
+		f.checkRow(t, lk, "t2", "tool v3.0.0\n", "v3.0.0")
+		if err := f.verify(t); err != nil {
+			t.Errorf("b verify: %v", err)
+		}
+	})
 }
 
 // TestDigestMatchesLock_OldRowNeedsTheFile: a row under the binary's name

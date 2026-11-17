@@ -22,11 +22,12 @@ import (
 //
 // Older versions of b wrote some rows under the name of the binary instead:
 // an alias entry of a preset (before alias rows), and a provider ref with an
-// alias. findLockRow finds such a row once under the old name, and the
-// install writes it under the file name. An install trusts the version of
-// a row only when its sha256 is the sha256 of the file (planInstall), so a
-// row that moved does not cause a download, and a row of another file does
-// not count as the row of this one.
+// alias. Before any download and before any prune, b install and b update
+// move such a row to the name of the file (moveOldLockRows). A row under an
+// old name counts only when its sha256 is the sha256 of the file
+// (describesFile): under that name it can also be the row of another file.
+// So a row that moved does not cause a download. The row under the old name
+// stays while it can describe a file (describesNoFile).
 
 // entryFileName is the name of the file that a b.yaml entry installs, the
 // name of its b.lock row: for a provider ref its alias, else the binary name
@@ -93,9 +94,21 @@ func joinNames(names []string) string {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
+// describesFile reports whether the b.lock row e describes the file at file:
+// its sha256 is the sha256 of the file. Only then does b trust the version
+// of the row.
+func describesFile(e *lock.BinEntry, file string) bool {
+	if e == nil || e.SHA256 == "" {
+		return false
+	}
+	hash, err := lock.SHA256File(file)
+	return err == nil && hash == e.SHA256
+}
+
 // findLockRow is b's b.lock row, and the name that it has in b.lock: the row
 // of b's file (lockName), or else a row that an older b wrote for b under the
-// binary's name (oldLockRow). It is nil when there is none.
+// binary's name (oldLockRow) when it describes b's file. It is nil when
+// there is none.
 func findLockRow(lk *lock.Lock, b *binary.Binary) (*lock.BinEntry, string) {
 	name := lockName(b)
 	if e := lk.FindBinary(name); e != nil {
@@ -104,7 +117,7 @@ func findLockRow(lk *lock.Lock, b *binary.Binary) (*lock.BinEntry, string) {
 	if name == b.Name {
 		return nil, ""
 	}
-	if e := lk.FindBinary(b.Name); e != nil && oldLockRow(e, b) {
+	if e := lk.FindBinary(b.Name); e != nil && oldLockRow(e, b) && describesFile(e, b.BinaryPath()) {
 		return e, b.Name
 	}
 	return nil, ""
@@ -113,8 +126,7 @@ func findLockRow(lk *lock.Lock, b *binary.Binary) (*lock.BinEntry, string) {
 // oldLockRow reports whether e, the row under the name of b's binary, can be
 // the row that an older b wrote for b's file: a row without a Binary field,
 // of a provider ref with b's ref, or of a preset when b is a preset. It can
-// also be the row of a present file of that name. The caller must check the
-// sha256 of b's file against it before it trusts the version.
+// also be the row of a present file of that name.
 func oldLockRow(e *lock.BinEntry, b *binary.Binary) bool {
 	if e.Binary != "" {
 		return false
@@ -163,14 +175,69 @@ func lockFileNames(cfg *state.State, binaries []*binary.Binary) map[string]bool 
 	return names
 }
 
-// pruneLock removes the b.lock rows that describe no file: no b.yaml entry
-// installs a file of that name, and the binary directory has no file of that
-// name. Such a row makes b verify fail, and no install writes it again: the
-// row of an entry that b.yaml does not have any more, or a row of an older b
-// under an old name. A row of a file that is there stays, also without an
-// entry: an install of a binary that is not in b.yaml, or an entry of another
-// b.yaml (b --config) that uses the same b.lock. It returns the names of the
-// rows that it removed.
+// describesNoFile reports whether the b.lock row of that name describes no
+// file: keep (the files that b.yaml installs) has no file of that name, and
+// the binary directory binDir has no file of that name. A row of a file
+// that is there can describe it, also without a b.yaml entry.
+func describesNoFile(name string, keep map[string]bool, binDir string) bool {
+	if name == "" || keep[name] {
+		return false
+	}
+	_, err := os.Lstat(filepath.Join(binDir, name))
+	return os.IsNotExist(err)
+}
+
+// moveOldLockRows moves each row that an older b wrote for one of the
+// binaries under the name of its binary (findLockRow: only when the row
+// describes the binary's file) to the name of the file. The row under the
+// old name stays when it can also describe another file: a b.yaml entry or
+// a binary of this run installs a file of that name (stay), or the file is
+// there (describesNoFile). It reports whether it changed lk.
+func moveOldLockRows(lk *lock.Lock, binaries []*binary.Binary, stay map[string]bool, binDir string) bool {
+	old := map[string]bool{}
+	for _, b := range binaries {
+		e, rowName := findLockRow(lk, b)
+		if e == nil || rowName == lockName(b) {
+			continue
+		}
+		moved := *e
+		moved.Name = lockName(b)
+		moved.Binary = lockBinary(b)
+		lk.UpsertBinary(moved)
+		old[rowName] = true
+	}
+	// Remove the old rows after all moves: one old row can be the row of
+	// two files with the same content.
+	for name := range old {
+		if describesNoFile(name, stay, binDir) {
+			lk.RemoveBinary(name)
+		}
+	}
+	return len(old) > 0
+}
+
+// moveOldRows moves the b.lock rows that an older b wrote for the binaries
+// under other names to the names of their files (moveOldLockRows), in lk
+// and in b.lock. b install and b update call it before any download, while
+// the files are the ones that the rows describe, and before any prune: a
+// row under an old name describes no file, and a prune would remove it.
+func (o *SharedOptions) moveOldRows(lk *lock.Lock, binaries []*binary.Binary) {
+	if !moveOldLockRows(lk, binaries, lockFileNames(o.Config, binaries), path.GetBinaryPath()) {
+		return
+	}
+	if err := lock.WriteLock(o.LockDir(), lk, o.bVersion); err != nil {
+		fmt.Fprintf(o.IO.ErrOut, "Warning: failed to move b.lock rows to the names of their files: %v\n", err)
+	}
+}
+
+// pruneLock removes the b.lock rows that describe no file (describesNoFile):
+// no b.yaml entry installs a file of that name, and the binary directory has
+// no file of that name. Such a row makes b verify fail, and no install
+// writes it again: the row of an entry that b.yaml does not have any more,
+// or a row of an older b under an old name that describes no file. A row of
+// a file that is there stays, also without an entry: an install of a binary
+// that is not in b.yaml, or an entry of another b.yaml (b --config) that
+// uses the same b.lock. It returns the names of the rows that it removed.
 func (o *SharedOptions) pruneLock() ([]string, error) {
 	if o.Config == nil {
 		return nil, nil
@@ -184,15 +251,13 @@ func (o *SharedOptions) pruneLock() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	installed := configFileNames(o.Config)
+	installed := lockFileNames(o.Config, nil)
 	var removed []string
 	kept := lk.Binaries[:0]
 	for _, e := range lk.Binaries {
-		if _, ok := installed[e.Name]; !ok && e.Name != "" {
-			if _, err := os.Lstat(filepath.Join(binDir, e.Name)); os.IsNotExist(err) {
-				removed = append(removed, e.Name)
-				continue
-			}
+		if describesNoFile(e.Name, installed, binDir) {
+			removed = append(removed, e.Name)
+			continue
 		}
 		kept = append(kept, e)
 	}
