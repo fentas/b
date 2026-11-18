@@ -37,10 +37,19 @@ func (o *CmdBinaryOptions) lookupLocals() ([]*binary.LocalBinary, error) {
 	return locals, nil
 }
 
+// installBinaries installs the binaries of -i (with -u: updates them, with
+// -f: downloads them again). A failed download stops nothing else. When
+// downloads failed, it returns their error (failedDownloads), as b install
+// and b update do, so the command exits 1.
 func (o *CmdBinaryOptions) installBinaries() error {
 	wg := sync.WaitGroup{}
 	pw := newProgressRun(o.IO.Out)
 	defer pw.Stop()
+
+	// The error of each binary whose download failed. The goroutines write
+	// it under failedMu.
+	var failedMu sync.Mutex
+	failed := make(map[*binary.Binary]error)
 
 	for b, do := range o.ensure {
 		if *do {
@@ -56,6 +65,11 @@ func (o *CmdBinaryOptions) installBinaries() error {
 				} else {
 					err = b.EnsureBinary(o.update)
 				}
+				if err != nil {
+					failedMu.Lock()
+					failed[b] = err
+					failedMu.Unlock()
+				}
 
 				progress.ProgressDone(
 					b.Tracker,
@@ -69,5 +83,7 @@ func (o *CmdBinaryOptions) installBinaries() error {
 	wg.Wait()
 	// let the progress bar render
 	time.Sleep(200 * time.Millisecond)
-	return nil
+	// o.Binaries holds the binaries of o.ensure in a fixed order: the error
+	// has one line per failed binary, in that order.
+	return failedDownloads(o.Binaries, failed, "")
 }

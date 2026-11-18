@@ -10,8 +10,8 @@ import (
 )
 
 // downloadFailure is the error of a command whose downloads failed: one line
-// per binary, with the cause. b install and b update return it after they
-// did the rest of their work.
+// per binary, with the cause. b install, b update and the -i flag of
+// NewCmdBinary return it after they did the rest of their work.
 type downloadFailure struct{ msg string }
 
 func (e *downloadFailure) Error() string { return e.msg }
