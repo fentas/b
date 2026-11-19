@@ -490,14 +490,14 @@ func TestDownloadPreset_IsZip(t *testing.T) {
 
 func TestExtractSingleFileFromTar_UnknownComp(t *testing.T) {
 	b := &Binary{Name: "foo"}
-	if err := b.extractSingleFileFromTar(bytes.NewReader(nil), "bogus"); err == nil {
+	if err := b.extractSingleFileFromTar(bytes.NewReader(nil), "bogus", "test.tar"); err == nil {
 		t.Error("expected error")
 	}
 }
 
 func TestExtractSingleFileFromTar_BadGzip(t *testing.T) {
 	b := &Binary{Name: "foo"}
-	if err := b.extractSingleFileFromTar(bytes.NewReader([]byte("not-gzip")), "gz"); err == nil {
+	if err := b.extractSingleFileFromTar(bytes.NewReader([]byte("not-gzip")), "gz", "test.tar.gz"); err == nil {
 		t.Error("expected error")
 	}
 }
@@ -507,7 +507,7 @@ func TestExtractSingleFileFromTar_FileNotFound(t *testing.T) {
 
 	tmp := t.TempDir()
 	b := &Binary{Name: "foo", File: filepath.Join(tmp, "foo")}
-	err := b.extractSingleFileFromTar(buf, "gz")
+	err := b.extractSingleFileFromTar(buf, "gz", "test.tar.gz")
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("err = %v", err)
 	}
@@ -518,7 +518,7 @@ func TestExtractFromTarAuto_NameMatch(t *testing.T) {
 
 	tmp := t.TempDir()
 	b := &Binary{Name: "foo", File: filepath.Join(tmp, "foo")}
-	if err := b.extractFromTarAuto(buf, "gz"); err != nil {
+	if err := b.extractFromTarAuto(buf, "gz", "test.tar.gz"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(b.File)
@@ -535,7 +535,7 @@ func TestExtractFromTarAuto_NoExecutables(t *testing.T) {
 
 	tmp := t.TempDir()
 	b := &Binary{Name: "foo", File: filepath.Join(tmp, "foo")}
-	if err := b.extractFromTarAuto(buf, "gz"); err == nil {
+	if err := b.extractFromTarAuto(buf, "gz", "test.tar.gz"); err == nil {
 		t.Error("expected error")
 	}
 }
@@ -547,7 +547,7 @@ func TestExtractFromTarAuto_PicksLargest(t *testing.T) {
 	)
 	tmp := t.TempDir()
 	b := &Binary{Name: "foo", File: filepath.Join(tmp, "foo")}
-	if err := b.extractFromTarAuto(buf, "gz"); err != nil {
+	if err := b.extractFromTarAuto(buf, "gz", "test.tar.gz"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(b.File)
@@ -561,7 +561,7 @@ func TestExtractFromTarAuto_PicksLargest(t *testing.T) {
 
 func TestExtractFromTarAuto_BadComp(t *testing.T) {
 	b := &Binary{Name: "foo"}
-	if err := b.extractFromTarAuto(bytes.NewReader(nil), "bogus"); err == nil {
+	if err := b.extractFromTarAuto(bytes.NewReader(nil), "bogus", "test.tar"); err == nil {
 		t.Error("expected error")
 	}
 }
@@ -570,7 +570,7 @@ func TestExtractFromZipAuto_NameMatch(t *testing.T) {
 	buf := makeZip(t, map[string][]byte{"foo": []byte("bin")})
 	tmp := t.TempDir()
 	b := &Binary{Name: "foo", File: filepath.Join(tmp, "foo")}
-	if err := b.extractFromZipAuto(buf); err != nil {
+	if err := b.extractFromZipAuto(buf, "test.zip"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(b.File)
@@ -584,7 +584,7 @@ func TestExtractFromZipAuto_NameMatch(t *testing.T) {
 
 func TestExtractFromZipAuto_BadZip(t *testing.T) {
 	b := &Binary{Name: "foo"}
-	if err := b.extractFromZipAuto(bytes.NewReader([]byte("not-zip"))); err == nil {
+	if err := b.extractFromZipAuto(bytes.NewReader([]byte("not-zip")), "test.zip"); err == nil {
 		t.Error("expected error")
 	}
 }
@@ -593,7 +593,7 @@ func TestExtractFromZipAuto_PicksLargest(t *testing.T) {
 	buf := makeZip(t, map[string][]byte{"a": []byte("xx"), "b": []byte("xxxxxxxx")})
 	tmp := t.TempDir()
 	b := &Binary{Name: "none", File: filepath.Join(tmp, "out")}
-	if err := b.extractFromZipAuto(buf); err != nil {
+	if err := b.extractFromZipAuto(buf, "test.zip"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -684,7 +684,7 @@ func TestExtractSingleFileFromTar_SuccessMatch(t *testing.T) {
 
 	tmp := t.TempDir()
 	b := &Binary{Name: "foo", File: filepath.Join(tmp, "foo")}
-	if err := b.extractSingleFileFromTar(&buf, "gz"); err != nil {
+	if err := b.extractSingleFileFromTar(&buf, "gz", "test.tar.gz"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(b.File)
@@ -700,7 +700,7 @@ func TestExtractSingleFileFromTar_GitHubFileStripExt(t *testing.T) {
 	buf := makeTarGz(t, tarEntry{name: "mytool-linux", mode: 0755, content: []byte("xy")})
 	tmp := t.TempDir()
 	b := &Binary{Name: "other", GitHubFile: "mytool-linux.tar.gz", File: filepath.Join(tmp, "out")}
-	if err := b.extractSingleFileFromTar(buf, "gz"); err != nil {
+	if err := b.extractSingleFileFromTar(buf, "gz", "test.tar.gz"); err != nil {
 		t.Fatal(err)
 	}
 }

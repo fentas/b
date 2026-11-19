@@ -8,8 +8,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -41,14 +44,46 @@ func accessDeniedError(resp *http.Response, url string) error {
 	return fmt.Errorf("HTTP %d for %s: access denied; check credentials (for GitHub, set GITHUB_TOKEN)", resp.StatusCode, url)
 }
 
-// verifyWritten confirms a download landed on disk: at least one byte was
-// written, and the byte count matches Content-Length when the server sent one.
-func verifyWritten(file string, written, contentLength int64) error {
-	if written == 0 {
-		return fmt.Errorf("download of %s wrote 0 bytes: the server sent an empty body; retry the download", file)
+// writeSource names where the bytes of a binary come from, for the errors
+// of verifyWritten.
+type writeSource struct {
+	what  string // the subject of the errors
+	empty string // why no byte came, and the next step
+	size  string // the size that the byte count must match
+	retry string // the next step when the byte count differs
+}
+
+// downloadOf is the source of a download into file. Its size is the
+// Content-Length.
+func downloadOf(file string) writeSource {
+	return writeSource{
+		what:  "download of " + file,
+		empty: "the server sent an empty body; retry the download",
+		size:  "Content-Length",
+		retry: "retry the download",
 	}
-	if contentLength >= 0 && written != contentLength {
-		return fmt.Errorf("download of %s is incomplete: wrote %d bytes, Content-Length is %d; retry the download", file, written, contentLength)
+}
+
+// memberOf is the source of the file member of the archive archive. Its
+// size is the size in the archive header.
+func memberOf(member, archive string) writeSource {
+	return writeSource{
+		what:  fmt.Sprintf("extraction of %s from %s", member, archive),
+		empty: "the file in the archive is empty; the archive is damaged or does not hold the binary",
+		size:  "its size in the archive",
+		retry: "the archive is damaged",
+	}
+}
+
+// verifyWritten confirms that the bytes of a binary landed on disk: at least
+// one byte was written, and the byte count matches want when the source
+// gives a size (want >= 0). An empty file is never a binary: it cannot run.
+func verifyWritten(src writeSource, written, want int64) error {
+	if written == 0 {
+		return fmt.Errorf("%s wrote 0 bytes: %s", src.what, src.empty)
+	}
+	if want >= 0 && written != want {
+		return fmt.Errorf("%s is incomplete: wrote %d bytes, %s is %d; %s", src.what, written, src.size, want, src.retry)
 	}
 	return nil
 }
@@ -65,6 +100,59 @@ func (b *Binary) writeFile(r io.Reader, check func(written int64) error) error {
 		}
 		return err
 	})
+}
+
+// writeMember writes the binary from the member of an archive (writeFile)
+// and checks it (verifyWritten): the member is not empty, and its byte count
+// is size when the archive header gives one (size >= 0). The archive readers
+// refuse a short member too; this count is taken where the bytes are
+// written, after every reader between. A read error names the member and the
+// archive.
+func (b *Binary) writeMember(r io.Reader, member, archive string, size int64) error {
+	src := memberOf(member, archive)
+	return b.writeFile(namedReader{r: r, name: src.what}, func(written int64) error {
+		return verifyWritten(src, written, size)
+	})
+}
+
+// namedReader puts name in front of the read errors of r. io.EOF stays as it
+// is, because io.Copy ends on it.
+type namedReader struct {
+	r    io.Reader
+	name string
+}
+
+func (n namedReader) Read(p []byte) (int, error) {
+	k, err := n.r.Read(p)
+	if err != nil && err != io.EOF {
+		err = fmt.Errorf("%s: %w", n.name, err)
+	}
+	return k, err
+}
+
+// zipSize is the size of f in the zip header, or -1 when it does not fit an
+// int64 (the zip reader refuses such a member).
+func zipSize(f *zip.File) int64 {
+	if f.UncompressedSize64 > math.MaxInt64 {
+		return -1
+	}
+	return int64(f.UncompressedSize64)
+}
+
+// archiveName is the last element of the path of rawURL: the name of an
+// archive in errors. A URL without a path element gives the URL without its
+// user info, query and fragment, so that no credential goes into an error. A
+// URL that does not parse gives "the archive".
+func archiveName(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "the archive"
+	}
+	if name := path.Base(u.Path); name != "." && name != "/" {
+		return name
+	}
+	u.User, u.RawQuery, u.Fragment = nil, "", ""
+	return u.String()
 }
 
 // ctx returns the context of b, or context.Background if it has none.
@@ -101,22 +189,22 @@ func (b *Binary) githubURL() (string, error) {
 }
 
 // extractSingleFileFromTar extracts a single file from a tar archive.
-// compression can be "gz" or "xz".
-func (b *Binary) extractSingleFileFromTar(stream io.Reader, compression string) error {
+// compression can be "gz" or "xz". archive names the archive in errors.
+func (b *Binary) extractSingleFileFromTar(stream io.Reader, compression, archive string) error {
 	var tarReader *tar.Reader
 
 	switch compression {
 	case "gz":
 		gzipReader, err := gzip.NewReader(stream)
 		if err != nil {
-			return err
+			return fmt.Errorf("reading the gzip header of %s: %w", archive, err)
 		}
 		defer gzipReader.Close()
 		tarReader = tar.NewReader(gzipReader)
 	case "xz":
 		xzReader, err := xz.NewReader(stream)
 		if err != nil {
-			return err
+			return fmt.Errorf("reading the xz header of %s: %w", archive, err)
 		}
 		tarReader = tar.NewReader(xzReader)
 	default:
@@ -129,7 +217,7 @@ func (b *Binary) extractSingleFileFromTar(stream io.Reader, compression string) 
 			break
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("reading the tar archive %s: %w", archive, err)
 		}
 		if header.Typeflag != tar.TypeReg {
 			continue
@@ -152,28 +240,30 @@ func (b *Binary) extractSingleFileFromTar(stream io.Reader, compression string) 
 			}
 		}
 
-		return b.writeFile(tarReader, nil)
+		return b.writeMember(tarReader, header.Name, archive, header.Size)
 	}
 
 	return fmt.Errorf("file %s not found", b.Name)
 }
 
-func (b *Binary) extractSingleFileFromZip(stream io.Reader) error {
+// extractSingleFileFromZip extracts the file b.Name from a zip archive.
+// archive names the archive in errors.
+func (b *Binary) extractSingleFileFromZip(stream io.Reader, archive string) error {
 	zipData, err := io.ReadAll(stream)
 	if err != nil {
-		return err
+		return fmt.Errorf("reading %s: %w", archive, err)
 	}
 
 	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
-		return err
+		return fmt.Errorf("reading the zip directory of %s: %w", archive, err)
 	}
 
 	for _, file := range zipReader.File {
 		if file.Name == b.Name {
 			zippedFile, err := file.Open()
 			if err != nil {
-				return err
+				return fmt.Errorf("opening %s in %s: %w", file.Name, archive, err)
 			}
 			defer zippedFile.Close()
 
@@ -184,7 +274,7 @@ func (b *Binary) extractSingleFileFromZip(stream io.Reader) error {
 				defer b.Tracker.MarkAsDone()
 			}
 
-			return b.writeFile(reader, nil)
+			return b.writeMember(reader, file.Name, archive, zipSize(file))
 		}
 	}
 
@@ -288,36 +378,37 @@ func (b *Binary) downloadAsset(asset *provider.Asset) error {
 	archiveType := provider.DetectArchiveType(asset.Name)
 	switch archiveType {
 	case "tar.gz":
-		return b.extractFromTarAuto(resp.Body, "gz")
+		return b.extractFromTarAuto(resp.Body, "gz", asset.Name)
 	case "tar.xz":
-		return b.extractFromTarAuto(resp.Body, "xz")
+		return b.extractFromTarAuto(resp.Body, "xz", asset.Name)
 	case "zip":
-		return b.extractFromZipAuto(resp.Body)
+		return b.extractFromZipAuto(resp.Body, asset.Name)
 	default:
 		// Raw binary (no archive)
 		return b.writeFile(resp.Body, func(written int64) error {
-			return verifyWritten(b.File, written, resp.ContentLength)
+			return verifyWritten(downloadOf(b.File), written, resp.ContentLength)
 		})
 	}
 }
 
 // extractFromTarAuto extracts the best-matching binary from a tar archive
 // using heuristic detection (name match > largest executable > only executable).
-func (b *Binary) extractFromTarAuto(stream io.Reader, compression string) error {
+// archive names the archive in errors.
+func (b *Binary) extractFromTarAuto(stream io.Reader, compression, archive string) error {
 	var tarReader *tar.Reader
 
 	switch compression {
 	case "gz":
 		gzipReader, err := gzip.NewReader(stream)
 		if err != nil {
-			return err
+			return fmt.Errorf("reading the gzip header of %s: %w", archive, err)
 		}
 		defer gzipReader.Close()
 		tarReader = tar.NewReader(gzipReader)
 	case "xz":
 		xzReader, err := xz.NewReader(stream)
 		if err != nil {
-			return err
+			return fmt.Errorf("reading the xz header of %s: %w", archive, err)
 		}
 		tarReader = tar.NewReader(xzReader)
 	default:
@@ -327,6 +418,7 @@ func (b *Binary) extractFromTarAuto(stream io.Reader, compression string) error 
 	type candidate struct {
 		name string
 		data []byte
+		size int64 // the size in the tar header
 		mode os.FileMode
 	}
 	var candidates []candidate
@@ -338,7 +430,7 @@ func (b *Binary) extractFromTarAuto(stream io.Reader, compression string) error 
 			break
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("reading the tar archive %s: %w", archive, err)
 		}
 		if header.Typeflag != tar.TypeReg {
 			continue
@@ -351,12 +443,13 @@ func (b *Binary) extractFromTarAuto(stream io.Reader, compression string) error 
 
 		data, err := io.ReadAll(tarReader)
 		if err != nil {
-			return err
+			return fmt.Errorf("%s: %w", memberOf(header.Name, archive).what, err)
 		}
 
 		c := candidate{
 			name: header.Name,
 			data: data,
+			size: header.Size,
 			mode: os.FileMode(header.Mode),
 		}
 		candidates = append(candidates, c)
@@ -386,19 +479,20 @@ func (b *Binary) extractFromTarAuto(stream io.Reader, compression string) error 
 		return fmt.Errorf("no executable found in archive for %s", b.Name)
 	}
 
-	return b.writeFile(bytes.NewReader(chosen.data), nil)
+	return b.writeMember(bytes.NewReader(chosen.data), chosen.name, archive, chosen.size)
 }
 
 // extractFromZipAuto extracts the best-matching binary from a zip archive.
-func (b *Binary) extractFromZipAuto(stream io.Reader) error {
+// archive names the archive in errors.
+func (b *Binary) extractFromZipAuto(stream io.Reader, archive string) error {
 	zipData, err := io.ReadAll(stream)
 	if err != nil {
-		return err
+		return fmt.Errorf("reading %s: %w", archive, err)
 	}
 
 	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
-		return err
+		return fmt.Errorf("reading the zip directory of %s: %w", archive, err)
 	}
 
 	type candidate struct {
@@ -443,11 +537,11 @@ func (b *Binary) extractFromZipAuto(stream io.Reader) error {
 
 	rc, err := chosen.file.Open()
 	if err != nil {
-		return err
+		return fmt.Errorf("opening %s in %s: %w", chosen.name, archive, err)
 	}
 	defer rc.Close()
 
-	return b.writeFile(rc, nil)
+	return b.writeMember(rc, chosen.name, archive, zipSize(chosen.file))
 }
 
 // downloadPreset is the original preset-based download path.
@@ -525,17 +619,18 @@ func (b *Binary) downloadPreset() error {
 		}
 	}
 
+	archive := archiveName(url)
 	if b.IsTarGz {
-		return b.extractSingleFileFromTar(resp.Body, "gz")
+		return b.extractSingleFileFromTar(resp.Body, "gz", archive)
 	}
 	if b.IsTarXz {
-		return b.extractSingleFileFromTar(resp.Body, "xz")
+		return b.extractSingleFileFromTar(resp.Body, "xz", archive)
 	}
 	if b.IsZip {
-		return b.extractSingleFileFromZip(resp.Body)
+		return b.extractSingleFileFromZip(resp.Body, archive)
 	}
 
 	return b.writeFile(resp.Body, func(written int64) error {
-		return verifyWritten(b.File, written, resp.ContentLength)
+		return verifyWritten(downloadOf(b.File), written, resp.ContentLength)
 	})
 }
