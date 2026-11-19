@@ -523,6 +523,20 @@ func TestGitHubReleaseTag(t *testing.T) {
 	}
 }
 
+// TestGitHubReleaseTag_ErrorHidesCredentials: the error names the URL
+// without its user info, query and fragment. The URL is where the request
+// ended after its redirects, and a login page can carry a token in its query.
+func TestGitHubReleaseTag_ErrorHidesCredentials(t *testing.T) {
+	u, err := url.Parse("https://u-sekrit:p-sekrit@github.com/login?return_to=x&token=q-sekrit#f-sekrit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = GitHubReleaseTag(u)
+	if want := "latest release: https://github.com/login is not a release tag URL"; err == nil || err.Error() != want {
+		t.Errorf("error %v, want %q", err, want)
+	}
+}
+
 // A 200 at /releases/latest (no redirect) and a redirect to the login page
 // must not give the version "latest" or "login".
 func TestGitHub_LatestVersion_RejectsNonTagURL(t *testing.T) {

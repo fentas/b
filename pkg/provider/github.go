@@ -49,7 +49,7 @@ func (g *GitHub) LatestVersion(ref string) (string, error) {
 		return "", fmt.Errorf("no releases found for %s/%s", owner, repo)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
+		return "", fmt.Errorf("HTTP %d for %s", resp.StatusCode, fetch.RedactRawURL(url))
 	}
 	return GitHubReleaseTag(resp.Request.URL)
 }
@@ -64,7 +64,7 @@ func GitHubReleaseTag(u *url.URL) (string, error) {
 	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
 	if len(parts) < 5 || parts[0] == "" || parts[1] == "" ||
 		parts[2] != "releases" || parts[3] != "tag" || parts[len(parts)-1] == "" {
-		return "", fmt.Errorf("latest release: %s is not a release tag URL", u.Redacted())
+		return "", fmt.Errorf("latest release: %s is not a release tag URL", fetch.RedactURL(u))
 	}
 	return parts[len(parts)-1], nil
 }
