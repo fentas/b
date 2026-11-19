@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -49,7 +48,7 @@ func (g *GitHub) LatestVersion(ref string) (string, error) {
 		return "", fmt.Errorf("no releases found for %s/%s", owner, repo)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
+		return "", fmt.Errorf("HTTP %d for %s", resp.StatusCode, fetch.RedactRawURL(url))
 	}
 	return GitHubReleaseTag(resp.Request.URL)
 }
@@ -64,7 +63,7 @@ func GitHubReleaseTag(u *url.URL) (string, error) {
 	parts := strings.Split(strings.TrimPrefix(u.Path, "/"), "/")
 	if len(parts) < 5 || parts[0] == "" || parts[1] == "" ||
 		parts[2] != "releases" || parts[3] != "tag" || parts[len(parts)-1] == "" {
-		return "", fmt.Errorf("latest release: %s is not a release tag URL", u.Redacted())
+		return "", fmt.Errorf("latest release: %s is not a release tag URL", fetch.RedactURL(u))
 	}
 	return parts[len(parts)-1], nil
 }
@@ -100,8 +99,7 @@ func (g *GitHub) FetchRelease(ref, version string) (*Release, error) {
 		return nil, fmt.Errorf("GitHub API rate limited (set GITHUB_TOKEN for higher limits)")
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GitHub API error %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("GitHub API error %d: %s", resp.StatusCode, fetch.ErrorBody(resp.Body))
 	}
 
 	var ghRelease struct {

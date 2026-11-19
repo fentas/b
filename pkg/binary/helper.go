@@ -34,7 +34,7 @@ func GithubLatest(b *Binary) (string, error) {
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return b.Version, fmt.Errorf("HTTP %d for %s", resp.StatusCode, latestURL)
+		return b.Version, fmt.Errorf("HTTP %d for %s", resp.StatusCode, fetch.RedactRawURL(latestURL))
 	}
 	tag, err := provider.GitHubReleaseTag(resp.Request.URL)
 	if err != nil {
@@ -50,7 +50,7 @@ func GetBody(url string) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return "", fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
+		return "", fmt.Errorf("HTTP %d for %s", resp.StatusCode, fetch.RedactRawURL(url))
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

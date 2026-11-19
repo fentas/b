@@ -128,6 +128,8 @@ var sleep = func(ctx context.Context, d time.Duration) error {
 
 // Error reports a request that still failed after its last try.
 type Error struct {
+	// URL is the URL of the request without its user info, query and
+	// fragment (RedactURL).
 	URL      string
 	Attempts int
 	// Status is the HTTP status of the last try, 0 if it got no response.
@@ -159,7 +161,8 @@ func (e *timeoutError) Temporary() bool { return true }
 // It returns any other response at once, 4xx included, and the caller then
 // owns its body; the caller must read it with no pause of IdleTimeout or
 // more. When the tries run out, the error is an *Error that names the URL
-// and the last status or error. Any other request gets one try.
+// and the last status or error. Any other request gets one try. An error
+// names a URL only without its user info, query and fragment (RedactURL).
 //
 // For an https request to a GitHub host, Do sends GITHUB_TOKEN (if set) as a
 // Bearer token. On each redirect, Do keeps the Authorization and
@@ -175,7 +178,7 @@ func Do(req *http.Request) (*http.Response, error) {
 func Get(ctx context.Context, rawURL string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, redactURLErrors(err)
 	}
 	return Do(req)
 }
@@ -184,14 +187,15 @@ func Get(ctx context.Context, rawURL string) (*http.Response, error) {
 // temp file before it returns, so a body that the network cuts short or
 // stops is retried from byte zero, and a partial body never reaches the
 // caller. The Body of the returned 200 response reads that file, and Close
-// removes it; ContentLength is the file size.
+// removes it; ContentLength is the file size. The Body also implements
+// io.ReaderAt and io.Seeker, so a caller can read the file at an offset.
 //
 // wrap, if not nil, is called for each try that gets a 200 and returns the
 // reader to copy the body from (for example, to show progress).
 func Download(ctx context.Context, rawURL string, wrap func(*http.Response) io.Reader) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, redactURLErrors(err)
 	}
 	return DefaultPolicy.do(req, true, wrap)
 }
@@ -223,7 +227,7 @@ func (p Policy) do(req *http.Request, spoolBody bool, wrap func(*http.Response) 
 			after = retryAfter(resp.Header.Get("Retry-After"), time.Now())
 			discard(resp.Body)
 		case spoolBody && resp.StatusCode == http.StatusOK:
-			if err = spool(resp, wrap); err == nil {
+			if err = scrubError(spool(resp, wrap)); err == nil {
 				return resp, nil
 			}
 			if ctx.Err() != nil || !retryableError(err) {
@@ -235,14 +239,14 @@ func (p Policy) do(req *http.Request, spoolBody bool, wrap func(*http.Response) 
 
 		delay := p.delay(attempt, after)
 		if attempt >= p.Attempts || waited+delay > p.MaxWait {
-			e := &Error{URL: req.URL.Redacted(), Attempts: attempt, Status: status, Err: err}
+			e := &Error{URL: RedactURL(req.URL), Attempts: attempt, Status: status, Err: err}
 			if status == http.StatusTooManyRequests && isGitHub(req.URL) && os.Getenv("GITHUB_TOKEN") == "" {
 				e.hint = "; rate limited, set GITHUB_TOKEN to authenticate"
 			}
 			return nil, e
 		}
 		if err := sleep(ctx, delay); err != nil {
-			return nil, fmt.Errorf("GET %s: %w", req.URL.Redacted(), err)
+			return nil, fmt.Errorf("GET %s: %w", RedactURL(req.URL), err)
 		}
 		waited += delay
 	}
@@ -277,7 +281,9 @@ func (p Policy) try(client *http.Client, req *http.Request) (*http.Response, err
 		headers.Stop()
 	}
 	if err != nil {
-		err = timeoutCause(ctx, err)
+		// Before timeoutCause, which formats err into its text. The URL
+		// field first, then the text: an error text can hold another URL.
+		err = timeoutCause(ctx, scrubError(redactURLErrors(err)))
 		cancel(nil)
 		return nil, err
 	}
