@@ -136,15 +136,36 @@ func memberBase(name string) string {
 	return path.Base(strings.ReplaceAll(name, `\`, "/"))
 }
 
+// memberPath is the path that the name of a file in an archive gives after
+// path.Clean, with "/" and "\" as separators (as memberBase). Two names with
+// the same memberPath, such as "tool" and "./tool", are the same file when
+// the archive is unpacked.
+func memberPath(name string) string {
+	return path.Clean(strings.ReplaceAll(name, `\`, "/"))
+}
+
 // unsafeNameError refuses archive for the file name.
 func unsafeNameError(archive, name string) error {
 	return fmt.Errorf("refusing %s: the file name %q is absolute, names a drive or has a \"..\" element", archive, name)
 }
 
 // ambiguousError refuses archive because more than one file in it matches
-// the binary.
-func ambiguousError(archive, binary string, names nameList) error {
-	return fmt.Errorf("refusing %s: %d files in it match the binary %s: %s", archive, names.n, binary, names)
+// the binary, and the rule of selector does not choose one of them. execs
+// is the number of the matches with an execute bit, unknown the number of
+// the matches with an unknown mode (execUnknown).
+func ambiguousError(archive, binary string, names nameList, execs, unknown int) error {
+	modes := fmt.Sprintf("%d with an execute bit", execs)
+	if unknown > 0 {
+		modes += fmt.Sprintf(", %d with an unknown mode", unknown)
+	}
+	return fmt.Errorf("refusing %s: %d files in it match the binary %s (%s): %s", archive, names.n, binary, modes, names)
+}
+
+// samePathError refuses archive because n files in it have the path p of
+// the binary (memberPath). An unpack keeps only one of them, and tar and
+// unzip keep the last one.
+func samePathError(archive, binary, p string, n int) error {
+	return fmt.Errorf("refusing %s: %d files in it have the path %q of the binary %s", archive, n, p, binary)
 }
 
 // tieError refuses archive because no file matches the binary by name and
@@ -387,13 +408,29 @@ type entry struct {
 // for it.
 func (e entry) mayRun() bool { return e.exec != execUnset }
 
+// executable reports whether the archive gives the file an execute bit: a
+// tar file whose mode has one, or a zip file with a Unix mode that has one.
+func (e entry) executable() bool { return e.exec == execSet }
+
 // selector chooses the binary among the regular files of an archive, with
 // the same rule on every path:
 //   - A file that matches the binary by name is the binary, with or without
 //     an execute bit (b installs the binary with mode 0755). A file matches
 //     when its base name (memberBase) is the name of the binary; a tar
-//     preset also takes the names of tarFileMatches. Two or more matches
-//     refuse the archive as ambiguous.
+//     preset also takes the names of tarFileMatches.
+//   - When two or more files match, one of them is the binary only when
+//     exactly one has an execute bit (executable) and every other match is
+//     known to have none (execUnset). So a binary beside a completion
+//     script or a data file of the same name installs. A match with an
+//     unknown mode (execUnknown: a zip file without a Unix mode, or with a
+//     Unix mode without permission bits) can be the real binary, so it
+//     makes the set ambiguous. Two or more matches with an execute bit, none,
+//     or one beside a match with an unknown mode refuse the archive as
+//     ambiguous (ambiguousError).
+//   - The match so chosen must be the only match with its path (memberPath).
+//     When another match has the same path, such as "tool" twice, the
+//     archive is refused (samePathError), whatever the modes: an unpack
+//     keeps only one of them, and tar and unzip keep the last one.
 //   - When no file matches, the asset paths (fallback) take the single
 //     largest file that may run (mayRun). Two largest candidates of the
 //     same size refuse the archive.
@@ -401,10 +438,12 @@ type selector struct {
 	archive, binary string
 	none            string // the error when no file is the binary
 	fallback        bool
-	matches         nameList // the files that match by name
-	match           *entry   // the first of them
-	largest         *entry   // the first of the largest candidates
-	ties            nameList // the candidates of the largest size
+	matches         nameList       // the files that match by name
+	execs, unknown  int            // the matches with an execute bit, and with an unknown mode
+	paths           map[string]int // the number of matches of each memberPath
+	match, run      *entry         // the first match, and the first match with an execute bit
+	largest         *entry         // the first of the largest candidates
+	ties            nameList       // the candidates of the largest size
 }
 
 // add takes a regular file of the archive. match: it matches the binary by
@@ -415,6 +454,19 @@ func (s *selector) add(e entry, match, candidate bool) {
 		s.matches.add(e.name)
 		if s.match == nil {
 			s.match = &e
+		}
+		if s.paths == nil {
+			s.paths = map[string]int{}
+		}
+		s.paths[memberPath(e.name)]++
+		switch {
+		case e.executable():
+			s.execs++
+			if s.run == nil {
+				s.run = &e
+			}
+		case e.exec == execUnknown:
+			s.unknown++
 		}
 	case candidate && s.fallback:
 		switch {
@@ -432,8 +484,13 @@ func (s *selector) choose() (entry, error) {
 	switch {
 	case s.matches.n == 1:
 		return *s.match, nil
+	case s.matches.n > 1 && s.execs == 1 && s.unknown == 0:
+		if n := s.paths[memberPath(s.run.name)]; n > 1 {
+			return entry{}, samePathError(s.archive, s.binary, memberPath(s.run.name), n)
+		}
+		return *s.run, nil
 	case s.matches.n > 1:
-		return entry{}, ambiguousError(s.archive, s.binary, s.matches)
+		return entry{}, ambiguousError(s.archive, s.binary, s.matches, s.execs, s.unknown)
 	case s.largest == nil:
 		return entry{}, errors.New(s.none)
 	case s.ties.n > 1:

@@ -251,32 +251,35 @@ func TestExtract_UnsafeNames(t *testing.T) {
 			// bin/../tool is tool after path.Clean: not unsafe. Its base name
 			// is tool, so it matches the binary beside tool.
 			got, err := installFrom(t, p, archiveOf(t, p.kind, member{name: "bin/../tool", content: "tool v2\n"}, member{name: "tool", content: "tool v2\n"}))
-			wantRefused(t, got, err, `refusing tool.`+p.kind+`: 2 files in it match the binary tool: "bin/../tool", "tool"`, false)
+			wantRefused(t, got, err, `refusing tool.`+p.kind+`: 2 files in it match the binary tool (2 with an execute bit): "bin/../tool", "tool"`, false)
 		})
 	}
 }
 
 // TestExtract_Ambiguous: an archive in which more than one file matches the
-// binary is refused on every path, and the error names the files. A single
-// match installs, and on the asset paths it wins over a larger file.
+// binary is refused on every path when the rule of selector chooses none of
+// them, and the error names the files and counts their execute bits. Here
+// every match has an execute bit (TestExtract_ExecRule has the matches with
+// one execute bit). A single match installs, and on the asset paths it
+// wins over a larger file.
 func TestExtract_Ambiguous(t *testing.T) {
 	for _, p := range archivePaths {
 		archive := "tool." + p.kind
 		t.Run(p.name+", two dirs with the same name", func(t *testing.T) {
 			got, err := installFrom(t, p, archiveOf(t, p.kind,
 				member{name: "a/tool", content: "tool a\n"}, member{name: "b/tool", content: "tool b\n"}))
-			wantRefused(t, got, err, "refusing "+archive+`: 2 files in it match the binary tool: "a/tool", "b/tool"`, false)
+			wantRefused(t, got, err, "refusing "+archive+`: 2 files in it match the binary tool (2 with an execute bit): "a/tool", "b/tool"`, false)
 		})
 		t.Run(p.name+", a duplicate entry", func(t *testing.T) {
 			got, err := installFrom(t, p, archiveOf(t, p.kind,
 				member{name: "tool", content: "tool v2\n"}, member{name: "tool", content: "tool v3\n"}))
-			wantRefused(t, got, err, "refusing "+archive+`: 2 files in it match the binary tool: "tool", "tool"`, false)
+			wantRefused(t, got, err, "refusing "+archive+`: 2 files in it match the binary tool (2 with an execute bit): "tool", "tool"`, false)
 		})
 		t.Run(p.name+", a duplicate entry after other files", func(t *testing.T) {
 			got, err := installFrom(t, p, archiveOf(t, p.kind,
 				member{name: "tool", content: "tool v2\n"}, member{name: "README", content: "docs\n", mode: 0644},
 				member{name: "tool", content: "tool v3\n"}))
-			wantRefused(t, got, err, "refusing "+archive+`: 2 files in it match the binary tool: "tool", "tool"`, false)
+			wantRefused(t, got, err, "refusing "+archive+`: 2 files in it match the binary tool (2 with an execute bit): "tool", "tool"`, false)
 		})
 		t.Run(p.name+", a single match", func(t *testing.T) {
 			got, err := installFrom(t, p, archiveOf(t, p.kind,
