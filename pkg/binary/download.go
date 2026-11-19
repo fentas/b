@@ -3,6 +3,7 @@ package binary
 import (
 	"archive/tar"
 	"archive/zip"
+	"bufio"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -511,14 +512,57 @@ func (u *unpackLimit) Read(p []byte) (int, error) {
 // tarStream is a tar archive read from its start, through unpackLimit.
 type tarStream struct {
 	*tar.Reader
-	lim   *unpackLimit
-	kind  string // "gzip" or "xz"
-	close func() error
+	lim     *unpackLimit
+	kind    string       // "gzip" or "xz"
+	members *gzipMembers // gzip only
+	close   func() error
+}
+
+// gzipMembers reads the gzip members of a tar.gz one after the other, as one
+// stream: a tar archive can go on in the next member (concatenated gzip
+// files, or a compressor that writes a member per block). Once the tar
+// archive ended (last), it reads no next member: readToEnd reads the member
+// that holds the end of the tar archive to its end, and the bytes after
+// that member are not read. zr reads br, a bufio.Reader, so that zr reads no
+// byte past the end of a member and Reset finds the next member.
+type gzipMembers struct {
+	br    *bufio.Reader
+	zr    *gzip.Reader
+	ended bool // the member in zr ended, and its checksum is checked
+	last  bool // the tar archive ended
+}
+
+func (g *gzipMembers) Read(p []byte) (int, error) {
+	for {
+		if g.ended {
+			if g.last {
+				return 0, io.EOF
+			}
+			// Reset reads the header of the next member. It gives io.EOF
+			// when no byte follows: the end of the stream.
+			if err := g.zr.Reset(g.br); err != nil {
+				return 0, err
+			}
+			g.zr.Multistream(false) // Reset sets it to true
+			g.ended = false
+		}
+		n, err := g.zr.Read(p)
+		if err != io.EOF {
+			return n, err
+		}
+		// The next Read goes on in the next member, unless the tar
+		// archive ends in this one.
+		g.ended = true
+		if n > 0 {
+			return n, nil
+		}
+	}
 }
 
 // openTar opens the tar archive in f from its start. compression is "gz" or
-// "xz". It reads one compressed stream: one gzip member, or one xz stream.
-// The bytes after that stream are not read (readToEnd).
+// "xz". A tar archive can go on over several gzip members (gzipMembers); an
+// xz stream must hold all of it. After the tar archive, b reads no next
+// member or stream (readToEnd).
 func openTar(f archiveFile, compression, archive string) (*tarStream, error) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("reading %s: %w", archive, err)
@@ -527,12 +571,14 @@ func openTar(f archiveFile, compression, archive string) (*tarStream, error) {
 	var r io.Reader
 	switch compression {
 	case "gz":
-		gzipReader, err := gzip.NewReader(f)
+		br := bufio.NewReader(f)
+		gzipReader, err := gzip.NewReader(br)
 		if err != nil {
 			return nil, fmt.Errorf("reading the gzip header of %s: %w", archive, err)
 		}
 		gzipReader.Multistream(false)
-		r, ts.kind, ts.close = gzipReader, "gzip", gzipReader.Close
+		ts.members = &gzipMembers{br: br, zr: gzipReader}
+		r, ts.kind, ts.close = ts.members, "gzip", gzipReader.Close
 	case "xz":
 		xzReader, err := xz.ReaderConfig{SingleStream: true}.NewReader(f)
 		if err != nil {
@@ -565,11 +611,14 @@ func (ts *tarStream) fail(err error, archive string) error {
 const xzDataAfterStream = "xz: unexpected data after stream"
 
 // readToEnd reads the compressed stream of ts after the end of the tar
-// archive, to the end of the stream, so that gzip or xz checks the checksum
-// there. The bytes after that stream (padding, a second gzip member or xz
-// stream, other bytes) are not decompressed and do not count: as before
-// this check, b ignores them.
+// archive, to the end of the gzip member or the xz stream that holds that
+// end, so that gzip or xz checks the checksum there. The bytes after it
+// (padding, a next gzip member or xz stream, other bytes) are not
+// decompressed and do not count: as before this check, b ignores them.
 func (ts *tarStream) readToEnd(archive string) error {
+	if ts.members != nil {
+		ts.members.last = true
+	}
 	_, err := io.Copy(io.Discard, ts.lim)
 	switch {
 	case err == nil:

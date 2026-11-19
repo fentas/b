@@ -177,8 +177,9 @@ and the error names the archive and its files:
 - When no file matches, b takes the largest candidate of a release asset: a
   file with an execute bit, or any regular file of a zip archive without Unix
   modes. Two largest candidates of the same size refuse the archive.
-- After the tar archive, b reads the gzip or xz stream to its end and checks
-  its checksum. b does not read the bytes after that stream.
+- A tar archive can go on over several gzip members, but one xz stream must
+  hold all of it. After the tar archive, b reads that gzip member or xz stream
+  to its end and checks its checksum. b does not read the bytes after it.
 
 b installs a binary of at most 2 GiB (2147483648 bytes) from a download of at
 most 2 GiB. A larger binary or download is refused: by its size when the

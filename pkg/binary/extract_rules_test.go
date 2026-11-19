@@ -305,6 +305,44 @@ func TestExtract_StreamEnd(t *testing.T) {
 	}
 }
 
+// TestExtract_GzipMembers: a tar archive can go on in the next gzip member,
+// as it could before the stream-end check: the end of a member is not the
+// end of the tar archive, also when it falls between two entries. After the
+// member that holds the end of the tar archive, b reads no next member. An
+// xz stream must hold the whole tar archive: a tar.xz in two streams is
+// refused.
+func TestExtract_GzipMembers(t *testing.T) {
+	raw := tarMembers(t, member{name: "helper", content: "a larger helper binary\n"}, member{name: "tool", content: "tool v2\n"})
+	// helper: a header (0-511) and one block of content (512-1023); then
+	// the header of tool at 1024.
+	cuts := []struct {
+		name string
+		at   int
+	}{{"between two entries", 1024}, {"inside a header", 1100}, {"inside the content of an entry", 520}}
+	for _, p := range tarPaths {
+		for _, cut := range cuts {
+			t.Run(p.name+", two streams, a cut "+cut.name, func(t *testing.T) {
+				body := append(compressed(t, p.kind, raw[:cut.at]), compressed(t, p.kind, raw[cut.at:])...)
+				got, err := installFrom(t, p, body)
+				if p.kind == "tar.xz" {
+					wantRefused(t, got, err, "reading the tar archive tool.tar.xz: xz: unexpected data after stream", true)
+					return
+				}
+				wantInstalled(t, got, err, "tool v2\n")
+			})
+		}
+		if p.kind == "tar.gz" {
+			t.Run(p.name+", a tar archive in two members, then a member above the unpack limit", func(t *testing.T) {
+				withLimit(t, &maxUnpackedSize, int64(len(raw)))
+				body := append(compressed(t, p.kind, raw[:1100]), compressed(t, p.kind, raw[1100:])...)
+				body = append(body, compressed(t, p.kind, make([]byte, 64<<10))...)
+				got, err := installFrom(t, p, body)
+				wantInstalled(t, got, err, "tool v2\n")
+			})
+		}
+	}
+}
+
 // TestExtract_MemberNamesAreQuoted: an error that names a file of an archive
 // quotes it (%q), so a control character in the name does not reach the
 // terminal.
