@@ -248,13 +248,9 @@ func TestExtract_UnsafeNames(t *testing.T) {
 			}
 		}
 		t.Run(p.name+", a name with a .. element that stays inside", func(t *testing.T) {
-			// bin/../tool is tool after path.Clean: not unsafe. The zip preset
-			// path compares the whole name, so it does not match there.
+			// bin/../tool is tool after path.Clean: not unsafe. Its base name
+			// is tool, so it matches the binary beside tool.
 			got, err := installFrom(t, p, archiveOf(t, p.kind, member{name: "bin/../tool", content: "tool v2\n"}, member{name: "tool", content: "tool v2\n"}))
-			if p.kind == "zip" && !p.asset {
-				wantInstalled(t, got, err, "tool v2\n")
-				return
-			}
 			wantRefused(t, got, err, `refusing tool.`+p.kind+`: 2 files in it match the binary tool: "bin/../tool", "tool"`, false)
 		})
 	}
@@ -269,11 +265,6 @@ func TestExtract_Ambiguous(t *testing.T) {
 		t.Run(p.name+", two dirs with the same name", func(t *testing.T) {
 			got, err := installFrom(t, p, archiveOf(t, p.kind,
 				member{name: "a/tool", content: "tool a\n"}, member{name: "b/tool", content: "tool b\n"}))
-			if p.kind == "zip" && !p.asset {
-				// The zip preset path compares the whole name.
-				wantRefused(t, got, err, "file tool not found", false)
-				return
-			}
 			wantRefused(t, got, err, "refusing "+archive+`: 2 files in it match the binary tool: "a/tool", "b/tool"`, false)
 		})
 		t.Run(p.name+", a duplicate entry", func(t *testing.T) {

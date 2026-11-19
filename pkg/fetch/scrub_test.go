@@ -32,6 +32,18 @@ func TestScrubURLs(t *testing.T) {
 		{`an escape in the query: "https://host.test/x?t=a\x00b-s3cr3t"`, `an escape in the query: "https://host.test/x"`},
 		{"no URL here: a@b?c#d", "no URL here: a@b?c#d"},
 		{"", ""},
+		// The authority ends at the first "/", "?" or "#": an "@" after it is
+		// not the end of a user info.
+		{"an @ in the query: https://api.test?token=user@SECRET", "an @ in the query: https://api.test"},
+		{"an @ in the query, then a path: https://host.test?next=a@evil.test/p", "an @ in the query, then a path: https://host.test"},
+		{"an @ in the fragment: https://host.test#f@evil.test", "an @ in the fragment: https://host.test"},
+		{"an @ in the path and the query: https://host.test/a@b?t=c@d", "an @ in the path and the query: https://host.test/a@b"},
+		{"user info and an @ in the query: https://u:p@host.test?t=a@SECRET", "user info and an @ in the query: https://host.test"},
+		// A "'" is a URL character.
+		{"a quote in the user info: https://us'er:pa55@host.test/x", "a quote in the user info: https://host.test/x"},
+		{"a quote in the query: https://host.test/x?token=abc'def", "a quote in the query: https://host.test/x"},
+		{"fetching 'https://u:p@host.test/x?t=s3cr3t' failed", "fetching 'https://host.test/x' failed"},
+		{"in quotes, no path: 'https://u:p@host.test?t=s3cr3t'.", "in quotes, no path: 'https://host.test'."},
 	} {
 		if got := ScrubURLs(tc.in); got != tc.want {
 			t.Errorf("ScrubURLs(%q) = %q, want %q", tc.in, got, tc.want)
@@ -131,6 +143,26 @@ func TestErrorBody(t *testing.T) {
 		if got := ErrorBody(strings.NewReader(straddle)); strings.Contains(got, secret) {
 			t.Errorf("ErrorBody kept %q: %q", secret, got)
 		}
+	}
+
+	// A URL that runs to the end of the read (maxErrorRead bytes) is cut to
+	// its scheme: the "@" of its user info can lie past the read. Also when
+	// the read ends after a backslash, the start of an escape.
+	for _, tc := range []struct{ name, body string }{
+		{"a user info across the read limit",
+			"error: https://" + strings.Repeat("s", maxErrorRead) + ":p-pass@api.test/x"},
+		{"a backslash at the read limit",
+			"error: https://" + strings.Repeat("s", maxErrorRead-len("error: https://")-1) + `\"s:p-pass@api.test/x`},
+	} {
+		if got := ErrorBody(strings.NewReader(tc.body)); got != "error: https://" {
+			t.Errorf("%s: ErrorBody = %.40q (%d bytes), want %q", tc.name, got, len(got), "error: https://")
+		}
+	}
+	// A URL that ends before the end of the read stays, without its user
+	// info and its query, also when the body is longer than the read.
+	complete := "see https://u-name:p-pass@api.test/x?t=s3cr3t " + strings.Repeat("y", maxErrorRead)
+	if got, want := ErrorBody(strings.NewReader(complete)), "see https://api.test/x "+strings.Repeat("y", maxErrorBody-len("see https://api.test/x "))+"..."; got != want {
+		t.Errorf("ErrorBody = %.60q, want %.60q", got, want)
 	}
 
 	// A cut inside a multi-byte rune drops the part of the rune.

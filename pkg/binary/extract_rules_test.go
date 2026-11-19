@@ -88,46 +88,32 @@ func TestExtract_DriveNames(t *testing.T) {
 	})
 }
 
-// TestExtract_ExecRule: when two or more files match the binary by name,
-// only those with an execute bit count where the archive gives Unix modes.
-// One of them installs, on every path; two of them refuse the archive.
+// TestExtract_ExecRule: one rule on every path. A file whose base name is
+// the binary is the binary, with or without an execute bit. The execute bit
+// counts only for the fallback of the asset paths, when no file matches by
+// name. Two or more files that match by name refuse the archive, whatever
+// their modes.
 func TestExtract_ExecRule(t *testing.T) {
 	bin := member{name: "tool", content: "tool v2\n"}
 	completion := member{name: "completions/bash/tool", content: "complete -F _tool tool\n", mode: 0644}
 	for _, p := range append(archivePaths, tarPaths[1], tarPaths[3]) {
 		archive := "tool." + p.kind
-		t.Run(p.name+", the binary before a completion script of the same name", func(t *testing.T) {
-			got, err := installFrom(t, p, archiveFor(t, p.kind, bin, completion))
+		t.Run(p.name+", the binary without an execute bit beside an executable helper", func(t *testing.T) {
+			got, err := installFrom(t, p, archiveFor(t, p.kind,
+				member{name: "bin/tool", content: "tool v2\n", mode: 0644}, member{name: "bin/helper", content: "a larger helper binary\n"}))
 			wantInstalled(t, got, err, "tool v2\n")
-		})
-		t.Run(p.name+", the binary after a completion script of the same name", func(t *testing.T) {
-			got, err := installFrom(t, p, archiveFor(t, p.kind, completion, bin))
-			wantInstalled(t, got, err, "tool v2\n")
-		})
-		t.Run(p.name+", two files named tool, one with an execute bit", func(t *testing.T) {
-			got, err := installFrom(t, p, archiveFor(t, p.kind, member{name: "tool", content: "not this\n", mode: 0644}, bin))
-			wantInstalled(t, got, err, "tool v2\n")
-		})
-		t.Run(p.name+", two executables named tool", func(t *testing.T) {
-			got, err := installFrom(t, p, archiveFor(t, p.kind, member{name: "tool", content: "tool a\n"}, member{name: "tool", content: "tool b\n"}, completion))
-			// The error lists every match by name. The tar asset path sees
-			// only the files with an execute bit, and the zip preset path
-			// compares the whole name.
-			want := `"tool", "tool", "completions/bash/tool"`
-			if p.asset && p.kind != "zip" || p.kind == "zip" && !p.asset {
-				want = `"tool", "tool"`
-			}
-			wantRefused(t, got, err, "refusing "+archive+": "+strconv.Itoa(strings.Count(want, ",")+1)+" files in it match the binary tool: "+want, false)
 		})
 		t.Run(p.name+", one match without an execute bit", func(t *testing.T) {
 			got, err := installFrom(t, p, archiveFor(t, p.kind, member{name: "tool", content: "tool v2\n", mode: 0644}))
-			if p.asset && p.kind != "zip" {
-				// The tar asset path selects only among the files with an
-				// execute bit.
-				wantRefused(t, got, err, "no executable found in archive for tool", false)
-				return
-			}
 			wantInstalled(t, got, err, "tool v2\n")
+		})
+		t.Run(p.name+", the binary and a completion script of the same name", func(t *testing.T) {
+			got, err := installFrom(t, p, archiveFor(t, p.kind, completion, bin))
+			wantRefused(t, got, err, "refusing "+archive+`: 2 files in it match the binary tool: "completions/bash/tool", "tool"`, false)
+		})
+		t.Run(p.name+", two executables named tool", func(t *testing.T) {
+			got, err := installFrom(t, p, archiveFor(t, p.kind, member{name: "tool", content: "tool a\n"}, member{name: "tool", content: "tool b\n"}, completion))
+			wantRefused(t, got, err, "refusing "+archive+`: 3 files in it match the binary tool: "tool", "tool", "completions/bash/tool"`, false)
 		})
 	}
 	for _, p := range []archivePath{{name: "a zip preset", kind: "zip"}, {name: "a zip asset", kind: "zip", asset: true}} {
@@ -187,18 +173,14 @@ func TestExtract_ZipFallbackMayRun(t *testing.T) {
 }
 
 // TestExtract_BackslashSeparator: matching by base name takes "/" and "\" as
-// separators, as unsafeName does, on every OS. So bin\tool matches the binary
-// tool and wins over a larger file. The zip preset path compares the whole
-// name.
+// separators, as unsafeName does, on every OS and every path (the zip preset
+// included). So bin\tool matches the binary tool and wins over a larger
+// file.
 func TestExtract_BackslashSeparator(t *testing.T) {
 	for _, p := range append(archivePaths, tarPaths[1], tarPaths[3]) {
 		t.Run(p.name, func(t *testing.T) {
 			got, err := installFrom(t, p, archiveFor(t, p.kind,
 				member{name: `bin\tool`, content: "tool v2\n"}, member{name: "other", content: "a larger file that is not the binary\n"}))
-			if p.kind == "zip" && !p.asset {
-				wantRefused(t, got, err, "file tool not found", false)
-				return
-			}
 			wantInstalled(t, got, err, "tool v2\n")
 		})
 	}
@@ -275,29 +257,46 @@ func TestExtract_AmbiguousListsTenNames(t *testing.T) {
 }
 
 // TestExtract_StreamEnd: after the tar archive, b reads the compressed
-// stream to its end and refuses the archive on any error there: a gzip
-// trailer with a bad checksum, and bytes after the stream that are not a
-// gzip or xz stream.
+// stream (one gzip member, or one xz stream) to its end, and refuses the
+// archive when the checksum there is bad. b does not read the bytes after
+// that stream: zero padding, other bytes, and a second gzip member or xz
+// stream, also one that unpacks to more than the unpack limit.
 func TestExtract_StreamEnd(t *testing.T) {
 	good := tarMembers(t, member{name: "tool", content: "tool v2\n"})
 	for _, p := range tarPaths {
 		archive := "tool." + p.kind
 		kind := map[string]string{"tar.gz": "gzip", "tar.xz": "xz"}[p.kind]
-		if p.kind == "tar.gz" {
-			t.Run(p.name+", a bad checksum in the gzip trailer", func(t *testing.T) {
-				body := compressed(t, p.kind, good)
-				body[len(body)-8] ^= 0xff // the first byte of the CRC-32
-				got, err := installFrom(t, p, body)
-				wantRefused(t, got, err, "refusing "+archive+": the gzip stream after the tar archive is damaged: gzip: invalid checksum", false)
-				if !errors.Is(err, gzip.ErrChecksum) {
-					t.Errorf("error %q does not wrap gzip.ErrChecksum", err)
-				}
-			})
-		}
-		t.Run(p.name+", bytes after the stream", func(t *testing.T) {
-			body := append(compressed(t, p.kind, good), "these bytes are not a stream"...)
+		t.Run(p.name+", a bad checksum at the end of the stream", func(t *testing.T) {
+			body := compressed(t, p.kind, good)
+			// gzip: the first byte of the CRC-32 in the trailer (8 bytes).
+			// xz: the first byte of the CRC-32 of the stream footer (12
+			// bytes).
+			body[len(body)-map[string]int{"tar.gz": 8, "tar.xz": 12}[p.kind]] ^= 0xff
 			got, err := installFrom(t, p, body)
 			wantRefused(t, got, err, "refusing "+archive+": the "+kind+" stream after the tar archive is damaged: ", true)
+			if p.kind == "tar.gz" && !errors.Is(err, gzip.ErrChecksum) {
+				t.Errorf("error %q does not wrap gzip.ErrChecksum", err)
+			}
+		})
+		for _, after := range []struct {
+			name  string
+			bytes []byte
+		}{
+			{"zero padding", make([]byte, 1024)},
+			{"bytes that are not a stream", []byte("these bytes are not a stream")},
+		} {
+			t.Run(p.name+", "+after.name+" after the stream", func(t *testing.T) {
+				got, err := installFrom(t, p, append(compressed(t, p.kind, good), after.bytes...))
+				wantInstalled(t, got, err, "tool v2\n")
+			})
+		}
+		t.Run(p.name+", a second stream above the unpack limit", func(t *testing.T) {
+			// The first stream unpacks to the limit. If b read the second
+			// stream, the archive would unpack to more than the limit.
+			withLimit(t, &maxUnpackedSize, int64(len(good)))
+			body := append(compressed(t, p.kind, good), compressed(t, p.kind, make([]byte, 64<<10))...)
+			got, err := installFrom(t, p, body)
+			wantInstalled(t, got, err, "tool v2\n")
 		})
 		t.Run(p.name+", a clean end", func(t *testing.T) {
 			got, err := installFrom(t, p, compressed(t, p.kind, good))
@@ -318,13 +317,11 @@ func TestExtract_MemberNamesAreQuoted(t *testing.T) {
 		}
 	}
 	for _, p := range append(archivePaths, tarPaths[1], tarPaths[3]) {
-		if p.kind != "zip" || p.asset {
-			t.Run(p.name+", an empty file", func(t *testing.T) {
-				got, err := installFrom(t, p, archiveFor(t, p.kind, member{name: name, content: ""}))
-				wantRefused(t, got, err, "extraction of "+strconv.Quote(name)+" from tool."+p.kind+" wrote 0 bytes: ", true)
-				noEsc(t, err)
-			})
-		}
+		t.Run(p.name+", an empty file", func(t *testing.T) {
+			got, err := installFrom(t, p, archiveFor(t, p.kind, member{name: name, content: ""}))
+			wantRefused(t, got, err, "extraction of "+strconv.Quote(name)+" from tool."+p.kind+" wrote 0 bytes: ", true)
+			noEsc(t, err)
+		})
 		t.Run(p.name+", an unsafe name", func(t *testing.T) {
 			got, err := installFrom(t, p, archiveFor(t, p.kind, member{name: "/\x1b[2Jtool", content: "x\n"}))
 			wantRefused(t, got, err, "the file name "+strconv.Quote("/\x1b[2Jtool")+" is absolute", true)

@@ -381,28 +381,27 @@ type entry struct {
 	exec  execMode
 }
 
-// mayRun reports whether the file can be the binary when more than one file
-// matches it: it has an execute bit, or the archive gives no mode for it.
+// mayRun reports whether the fallback can take the file when no file matches
+// the binary by name: it has an execute bit, or the archive gives no mode
+// for it.
 func (e entry) mayRun() bool { return e.exec != execUnset }
 
 // selector chooses the binary among the regular files of an archive, with
 // the same rule on every path:
-//   - When one file matches the binary by name, it is the binary.
-//   - When two or more files match, only those that may run count (mayRun).
-//     If one of them remains, it is the binary; else the archive is refused
-//     as ambiguous. So a binary with an execute bit beside a completion
-//     script of the same name installs, and two executables of that name
-//     refuse the archive.
+//   - A file that matches the binary by name is the binary, with or without
+//     an execute bit (b installs the binary with mode 0755). A file matches
+//     when its base name (memberBase) is the name of the binary; a tar
+//     preset also takes the names of tarFileMatches. Two or more matches
+//     refuse the archive as ambiguous.
 //   - When no file matches, the asset paths (fallback) take the single
-//     largest candidate. Two largest candidates of the same size refuse the
-//     archive.
+//     largest file that may run (mayRun). Two largest candidates of the
+//     same size refuse the archive.
 type selector struct {
 	archive, binary string
 	none            string // the error when no file is the binary
 	fallback        bool
 	matches         nameList // the files that match by name
-	runnable        nameList // the matches that may run
-	match, run      *entry   // the first of each
+	match           *entry   // the first of them
 	largest         *entry   // the first of the largest candidates
 	ties            nameList // the candidates of the largest size
 }
@@ -415,12 +414,6 @@ func (s *selector) add(e entry, match, candidate bool) {
 		s.matches.add(e.name)
 		if s.match == nil {
 			s.match = &e
-		}
-		if e.mayRun() {
-			s.runnable.add(e.name)
-			if s.run == nil {
-				s.run = &e
-			}
 		}
 	case candidate && s.fallback:
 		switch {
@@ -438,8 +431,6 @@ func (s *selector) choose() (entry, error) {
 	switch {
 	case s.matches.n == 1:
 		return *s.match, nil
-	case s.matches.n > 1 && s.runnable.n == 1:
-		return *s.run, nil
 	case s.matches.n > 1:
 		return entry{}, ambiguousError(s.archive, s.binary, s.matches)
 	case s.largest == nil:
@@ -526,7 +517,8 @@ type tarStream struct {
 }
 
 // openTar opens the tar archive in f from its start. compression is "gz" or
-// "xz".
+// "xz". It reads one compressed stream: one gzip member, or one xz stream.
+// The bytes after that stream are not read (readToEnd).
 func openTar(f archiveFile, compression, archive string) (*tarStream, error) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return nil, fmt.Errorf("reading %s: %w", archive, err)
@@ -539,9 +531,10 @@ func openTar(f archiveFile, compression, archive string) (*tarStream, error) {
 		if err != nil {
 			return nil, fmt.Errorf("reading the gzip header of %s: %w", archive, err)
 		}
+		gzipReader.Multistream(false)
 		r, ts.kind, ts.close = gzipReader, "gzip", gzipReader.Close
 	case "xz":
-		xzReader, err := xz.NewReader(f)
+		xzReader, err := xz.ReaderConfig{SingleStream: true}.NewReader(f)
 		if err != nil {
 			return nil, fmt.Errorf("reading the xz header of %s: %w", archive, err)
 		}
@@ -563,14 +556,40 @@ func (ts *tarStream) fail(err error, archive string) error {
 	return fmt.Errorf("reading the tar archive %s: %w", archive, err)
 }
 
+// xzDataAfterStream is the text of the error that the xz reader in
+// single-stream mode gives for bytes after the stream. It gives it only
+// after it read the stream to its end and checked the index and the footer.
+// The xz package does not export the error. If a later version changes the
+// text, b refuses such an archive as damaged, and TestExtract_StreamEnd
+// fails.
+const xzDataAfterStream = "xz: unexpected data after stream"
+
+// readToEnd reads the compressed stream of ts after the end of the tar
+// archive, to the end of the stream, so that gzip or xz checks the checksum
+// there. The bytes after that stream (padding, a second gzip member or xz
+// stream, other bytes) are not decompressed and do not count: as before
+// this check, b ignores them.
+func (ts *tarStream) readToEnd(archive string) error {
+	_, err := io.Copy(io.Discard, ts.lim)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ts.lim.err):
+		return err
+	case ts.kind == "xz" && err.Error() == xzDataAfterStream:
+		return nil
+	}
+	return fmt.Errorf("refusing %s: the %s stream after the tar archive is damaged: %w", archive, ts.kind, err)
+}
+
 // selectTar reads the whole tar archive in f and selects the binary
-// (selector). A preset selects the regular files that tarFileMatches. A
-// release asset selects by base name among the regular files with an
-// execute bit, with the fallback. The archive is refused when it holds a
-// regular file with an unsafe name, has more than maxEntries entries or
-// unpacks to more than maxUnpackedSize bytes, and when its compressed stream
-// does not end cleanly after the tar archive (gzip and xz check a checksum
-// at the end).
+// (selector). A preset matches the regular files that tarFileMatches; a
+// release asset matches by base name, with the fallback over the regular
+// files with an execute bit. The archive is refused when it holds a regular
+// file with an unsafe name, has more than maxEntries entries or unpacks to
+// more than maxUnpackedSize bytes, and when the compressed stream does not
+// end cleanly after the tar archive (gzip and xz check a checksum at its
+// end, readToEnd).
 func (b *Binary) selectTar(f archiveFile, compression, archive string, preset bool) (entry, error) {
 	ts, err := openTar(f, compression, archive)
 	if err != nil {
@@ -607,22 +626,16 @@ func (b *Binary) selectTar(f archiveFile, compression, archive string, preset bo
 			return entry{}, unsafeNameError(archive, header.Name)
 		}
 		e := entry{index: i, name: header.Name, size: uint64(header.Size), exec: tarExec(header.Mode)}
+		match := memberBase(header.Name) == b.Name
 		if preset {
-			ok, err := b.tarFileMatches(header.Name)
-			if err != nil {
+			if match, err = b.tarFileMatches(header.Name); err != nil {
 				return entry{}, err
 			}
-			s.add(e, ok, false)
-		} else if e.exec == execSet {
-			s.add(e, memberBase(header.Name) == b.Name, true)
 		}
+		s.add(e, match, e.mayRun())
 	}
-	// The tar archive ends before the compressed stream does.
-	if _, err := io.Copy(io.Discard, ts.lim); err != nil {
-		if errors.Is(err, ts.lim.err) {
-			return entry{}, err
-		}
-		return entry{}, fmt.Errorf("refusing %s: the %s stream after the tar archive is damaged: %w", archive, ts.kind, err)
+	if err := ts.readToEnd(archive); err != nil {
+		return entry{}, err
 	}
 	return s.choose()
 }
@@ -682,11 +695,11 @@ func (b *Binary) tarFileMatches(name string) (bool, error) {
 }
 
 // extractZip installs the binary from the zip archive in f, by the rule of
-// selector. A preset selects the regular files whose whole name is b.Name. A
-// release asset selects the regular files whose base name (memberBase) is
-// b.Name, with the fallback over the files that may run (mayRun): without a
-// Unix mode, every regular file. A symlink, a device or a directory is never
-// the binary. A regular file with an unsafe name refuses the archive.
+// selector: a preset and a release asset match the regular files whose base
+// name (memberBase) is b.Name. A release asset has the fallback over the
+// files that may run (mayRun): without a Unix mode, every regular file. A
+// symlink, a device or a directory is never the binary. A regular file with
+// an unsafe name refuses the archive.
 func (b *Binary) extractZip(f archiveFile, archive string, preset bool) error {
 	zipReader, err := openZip(f, archive)
 	if err != nil {
@@ -706,11 +719,7 @@ func (b *Binary) extractZip(f archiveFile, archive string, preset bool) error {
 			return unsafeNameError(archive, zf.Name)
 		}
 		e := entry{index: i, name: zf.Name, size: zf.UncompressedSize64, exec: zipExec(zf)}
-		if preset {
-			s.add(e, zf.Name == b.Name, false)
-		} else {
-			s.add(e, memberBase(zf.Name) == b.Name, e.mayRun())
-		}
+		s.add(e, memberBase(zf.Name) == b.Name, e.mayRun())
 	}
 	chosen, err := s.choose()
 	if err != nil {
@@ -857,10 +866,10 @@ func (b *Binary) downloadAsset(asset *provider.Asset) error {
 }
 
 // extractFromTarAuto installs the binary from a tar archive of a release
-// asset (extractTar). The candidates are the regular files with an execute
-// bit. The binary is the candidate whose base name is b.Name, by the rule
-// of selector; without one, the single largest candidate (also when it is
-// the only one). archive names the archive in errors.
+// asset (extractTar). The binary is the regular file whose base name is
+// b.Name, by the rule of selector; without one, the single largest regular
+// file with an execute bit (also when it is the only one). archive names
+// the archive in errors.
 func (b *Binary) extractFromTarAuto(f archiveFile, compression, archive string) error {
 	return b.extractTar(f, compression, archive, false)
 }

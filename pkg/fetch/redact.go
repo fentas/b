@@ -52,20 +52,22 @@ func redactURLErrors(err error) error {
 }
 
 // urlInText matches a URL in a text: a scheme, "://", then the characters up
-// to a space, a quote or an angle bracket. A backslash escape (as %q writes
-// one) stays in the match.
-var urlInText = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://(?:\\.|[^\s"'<>` + "`" + `\\])*`)
+// to a space, a double quote, a backquote or an angle bracket. A backslash
+// escape (as %q writes one) stays in the match. A "'" is a URL character, so
+// it stays in the match too (a "'" at the end of a match is urlTail).
+var urlInText = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://(?:\\.|[^\s"<>` + "`" + `\\])*`)
 
 // urlTail is the end of a URL match that belongs to the text after the URL:
-// punctuation (": ", ", ", ".") and an escaped quote (the end of a string in
-// a text that %q wrote).
-var urlTail = regexp.MustCompile(`(?:\\["'` + "`" + `]|[:,.;)\]])+$`)
+// punctuation (": ", ", ", "."), a "'" (the end of a quote) and an escaped
+// quote (the end of a string in a text that %q wrote).
+var urlTail = regexp.MustCompile(`(?:\\["'` + "`" + `]|[':,.;)\]])+$`)
 
 // ScrubURLs returns s with each URL in it cut to its scheme, host and path:
 // the user info, the query and the fragment go. It works on the text, so it
-// also cuts a URL that does not parse. The user info is all up to the last
-// "@" before the first "/" after the scheme; without a "/", all up to the
-// last "@". Punctuation and an escaped quote at the end of a URL stay.
+// also cuts a URL that does not parse. The authority of a URL ends at the
+// first "/", "?" or "#" after the scheme, and its user info is all up to the
+// last "@" in the authority. Punctuation, a "'" and an escaped quote at the
+// end of a URL stay.
 func ScrubURLs(s string) string {
 	return urlInText.ReplaceAllStringFunc(s, scrubURL)
 }
@@ -75,7 +77,7 @@ func scrubURL(raw string) string {
 	raw = raw[:len(raw)-len(tail)]
 	i := strings.Index(raw, "://") + len("://")
 	scheme, rest := raw[:i], raw[i:]
-	end := strings.IndexByte(rest, '/')
+	end := strings.IndexAny(rest, "/?#")
 	if end < 0 {
 		end = len(rest)
 	}
@@ -117,16 +119,41 @@ func scrubError(err error) error {
 // maxErrorBody is the most bytes of a response body that an error quotes.
 const maxErrorBody = 512
 
+// maxErrorRead is the most bytes of a response body that ErrorBody reads.
+const maxErrorRead = 8 * maxErrorBody
+
 // ErrorBody reads the start of a response body for an error text: at most
 // maxErrorBody bytes, with the URLs in it cut (ScrubURLs). An API can echo
-// the URL of the request, with its token, in an error body. ErrorBody cuts
-// the URLs before it cuts the text, so that the cut cannot keep a part of a
-// URL that ScrubURLs drops.
+// the URL of the request, with its token, in an error body. ErrorBody reads
+// maxErrorRead bytes and cuts the URLs before it cuts the text, so that the
+// cut cannot keep a part of a URL that ScrubURLs drops. A read of
+// maxErrorRead bytes can end inside a URL: cutOpenURL cuts that URL first.
 func ErrorBody(body io.Reader) string {
-	raw, _ := io.ReadAll(io.LimitReader(body, 8*maxErrorBody))
-	s := ScrubURLs(string(raw))
+	raw, _ := io.ReadAll(io.LimitReader(body, maxErrorRead))
+	s := string(raw)
+	if len(raw) == maxErrorRead {
+		s = cutOpenURL(s)
+	}
+	s = ScrubURLs(s)
 	if len(s) > maxErrorBody {
 		s = strings.ToValidUTF8(s[:maxErrorBody], "") + "..."
 	}
 	return s
+}
+
+// cutOpenURL cuts the last URL in s to its scheme when that URL runs to the
+// end of s: s is the start of a longer text, so the "@" that ends the user
+// info of that URL can lie after s, where ScrubURLs does not see it. A URL
+// match also ends before a backslash at the end of s (the start of an
+// escape), so that URL is cut too.
+func cutOpenURL(s string) string {
+	locs := urlInText.FindAllStringIndex(s, -1)
+	if len(locs) == 0 {
+		return s
+	}
+	start, end := locs[len(locs)-1][0], locs[len(locs)-1][1]
+	if end != len(s) && s[end:] != `\` {
+		return s
+	}
+	return s[:start+strings.Index(s[start:], "://")+len("://")]
 }

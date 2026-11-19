@@ -167,18 +167,24 @@ and the error names the archive and its files:
   header gives.
 - Only a regular file can be the binary. A symlink, a directory or a device in
   a zip archive is never installed.
-- An archive that holds a regular file with an absolute name (`/tool`) or a
-  `..` element (`../tool`) is refused.
-- An archive in which more than one file matches the binary is refused. For a
-  release asset, a file matches when its name without the directory is the
-  name of the binary. When no file matches, b takes the largest candidate: an
-  executable file of a tar archive, or any regular file of a zip archive. Two
-  largest candidates of the same size refuse the archive.
+- An archive that holds a regular file with an absolute name (`/tool`), a
+  drive name (`C:\tool`) or a `..` element (`../tool`) is refused.
+- A file matches the binary when its name without the directory is the name
+  of the binary (a preset of a tar archive can also give the file name). The
+  file matches with or without an execute bit: b installs the binary with mode
+  `0755`. An archive in which more than one file matches the binary is
+  refused.
+- When no file matches, b takes the largest candidate of a release asset: a
+  file with an execute bit, or any regular file of a zip archive without Unix
+  modes. Two largest candidates of the same size refuse the archive.
+- After the tar archive, b reads the gzip or xz stream to its end and checks
+  its checksum. b does not read the bytes after that stream.
 
 b installs a binary of at most 2 GiB (2147483648 bytes) from a download of at
 most 2 GiB. A larger binary or download is refused: by its size when the
-archive header or the `Content-Length` gives one, else while b reads it. There
-is no setting for these limits.
+archive header or the `Content-Length` gives one, else while b reads it. A tar
+archive that unpacks to more than 8 GiB, and an archive with more than 100000
+entries, are refused too. There is no setting for these limits.
 
 **Solution**: an archive that b refuses does not change when you try again.
 Read the file names in the error, and report the archive to the project that
