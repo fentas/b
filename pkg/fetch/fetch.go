@@ -187,7 +187,8 @@ func Get(ctx context.Context, rawURL string) (*http.Response, error) {
 // temp file before it returns, so a body that the network cuts short or
 // stops is retried from byte zero, and a partial body never reaches the
 // caller. The Body of the returned 200 response reads that file, and Close
-// removes it; ContentLength is the file size.
+// removes it; ContentLength is the file size. The Body also implements
+// io.ReaderAt and io.Seeker, so a caller can read the file at an offset.
 //
 // wrap, if not nil, is called for each try that gets a 200 and returns the
 // reader to copy the body from (for example, to show progress).
@@ -226,7 +227,7 @@ func (p Policy) do(req *http.Request, spoolBody bool, wrap func(*http.Response) 
 			after = retryAfter(resp.Header.Get("Retry-After"), time.Now())
 			discard(resp.Body)
 		case spoolBody && resp.StatusCode == http.StatusOK:
-			if err = spool(resp, wrap); err == nil {
+			if err = scrubError(spool(resp, wrap)); err == nil {
 				return resp, nil
 			}
 			if ctx.Err() != nil || !retryableError(err) {
@@ -280,8 +281,9 @@ func (p Policy) try(client *http.Client, req *http.Request) (*http.Response, err
 		headers.Stop()
 	}
 	if err != nil {
-		// Before timeoutCause, which formats err into its text.
-		err = timeoutCause(ctx, redactURLErrors(err))
+		// Before timeoutCause, which formats err into its text. The URL
+		// field first, then the text: an error text can hold another URL.
+		err = timeoutCause(ctx, scrubError(redactURLErrors(err)))
 		cancel(nil)
 		return nil, err
 	}

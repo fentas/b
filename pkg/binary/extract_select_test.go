@@ -127,6 +127,7 @@ func binaryFor(dir, rawURL string, p archivePath) *Binary {
 	}
 	b.URL, b.Version = rawURL, "v2"
 	b.IsTarGz = p.kind == "tar.gz"
+	b.IsTarXz = p.kind == "tar.xz"
 	b.IsZip = p.kind == "zip"
 	return b
 }
@@ -242,7 +243,7 @@ func TestExtract_UnsafeNames(t *testing.T) {
 						members[0], members[1] = members[1], members[0]
 					}
 					got, err := installFrom(t, p, archiveOf(t, p.kind, members...))
-					wantRefused(t, got, err, "refusing tool."+p.kind+": the file name "+strconv.Quote(name)+` is absolute or has a ".." element`, false)
+					wantRefused(t, got, err, "refusing tool."+p.kind+": the file name "+strconv.Quote(name)+` is absolute, names a drive or has a ".." element`, false)
 				})
 			}
 		}
@@ -351,7 +352,7 @@ func TestExtract_SizeLimit(t *testing.T) {
 				body = []byte("tool v2\n")
 			} else {
 				body = archiveOf(t, p.kind, member{name: "tool", content: "tool v2\n"})
-				want = "extraction of tool from tool." + p.kind + " is too large: its size in the archive is 8 bytes, and the limit for a binary is 4 bytes"
+				want = "extraction of \"tool\" from tool." + p.kind + " is too large: its size in the archive is 8 bytes, and the limit for a binary is 4 bytes"
 			}
 			got, err := installFrom(t, p, body)
 			wantRefused(t, got, err, want, true)
@@ -370,9 +371,9 @@ func TestExtract_SizeLimit(t *testing.T) {
 // TestExtract_HeaderSizeIsCheckedFirst: a member whose header size is above
 // maxBinarySize is refused by the header before b reads one byte of it. The
 // archive holds only 8 bytes of the member, so a read would fail with
-// io.ErrUnexpectedEOF instead. (The tar asset path reads past each member to
-// the end of the archive before it selects one, so a short archive fails
-// there as a damaged archive: TestExtract_SizeLimit covers that path.)
+// io.ErrUnexpectedEOF instead. (The tar paths read the whole archive before
+// they select a member: there, a header size above the unpack limit refuses
+// the archive first, TestExtract_TarHeaderSizeIsCheckedFirst.)
 func TestExtract_HeaderSizeIsCheckedFirst(t *testing.T) {
 	const size = 1 << 40
 	limit := strconv.FormatInt(maxBinarySize, 10)
@@ -381,9 +382,6 @@ func TestExtract_HeaderSizeIsCheckedFirst(t *testing.T) {
 		body func(t *testing.T) []byte
 		size string
 	}{
-		{archivePath{name: "a tar.gz preset", kind: "tar.gz"}, func(t *testing.T) []byte {
-			return compressed(t, "tar.gz", shortTar(t, "tool", size, []byte("tool v2\n")))
-		}, strconv.Itoa(size)},
 		{archivePath{name: "a zip preset", kind: "zip"}, func(t *testing.T) []byte { return zipWithSize(t, size, []byte("tool v2\n")) }, strconv.Itoa(size)},
 		{archivePath{name: "a zip asset", kind: "zip", asset: true}, func(t *testing.T) []byte { return zipWithSize(t, size, []byte("tool v2\n")) }, strconv.Itoa(size)},
 		{archivePath{name: "a zip preset, a size that does not fit an int64", kind: "zip"}, func(t *testing.T) []byte {
@@ -395,7 +393,7 @@ func TestExtract_HeaderSizeIsCheckedFirst(t *testing.T) {
 	} {
 		t.Run(tc.p.name, func(t *testing.T) {
 			got, err := installFrom(t, tc.p, tc.body(t))
-			wantRefused(t, got, err, "extraction of tool from tool."+tc.p.kind+" is too large: its size in the archive is "+tc.size+" bytes, and the limit for a binary is "+limit+" bytes", false)
+			wantRefused(t, got, err, "extraction of \"tool\" from tool."+tc.p.kind+" is too large: its size in the archive is "+tc.size+" bytes, and the limit for a binary is "+limit+" bytes", false)
 		})
 	}
 }
@@ -424,8 +422,8 @@ func TestWriteFile_SizeLimit(t *testing.T) {
 		write func(b *Binary, r io.Reader) error
 		what  string
 	}{
-		{"a raw download", func(b *Binary, r io.Reader) error { return b.writeFile(r, downloadOf(b.File), -1, nil) }, "download of "},
-		{"a member", func(b *Binary, r io.Reader) error { return b.writeMember(r, "tool", "tool.tar.gz", -1, nil) }, "extraction of tool from tool.tar.gz"},
+		{"a raw download", func(b *Binary, r io.Reader) error { return b.writeFile(r, downloadOf(b.File), -1) }, "download of "},
+		{"a member", func(b *Binary, r io.Reader) error { return b.writeMember(r, "tool", "tool.tar.gz", -1) }, `extraction of "tool" from tool.tar.gz`},
 	} {
 		for _, n := range []int{16, 17, 64} {
 			t.Run(tc.name+" of "+strconv.Itoa(n)+" bytes", func(t *testing.T) {
@@ -565,33 +563,25 @@ func TestLimitedBody(t *testing.T) {
 	}
 }
 
-// TestOpenZip_SizeLimit: the zip paths read at most maxDownloadSize bytes of
-// a zip archive into memory. (On the real paths, the download limit refuses
-// a larger body first: TestDownload_SizeLimit.)
+// TestOpenZip_SizeLimit: the zip paths refuse a zip archive larger than
+// maxDownloadSize. (On the real paths, the download limit refuses a larger
+// body first: TestDownload_SizeLimit.)
 func TestOpenZip_SizeLimit(t *testing.T) {
 	body := archiveOf(t, "zip", member{name: "tool", content: "tool v2\n"})
-	withLimit(t, &maxDownloadSize, int64(len(body)-1))
 	b := &Binary{Name: "tool", File: filepath.Join(t.TempDir(), "tool")}
-	want := "refusing tool.zip: the zip archive is larger than " + strconv.Itoa(len(body)-1) + " bytes, the limit for a download"
-	for name, extract := range map[string]func(io.Reader, string) error{
+	zipPaths := map[string]func(archiveFile, string) error{
 		"extractSingleFileFromZip": b.extractSingleFileFromZip,
 		"extractFromZipAuto":       b.extractFromZipAuto,
-	} {
-		// More bytes follow the archive: the read stops one byte after the
-		// limit.
-		r := &countingReader{r: io.MultiReader(bytes.NewReader(body), bytes.NewReader(make([]byte, 1000)))}
-		if err := extract(r, "tool.zip"); err == nil || err.Error() != want {
+	}
+	withLimit(t, &maxDownloadSize, int64(len(body)-1))
+	want := "refusing tool.zip: the zip archive is larger than " + strconv.Itoa(len(body)-1) + " bytes, the limit for a download"
+	for name, extract := range zipPaths {
+		if err := extract(bytes.NewReader(body), "tool.zip"); err == nil || err.Error() != want {
 			t.Errorf("%s: error %v, want %q", name, err, want)
-		}
-		if r.n > len(body) {
-			t.Errorf("%s read %d bytes, want at most %d", name, r.n, len(body))
 		}
 	}
 	withLimit(t, &maxDownloadSize, int64(len(body)))
-	for name, extract := range map[string]func(io.Reader, string) error{
-		"extractSingleFileFromZip": b.extractSingleFileFromZip,
-		"extractFromZipAuto":       b.extractFromZipAuto,
-	} {
+	for name, extract := range zipPaths {
 		if err := extract(bytes.NewReader(body), "tool.zip"); err != nil {
 			t.Errorf("%s: a zip archive at the limit: %v", name, err)
 		}

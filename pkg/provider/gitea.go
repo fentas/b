@@ -3,7 +3,6 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -53,8 +52,7 @@ func (g *Gitea) LatestVersion(ref string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("Gitea API error %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("Gitea API error %d: %s", resp.StatusCode, fetch.ErrorBody(resp.Body))
 	}
 
 	var releases []struct {
@@ -96,8 +94,7 @@ func (g *Gitea) FetchRelease(ref, version string) (*Release, error) {
 		return nil, fmt.Errorf("release %s not found for %s/%s on %s", version, owner, repo, host)
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Gitea API error %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("Gitea API error %d: %s", resp.StatusCode, fetch.ErrorBody(resp.Body))
 	}
 
 	var gRelease struct {

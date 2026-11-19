@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -100,8 +99,7 @@ func (g *GitHub) FetchRelease(ref, version string) (*Release, error) {
 		return nil, fmt.Errorf("GitHub API rate limited (set GITHUB_TOKEN for higher limits)")
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GitHub API error %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("GitHub API error %d: %s", resp.StatusCode, fetch.ErrorBody(resp.Body))
 	}
 
 	var ghRelease struct {

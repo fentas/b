@@ -3,7 +3,6 @@ package provider
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -69,8 +68,7 @@ func (g *GitLab) FetchRelease(ref, version string) (*Release, error) {
 		return nil, fmt.Errorf("release %s not found for %s", version, projectPath)
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GitLab API error %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("GitLab API error %d: %s", resp.StatusCode, fetch.ErrorBody(resp.Body))
 	}
 
 	var glRelease struct {
@@ -123,8 +121,7 @@ func gitlabGetReleases(projectPath string, perPage int) ([]gitlabReleaseSummary,
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("GitLab API error %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("GitLab API error %d: %s", resp.StatusCode, fetch.ErrorBody(resp.Body))
 	}
 
 	var releases []gitlabReleaseSummary

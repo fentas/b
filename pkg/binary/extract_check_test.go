@@ -195,7 +195,13 @@ func TestExtract_ChecksTheMember(t *testing.T) {
 		{name: "a tar.xz asset", kind: "tar.xz", asset: true},
 		{name: "a zip asset", kind: "zip", asset: true},
 	} {
-		member := "extraction of tool from tool." + path.kind
+		member := "extraction of \"tool\" from tool." + path.kind
+		// The tar paths read the whole archive before they select a member,
+		// so there the tar reader refuses a cut member.
+		shortErr := member + ": "
+		if path.kind != "zip" {
+			shortErr = "reading the tar archive tool." + path.kind + ": "
+		}
 		type extractCase struct {
 			name   string
 			body   func(t *testing.T) []byte
@@ -206,7 +212,7 @@ func TestExtract_ChecksTheMember(t *testing.T) {
 			{name: "an empty member", body: func(t *testing.T) []byte { return archive(t, path.kind, nil) },
 				errHas: member + " wrote 0 bytes: the file in the archive is empty"},
 			{name: "a member shorter than its header, the reader refuses it", body: func(t *testing.T) []byte { return short(t, path.kind) },
-				errHas: member + ": ", errIs: io.ErrUnexpectedEOF},
+				errHas: shortErr, errIs: io.ErrUnexpectedEOF},
 			{name: "a broken header, the reader refuses it", body: func(*testing.T) []byte { return []byte("not an archive") },
 				errHas: brokenHeader[path.kind].errHas, errIs: brokenHeader[path.kind].errIs},
 			{name: "a good member", body: func(t *testing.T) []byte { return archive(t, path.kind, good) }},
@@ -214,7 +220,7 @@ func TestExtract_ChecksTheMember(t *testing.T) {
 		if path.kind == "zip" {
 			cases = append(cases,
 				extractCase{name: "a member it cannot open, the reader refuses it", body: func(t *testing.T) []byte { return unknownMethodZip(t, "tool", good) },
-					errHas: "opening tool in tool.zip: ", errIs: zip.ErrAlgorithm})
+					errHas: "opening \"tool\" in tool.zip: ", errIs: zip.ErrAlgorithm})
 		} else {
 			cases = append(cases,
 				extractCase{name: "a broken tar, the reader refuses it", body: func(t *testing.T) []byte { return compressed(t, path.kind, []byte("not a tar archive")) },
@@ -291,11 +297,11 @@ func TestVerifyWritten(t *testing.T) {
 		{name: "a member of its size", src: member, written: 10, want: 10},
 		{name: "a member without a size", src: member, written: 5, want: -1},
 		{name: "an empty member", src: member, written: 0, want: 0,
-			err: "extraction of dir/tool from tool.tar.gz wrote 0 bytes: the file in the archive is empty; the archive is damaged or does not hold the binary"},
+			err: "extraction of \"dir/tool\" from tool.tar.gz wrote 0 bytes: the file in the archive is empty; the archive is damaged or does not hold the binary"},
 		{name: "a member shorter than its size", src: member, written: 5, want: 10,
-			err: "extraction of dir/tool from tool.tar.gz is incomplete: wrote 5 bytes, its size in the archive is 10; the archive is damaged"},
+			err: "extraction of \"dir/tool\" from tool.tar.gz is incomplete: wrote 5 bytes, its size in the archive is 10; the archive is damaged"},
 		{name: "a member longer than its size", src: member, written: 12, want: 10,
-			err: "extraction of dir/tool from tool.tar.gz is incomplete: wrote 12 bytes, its size in the archive is 10; the archive is damaged"},
+			err: "extraction of \"dir/tool\" from tool.tar.gz is incomplete: wrote 12 bytes, its size in the archive is 10; the archive is damaged"},
 		{name: "a download of its Content-Length", src: download, written: 7, want: 7},
 		{name: "an empty download", src: download, written: 0, want: -1,
 			err: "download of /bin/tool wrote 0 bytes: the server sent an empty body; retry the download"},
@@ -319,15 +325,14 @@ func TestVerifyWritten(t *testing.T) {
 // also when the reader ends without an error, and it keeps the old binary.
 // (The archive readers of the standard library refuse a short member first,
 // so only a direct call reaches this count.) A read error names the member
-// and the archive. A check after the count (then) can refuse the member too.
+// and the archive.
 func TestWriteMember(t *testing.T) {
-	const member = "extraction of dir/tool from tool.tar.gz"
+	const member = "extraction of \"dir/tool\" from tool.tar.gz"
 	for _, tc := range []struct {
 		name    string
 		content string
 		size    int64
 		readErr error  // the reader fails with it after content
-		then    error  // the check after the count returns it
 		err     string // "" for no error
 	}{
 		{name: "a member of its size", content: "tool v2\n", size: 8},
@@ -340,8 +345,6 @@ func TestWriteMember(t *testing.T) {
 			err: member + " is incomplete: wrote 12 bytes, its size in the archive is 8; the archive is damaged"},
 		{name: "a read error", content: "tool", size: 8, readErr: io.ErrUnexpectedEOF,
 			err: member + ": unexpected EOF"},
-		{name: "a member that the check after the count refuses", content: "tool v2\n", size: 8,
-			then: errors.New("a second match"), err: "a second match"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -354,12 +357,8 @@ func TestWriteMember(t *testing.T) {
 				r = io.MultiReader(r, iotest.ErrReader(tc.readErr))
 			}
 			b := &Binary{Name: "tool", File: file}
-			var then func() error
-			if tc.then != nil {
-				then = func() error { return tc.then }
-			}
 
-			err := b.writeMember(r, "dir/tool", "tool.tar.gz", tc.size, then)
+			err := b.writeMember(r, "dir/tool", "tool.tar.gz", tc.size)
 			noTempFiles(t, dir)
 			got, rerr := os.ReadFile(file)
 			if rerr != nil {
@@ -387,19 +386,37 @@ func TestWriteMember(t *testing.T) {
 	}
 }
 
-// TestExtractZip_ReadError: the zip paths read the whole stream before they
-// read the zip directory. A read error names the archive. (The download
-// layer refuses a cut body before the zip paths read it, so only a direct
-// call reaches this error.)
-func TestExtractZip_ReadError(t *testing.T) {
-	b := &Binary{Name: "tool", File: filepath.Join(t.TempDir(), "tool")}
-	for name, extract := range map[string]func(io.Reader, string) error{
-		"extractSingleFileFromZip": b.extractSingleFileFromZip,
-		"extractFromZipAuto":       b.extractFromZipAuto,
-	} {
-		err := extract(iotest.ErrReader(io.ErrUnexpectedEOF), "tool.zip")
-		if err == nil || err.Error() != "reading tool.zip: unexpected EOF" || !errors.Is(err, io.ErrUnexpectedEOF) {
-			t.Errorf("%s: error %v, want %q that wraps io.ErrUnexpectedEOF", name, err, "reading tool.zip: unexpected EOF")
+// atOnly is a zip archive that can be read only at offsets: its Read fails.
+type atOnly struct{ *bytes.Reader }
+
+func (atOnly) Read([]byte) (int, error) {
+	return 0, errors.New("the zip archive was read as a stream")
+}
+
+// failingAt is a zip archive whose ReadAt fails.
+type failingAt struct{ *bytes.Reader }
+
+func (failingAt) ReadAt([]byte, int64) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+// TestExtractZip_ReadsAtOffsets: the zip paths read the archive at its
+// offsets (ReadAt) from the temp file of the download, never as a stream
+// into memory. A read error names the archive. (The download layer refuses
+// a cut body before the zip paths read it, so only a direct call reaches
+// this error.)
+func TestExtractZip_ReadsAtOffsets(t *testing.T) {
+	body := makeZip(t, map[string][]byte{"tool": []byte("tool v2\n")}).Bytes()
+	for _, preset := range []bool{true, false} {
+		b := &Binary{Name: "tool", File: filepath.Join(t.TempDir(), "tool")}
+		if err := b.extractZip(atOnly{bytes.NewReader(body)}, "tool.zip", preset); err != nil {
+			t.Fatalf("preset %v: %v", preset, err)
+		}
+		if got, err := os.ReadFile(b.File); err != nil || string(got) != "tool v2\n" {
+			t.Errorf("preset %v: the binary is %q (%v), want %q", preset, got, err, "tool v2\n")
+		}
+		err := b.extractZip(failingAt{bytes.NewReader(body)}, "tool.zip", preset)
+		const want = "reading the zip directory of tool.zip: unexpected EOF"
+		if err == nil || err.Error() != want || !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Errorf("preset %v: error %v, want %q that wraps io.ErrUnexpectedEOF", preset, err, want)
 		}
 	}
 }
@@ -433,7 +450,7 @@ func TestZipSize(t *testing.T) {
 		}
 	}
 	for _, size := range []uint64{limit + 1, math.MaxInt64, math.MaxInt64 + 1, math.MaxUint64} {
-		want := "extraction of tool from tool.zip is too large: its size in the archive is " +
+		want := "extraction of \"tool\" from tool.zip is too large: its size in the archive is " +
 			strconv.FormatUint(size, 10) + " bytes, and the limit for a binary is " + strconv.FormatUint(limit, 10) + " bytes"
 		if _, err := zipSize(&zip.File{FileHeader: zip.FileHeader{Name: "tool", UncompressedSize64: size}}, "tool.zip"); err == nil || err.Error() != want {
 			t.Errorf("zipSize(%d): error %v, want %q", size, err, want)
