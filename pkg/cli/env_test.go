@@ -1291,3 +1291,76 @@ func TestEnvAddVersionFlagIsAPinNotTheRootBanner(t *testing.T) {
 		t.Error("`b --version` no longer requests the version banner")
 	}
 }
+
+// The banner follows the VALUE of the root's --version, read through the real
+// flag parsing of the root and of a subcommand that inherits the flag.
+//
+// Regression: the check read only pflag's Changed, which is true for any
+// explicit value, so `b --version=false` printed the banner and exited 0.
+// Parsing the real arguments also pins the flag name: a renamed registration
+// makes the parse fail, and a renamed lookup makes the true cases fail.
+func TestRootVersionBannerFollowsTheFlagValue(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH_BIN", filepath.Join(dir, ".bin"))
+	t.Chdir(dir)
+
+	cases := []struct {
+		name string
+		sub  string // "" parses on the root
+		args []string
+		want bool
+	}{
+		{"no flag", "", nil, false},
+		{"--version", "", []string{"--version"}, true},
+		{"--version=true", "", []string{"--version=true"}, true},
+		{"--version=1", "", []string{"--version=1"}, true}, // the parsed bool, not the raw text
+		{"-v", "", []string{"-v"}, true},
+		{"--version=false", "", []string{"--version=false"}, false},
+		{"-v=false", "", []string{"-v=false"}, false},
+		{"list --version", "list", []string{"--version"}, true},
+		{"list --version=false", "list", []string{"--version=false"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := NewRootCmd(mkBinaries(), mkIO(), "dev", "")
+			cmd := root
+			if tc.sub != "" {
+				for _, c := range root.Commands() {
+					if c.Name() == tc.sub {
+						cmd = c
+					}
+				}
+				if cmd == root {
+					t.Fatalf("subcommand %q not found", tc.sub)
+				}
+			}
+			if err := cmd.ParseFlags(tc.args); err != nil {
+				t.Fatalf("parse %q: %v", tc.args, err)
+			}
+			if got := wantsVersionBanner(cmd); got != tc.want {
+				t.Errorf("wantsVersionBanner after %q = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// The lookup in wantsVersionBanner reads the root's persistent set by name.
+// If the registration is renamed or moves out of that set, the lookup misses
+// and `b --version` prints nothing, with no error. This test fails instead.
+func TestRootPersistentVersionFlagIsABool(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH_BIN", filepath.Join(dir, ".bin"))
+	t.Chdir(dir)
+
+	root := NewRootCmd(mkBinaries(), mkIO(), "dev", "")
+	f := root.PersistentFlags().Lookup("version")
+	if f == nil {
+		t.Fatal("the root's persistent flag set has no flag named version")
+	}
+	if got := f.Value.Type(); got != "bool" {
+		t.Errorf("root --version type = %q, want bool", got)
+	}
+	if f.Shorthand != "v" {
+		t.Errorf("root --version shorthand = %q, want v", f.Shorthand)
+	}
+}
