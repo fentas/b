@@ -99,7 +99,9 @@ each pinned binary once and writes a new `b.lock`.
 `b` retries a download that fails with a network error, HTTP 429 or HTTP 5xx
 (other than 501). It makes up to 5 tries, waits up to 150 seconds in total, and
 obeys a `Retry-After` header. An error that names the URL and the last status
-comes after the last try. Other 4xx statuses fail at once. A try that gets no
+comes after the last try. An error names a URL without its user info, query
+and fragment, because they can hold a credential. Other 4xx statuses fail at
+once. A try that gets no
 response headers in 30 seconds, or no data for 60 seconds, is also retried. A
 slow download that continues to receive data is not stopped.
 
@@ -151,6 +153,36 @@ curl -H "Accept: application/vnd.github.v3+json" https://api.github.com/rate_lim
 # If you are using a proxy, make sure your shell environment is configured correctly
 # (e.g., HTTP_PROXY, HTTPS_PROXY environment variables).
 ```
+
+### Archive or Binary Refused
+
+**Problem**: `b install` or `b update` refuses the archive of a binary, or the
+binary itself
+
+b checks the file that it takes from an archive (a tar.gz, a tar.xz or a zip)
+before that file replaces the binary. When a check fails, the old binary stays
+and the error names the archive and its files:
+
+- The file must not be empty, and it must have the size that the archive
+  header gives.
+- Only a regular file can be the binary. A symlink, a directory or a device in
+  a zip archive is never installed.
+- An archive that holds a regular file with an absolute name (`/tool`) or a
+  `..` element (`../tool`) is refused.
+- An archive in which more than one file matches the binary is refused. For a
+  release asset, a file matches when its name without the directory is the
+  name of the binary. When no file matches, b takes the largest candidate: an
+  executable file of a tar archive, or any regular file of a zip archive. Two
+  largest candidates of the same size refuse the archive.
+
+b installs a binary of at most 2 GiB (2147483648 bytes) from a download of at
+most 2 GiB. A larger binary or download is refused: by its size when the
+archive header or the `Content-Length` gives one, else while b reads it. There
+is no setting for these limits.
+
+**Solution**: an archive that b refuses does not change when you try again.
+Read the file names in the error, and report the archive to the project that
+publishes it.
 
 ### Version Not Found
 

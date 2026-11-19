@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,12 +35,100 @@ func rateLimitShaped(resp *http.Response) bool {
 	return strings.Contains(strings.ToLower(string(body)), "rate limit")
 }
 
-// accessDeniedError builds the error for a 401/403 download response.
-func accessDeniedError(resp *http.Response, url string) error {
+// accessDeniedError builds the error for a 401/403 download response. It
+// names the URL without its user info, query and fragment
+// (fetch.RedactRawURL): they can hold a credential.
+func accessDeniedError(resp *http.Response, rawURL string) error {
+	u := fetch.RedactRawURL(rawURL)
 	if rateLimitShaped(resp) {
-		return fmt.Errorf("HTTP %d for %s: rate limit exhausted; set GITHUB_TOKEN to authenticate", resp.StatusCode, url)
+		return fmt.Errorf("HTTP %d for %s: rate limit exhausted; set GITHUB_TOKEN to authenticate", resp.StatusCode, u)
 	}
-	return fmt.Errorf("HTTP %d for %s: access denied; check credentials (for GitHub, set GITHUB_TOKEN)", resp.StatusCode, url)
+	return fmt.Errorf("HTTP %d for %s: access denied; check credentials (for GitHub, set GITHUB_TOKEN)", resp.StatusCode, u)
+}
+
+// maxBinarySize is the largest binary that b installs: 2 GiB. A member of an
+// archive or a raw download that is larger is refused: before the copy when
+// its size is known, else when the copy passes the limit. Tests replace it.
+var maxBinarySize int64 = 2 << 30
+
+// maxDownloadSize is the largest download that b reads: 2 GiB. A download
+// (an archive or a raw binary) is written to a temp file before b reads it,
+// and a zip archive is then read into memory, because its directory is at
+// its end. A longer download is refused while it is read. Tests replace it.
+var maxDownloadSize int64 = 2 << 30
+
+// downloadTooLarge refuses the download of label: it has more bytes than
+// maxDownloadSize.
+func downloadTooLarge(label string) error {
+	return fmt.Errorf("refusing the download of %s: it is larger than %d bytes, the limit for a download", label, maxDownloadSize)
+}
+
+// limitedBody reads a download body and fails once the body has more bytes
+// than maxDownloadSize, or at once when its Content-Length says so. The
+// error is not retried. Close closes the body.
+type limitedBody struct {
+	r     io.ReadCloser
+	label string
+	read  int64
+}
+
+func newLimitedBody(resp *http.Response, label string) *limitedBody {
+	l := &limitedBody{r: resp.Body, label: label}
+	if resp.ContentLength > maxDownloadSize {
+		l.read = resp.ContentLength
+	}
+	return l
+}
+
+func (l *limitedBody) Read(p []byte) (int, error) {
+	if l.read > maxDownloadSize {
+		return 0, downloadTooLarge(l.label)
+	}
+	k, err := l.r.Read(p)
+	l.read += int64(k)
+	if l.read > maxDownloadSize {
+		return 0, downloadTooLarge(l.label)
+	}
+	return k, err
+}
+
+func (l *limitedBody) Close() error { return l.r.Close() }
+
+// unsafeName reports whether the name of a file in an archive is absolute or
+// has a ".." element after path.Clean. A backslash counts as a separator, as
+// it does on Windows. archive/tar and archive/zip give the effective name (a
+// PAX or GNU long name included). b never installs such a file, and refuses
+// an archive that holds one as a regular file.
+func unsafeName(name string) bool {
+	clean := path.Clean(strings.ReplaceAll(name, `\`, "/"))
+	return path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../")
+}
+
+// unsafeNameError refuses archive for the file name.
+func unsafeNameError(archive, name string) error {
+	return fmt.Errorf("refusing %s: the file name %q is absolute or has a \"..\" element", archive, name)
+}
+
+// ambiguousError refuses archive because more than one file in it matches
+// the binary.
+func ambiguousError(archive, binary string, names []string) error {
+	return fmt.Errorf("refusing %s: %d files in it match the binary %s: %s", archive, len(names), binary, quoteNames(names))
+}
+
+// tieError refuses archive because no file matches the binary by name and
+// the largest candidates have the same size.
+func tieError(archive, binary string, names []string) error {
+	return fmt.Errorf("refusing %s: no file in it is named %s, and %d files tie as the largest: %s", archive, binary, len(names), quoteNames(names))
+}
+
+// quoteNames lists the names of files in an archive for an error, each
+// quoted (%q also escapes control characters).
+func quoteNames(names []string) string {
+	q := make([]string, len(names))
+	for i, n := range names {
+		q[i] = fmt.Sprintf("%q", n)
+	}
+	return strings.Join(q, ", ")
 }
 
 // writeSource names where the bytes of a binary come from, for the errors
@@ -76,11 +163,15 @@ func memberOf(member, archive string) writeSource {
 }
 
 // verifyWritten confirms that the bytes of a binary landed on disk: at least
-// one byte was written, and the byte count matches want when the source
-// gives a size (want >= 0). An empty file is never a binary: it cannot run.
+// one byte was written, no more than maxBinarySize, and the byte count
+// matches want when the source gives a size (want >= 0). An empty file is
+// never a binary: it cannot run.
 func verifyWritten(src writeSource, written, want int64) error {
 	if written == 0 {
 		return fmt.Errorf("%s wrote 0 bytes: %s", src.what, src.empty)
+	}
+	if written > maxBinarySize {
+		return fmt.Errorf("%s is too large: it has more than %d bytes, the limit for a binary", src.what, maxBinarySize)
 	}
 	if want >= 0 && written != want {
 		return fmt.Errorf("%s is incomplete: wrote %d bytes, %s is %d; %s", src.what, written, src.size, want, src.retry)
@@ -88,31 +179,51 @@ func verifyWritten(src writeSource, written, want int64) error {
 	return nil
 }
 
+// tooLarge refuses src before the copy: the size that src gives is above
+// maxBinarySize.
+func tooLarge(src writeSource, size uint64) error {
+	return fmt.Errorf("%s is too large: %s is %d bytes, and the limit for a binary is %d bytes", src.what, src.size, size, maxBinarySize)
+}
+
 // writeFile writes the binary file b.File from r in one step
-// (atomicfile.Write), with mode 0755. check, if not nil, gets the number of
-// bytes and can refuse them before the new file replaces the old one. A
-// download or an extraction that fails leaves the old file as it was.
-func (b *Binary) writeFile(r io.Reader, check func(written int64) error) error {
+// (atomicfile.Write), with mode 0755, and checks it before the new file
+// replaces the old one:
+//   - a size from src (want >= 0) above maxBinarySize is refused before the
+//     copy starts;
+//   - the copy reads at most one byte more than maxBinarySize;
+//   - verifyWritten checks the byte count;
+//   - then, if not nil, runs last and can refuse the file too.
+//
+// A download or an extraction that fails leaves the old file as it was.
+func (b *Binary) writeFile(r io.Reader, src writeSource, want int64, then func() error) error {
+	if want > maxBinarySize {
+		return tooLarge(src, uint64(want))
+	}
 	return atomicfile.Write(b.File, 0755, func(w io.Writer) error {
-		n, err := io.Copy(w, r)
-		if err == nil && check != nil {
-			err = check(n)
+		n, err := io.Copy(w, io.LimitReader(r, maxBinarySize+1))
+		if err != nil {
+			return err
 		}
-		return err
+		if err := verifyWritten(src, n, want); err != nil {
+			return err
+		}
+		if then != nil {
+			return then()
+		}
+		return nil
 	})
 }
 
 // writeMember writes the binary from the member of an archive (writeFile)
-// and checks it (verifyWritten): the member is not empty, and its byte count
-// is size when the archive header gives one (size >= 0). The archive readers
-// refuse a short member too; this count is taken where the bytes are
-// written, after every reader between. A read error names the member and the
-// archive.
-func (b *Binary) writeMember(r io.Reader, member, archive string, size int64) error {
+// and checks it (verifyWritten): the member is not empty, not larger than
+// maxBinarySize, and its byte count is size when the archive header gives
+// one (size >= 0). The archive readers refuse a short member before this
+// count; the count is taken where the bytes are written, after every reader
+// between. A read error names the member and the archive. then, if not nil,
+// runs after the check and before the new file replaces the old one.
+func (b *Binary) writeMember(r io.Reader, member, archive string, size int64, then func() error) error {
 	src := memberOf(member, archive)
-	return b.writeFile(namedReader{r: r, name: src.what}, func(written int64) error {
-		return verifyWritten(src, written, size)
-	})
+	return b.writeFile(namedReader{r: r, name: src.what}, src, size, then)
 }
 
 // namedReader puts name in front of the read errors of r. io.EOF stays as it
@@ -130,19 +241,36 @@ func (n namedReader) Read(p []byte) (int, error) {
 	return k, err
 }
 
-// zipSize is the size of f in the zip header, or -1 when it does not fit an
-// int64 (the zip reader refuses such a member).
-func zipSize(f *zip.File) int64 {
-	if f.UncompressedSize64 > math.MaxInt64 {
-		return -1
+// zipSize is the size of f in the zip header. A size above maxBinarySize is
+// refused (tooLarge), so the size always fits an int64.
+func zipSize(f *zip.File, archive string) (int64, error) {
+	if f.UncompressedSize64 > uint64(maxBinarySize) {
+		return 0, tooLarge(memberOf(f.Name, archive), f.UncompressedSize64)
 	}
-	return int64(f.UncompressedSize64)
+	return int64(f.UncompressedSize64), nil
+}
+
+// openZip reads the zip archive in stream into memory, at most
+// maxDownloadSize bytes, and reads its directory.
+func openZip(stream io.Reader, archive string) (*zip.Reader, error) {
+	zipData, err := io.ReadAll(io.LimitReader(stream, maxDownloadSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", archive, err)
+	}
+	if int64(len(zipData)) > maxDownloadSize {
+		return nil, fmt.Errorf("refusing %s: the zip archive is larger than %d bytes, the limit for a download", archive, maxDownloadSize)
+	}
+	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return nil, fmt.Errorf("reading the zip directory of %s: %w", archive, err)
+	}
+	return zipReader, nil
 }
 
 // archiveName is the last element of the path of rawURL: the name of an
 // archive in errors. A URL without a path element gives the URL without its
-// user info, query and fragment, so that no credential goes into an error. A
-// URL that does not parse gives "the archive".
+// user info, query and fragment (fetch.RedactURL), so that no credential
+// goes into an error. A URL that does not parse gives "the archive".
 func archiveName(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -151,8 +279,7 @@ func archiveName(rawURL string) string {
 	if name := path.Base(u.Path); name != "." && name != "/" {
 		return name
 	}
-	u.User, u.RawQuery, u.Fragment = nil, "", ""
-	return u.String()
+	return fetch.RedactURL(u)
 }
 
 // ctx returns the context of b, or context.Background if it has none.
@@ -164,18 +291,20 @@ func (b *Binary) ctx() context.Context {
 }
 
 // download GETs url with fetch.Download: transient failures are retried,
-// and a 200 body is complete before extraction starts. label names the
-// download in the progress tracker.
+// and a 200 body is complete before extraction starts. A body with more
+// bytes than maxDownloadSize is refused (limitedBody). label names the
+// download in the progress tracker and in errors.
 func (b *Binary) download(url, label string) (*http.Response, error) {
 	return fetch.Download(b.ctx(), url, func(resp *http.Response) io.Reader {
+		body := newLimitedBody(resp, label)
 		if b.Tracker == nil {
-			return resp.Body
+			return body
 		}
 		// A retry starts the count again.
 		b.Tracker.UpdateMessage(fmt.Sprintf("Downloading %s", label))
 		b.Tracker.UpdateTotal(resp.ContentLength)
 		b.Tracker.SetValue(0)
-		return progress.NewReader(resp.Body, b.Tracker)
+		return progress.NewReader(body, b.Tracker)
 	})
 }
 
@@ -211,74 +340,134 @@ func (b *Binary) extractSingleFileFromTar(stream io.Reader, compression, archive
 		return fmt.Errorf("Unknown compression type: %s", compression)
 	}
 
-	for {
-		header, err := tarReader.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("reading the tar archive %s: %w", archive, err)
-		}
-		if header.Typeflag != tar.TypeReg {
-			continue
-		}
-
-		switch filepath.Base(header.Name) {
-		case b.Name:
-		case strings.Split(b.GitHubFile, ".")[0]:
-		case b.TarFile:
-		default:
-			if b.TarFileF == nil {
+	// nextMatch returns the next regular file that matches the binary
+	// (tarFileMatches), or nil at the end of the archive. A regular file with
+	// an unsafe name refuses the archive.
+	nextMatch := func() (*tar.Header, error) {
+		for {
+			header, err := tarReader.Next()
+			if err == io.EOF {
+				return nil, nil
+			}
+			if err != nil {
+				return nil, fmt.Errorf("reading the tar archive %s: %w", archive, err)
+			}
+			if header.Typeflag != tar.TypeReg {
 				continue
 			}
-			name, err := b.TarFileF(b)
+			if unsafeName(header.Name) {
+				return nil, unsafeNameError(archive, header.Name)
+			}
+			ok, err := b.tarFileMatches(header.Name)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				return header, nil
+			}
+		}
+	}
+
+	header, err := nextMatch()
+	if err != nil {
+		return err
+	}
+	if header == nil {
+		return fmt.Errorf("file %s not found", b.Name)
+	}
+	// The first match is written. The rest of the archive is read before the
+	// new file replaces the old one: a second match, or a regular file with
+	// an unsafe name, refuses the archive.
+	return b.writeMember(tarReader, header.Name, archive, header.Size, func() error {
+		matches := []string{header.Name}
+		for {
+			next, err := nextMatch()
 			if err != nil {
 				return err
 			}
-			if header.Name != name {
-				continue
+			if next == nil {
+				break
 			}
+			matches = append(matches, next.Name)
 		}
-
-		return b.writeMember(tarReader, header.Name, archive, header.Size)
-	}
-
-	return fmt.Errorf("file %s not found", b.Name)
+		if len(matches) > 1 {
+			return ambiguousError(archive, b.Name, matches)
+		}
+		return nil
+	})
 }
 
-// extractSingleFileFromZip extracts the file b.Name from a zip archive.
-// archive names the archive in errors.
+// tarFileMatches reports whether the file name of a preset tar archive is
+// the binary: its base name is the name of b, the GitHub file name up to the
+// first ".", or b.TarFile; or the whole name is the one that b.TarFileF
+// gives.
+func (b *Binary) tarFileMatches(name string) (bool, error) {
+	switch filepath.Base(name) {
+	case b.Name, strings.Split(b.GitHubFile, ".")[0], b.TarFile:
+		return true, nil
+	}
+	if b.TarFileF == nil {
+		return false, nil
+	}
+	want, err := b.TarFileF(b)
+	if err != nil {
+		return false, err
+	}
+	return name == want, nil
+}
+
+// extractSingleFileFromZip extracts the file b.Name from a zip archive: the
+// one regular file whose whole name is b.Name. A symlink, a device or a
+// directory is never the binary. Two files of that name, or a regular file
+// with an unsafe name, refuse the archive. archive names the archive in
+// errors.
 func (b *Binary) extractSingleFileFromZip(stream io.Reader, archive string) error {
-	zipData, err := io.ReadAll(stream)
+	zipReader, err := openZip(stream, archive)
 	if err != nil {
-		return fmt.Errorf("reading %s: %w", archive, err)
+		return err
 	}
 
-	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
-	if err != nil {
-		return fmt.Errorf("reading the zip directory of %s: %w", archive, err)
-	}
-
-	for _, file := range zipReader.File {
-		if file.Name == b.Name {
-			zippedFile, err := file.Open()
-			if err != nil {
-				return fmt.Errorf("opening %s in %s: %w", file.Name, archive, err)
+	var file *zip.File
+	var matches []string
+	for _, f := range zipReader.File {
+		if !f.Mode().IsRegular() {
+			continue
+		}
+		if unsafeName(f.Name) {
+			return unsafeNameError(archive, f.Name)
+		}
+		if f.Name == b.Name {
+			matches = append(matches, f.Name)
+			if file == nil {
+				file = f
 			}
-			defer zippedFile.Close()
-
-			var reader io.Reader = zippedFile
-			if b.Writer != nil {
-				b.Tracker = b.Writer.AddTracker(fmt.Sprintf("Extracting %s", b.Name), int64(file.UncompressedSize64))
-				reader = progress.NewReader(zippedFile, b.Tracker)
-				defer b.Tracker.MarkAsDone()
-			}
-
-			return b.writeMember(reader, file.Name, archive, zipSize(file))
 		}
 	}
+	if file == nil {
+		return fmt.Errorf("file %s not found", b.Name)
+	}
+	if len(matches) > 1 {
+		return ambiguousError(archive, b.Name, matches)
+	}
+	size, err := zipSize(file, archive)
+	if err != nil {
+		return err
+	}
 
-	return fmt.Errorf("file %s not found", b.Name)
+	zippedFile, err := file.Open()
+	if err != nil {
+		return fmt.Errorf("opening %s in %s: %w", file.Name, archive, err)
+	}
+	defer zippedFile.Close()
+
+	var reader io.Reader = zippedFile
+	if b.Writer != nil {
+		b.Tracker = b.Writer.AddTracker(fmt.Sprintf("Extracting %s", b.Name), size)
+		reader = progress.NewReader(zippedFile, b.Tracker)
+		defer b.Tracker.MarkAsDone()
+	}
+
+	return b.writeMember(reader, file.Name, archive, size, nil)
 }
 
 func (b *Binary) downloadBinary() error {
@@ -385,15 +574,18 @@ func (b *Binary) downloadAsset(asset *provider.Asset) error {
 		return b.extractFromZipAuto(resp.Body, asset.Name)
 	default:
 		// Raw binary (no archive)
-		return b.writeFile(resp.Body, func(written int64) error {
-			return verifyWritten(downloadOf(b.File), written, resp.ContentLength)
-		})
+		return b.writeFile(resp.Body, downloadOf(b.File), resp.ContentLength, nil)
 	}
 }
 
-// extractFromTarAuto extracts the best-matching binary from a tar archive
-// using heuristic detection (name match > largest executable > only executable).
-// archive names the archive in errors.
+// extractFromTarAuto extracts the binary from a tar archive of a release
+// asset. The candidates are the regular files with an execute bit. The
+// binary is the one candidate whose base name is b.Name; without one, the
+// single largest candidate (also when it is the only one). Two candidates
+// named b.Name, two largest candidates of the same size, or a regular file
+// with an unsafe name refuse the archive. At most two candidates are in
+// memory at a time, each at most maxBinarySize. archive names the archive in
+// errors.
 func (b *Binary) extractFromTarAuto(stream io.Reader, compression, archive string) error {
 	var tarReader *tar.Reader
 
@@ -417,12 +609,29 @@ func (b *Binary) extractFromTarAuto(stream io.Reader, compression, archive strin
 
 	type candidate struct {
 		name string
-		data []byte
-		size int64 // the size in the tar header
-		mode os.FileMode
+		data []byte // nil when the candidate is not kept, or is too large
+		size int64  // the size in the tar header
 	}
-	var candidates []candidate
-	var nameMatch *candidate
+	var (
+		named   *candidate // the first candidate named b.Name
+		names   []string   // every candidate named b.Name
+		largest *candidate // the first of the largest other candidates
+		ties    []string   // every other candidate of the largest size
+	)
+	// read keeps the data of a candidate that can be installed. A candidate
+	// above maxBinarySize is not read: writeMember refuses it by its size.
+	read := func(header *tar.Header) (*candidate, error) {
+		c := &candidate{name: header.Name, size: header.Size}
+		if header.Size > maxBinarySize {
+			return c, nil
+		}
+		data, err := io.ReadAll(tarReader)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", memberOf(header.Name, archive).what, err)
+		}
+		c.data = data
+		return c, nil
+	}
 
 	for {
 		header, err := tarReader.Next()
@@ -435,113 +644,119 @@ func (b *Binary) extractFromTarAuto(stream io.Reader, compression, archive strin
 		if header.Typeflag != tar.TypeReg {
 			continue
 		}
-
+		if unsafeName(header.Name) {
+			return unsafeNameError(archive, header.Name)
+		}
 		// Skip non-executable files
 		if header.Mode&0111 == 0 {
 			continue
 		}
 
-		data, err := io.ReadAll(tarReader)
-		if err != nil {
-			return fmt.Errorf("%s: %w", memberOf(header.Name, archive).what, err)
-		}
-
-		c := candidate{
-			name: header.Name,
-			data: data,
-			size: header.Size,
-			mode: os.FileMode(header.Mode),
-		}
-		candidates = append(candidates, c)
-
-		base := filepath.Base(header.Name)
-		if base == b.Name {
-			nameMatch = &candidates[len(candidates)-1]
-		}
-	}
-
-	var chosen *candidate
-	if nameMatch != nil {
-		chosen = nameMatch
-	} else if len(candidates) == 1 {
-		chosen = &candidates[0]
-	} else if len(candidates) > 1 {
-		// Pick largest executable
-		chosen = &candidates[0]
-		for i := range candidates {
-			if len(candidates[i].data) > len(chosen.data) {
-				chosen = &candidates[i]
+		if filepath.Base(header.Name) == b.Name {
+			names = append(names, header.Name)
+			if named == nil {
+				if named, err = read(header); err != nil {
+					return err
+				}
+				if largest != nil {
+					largest.data = nil // the fallback is not used any more
+				}
 			}
-		}
-	}
-
-	if chosen == nil {
-		return fmt.Errorf("no executable found in archive for %s", b.Name)
-	}
-
-	return b.writeMember(bytes.NewReader(chosen.data), chosen.name, archive, chosen.size)
-}
-
-// extractFromZipAuto extracts the best-matching binary from a zip archive.
-// archive names the archive in errors.
-func (b *Binary) extractFromZipAuto(stream io.Reader, archive string) error {
-	zipData, err := io.ReadAll(stream)
-	if err != nil {
-		return fmt.Errorf("reading %s: %w", archive, err)
-	}
-
-	zipReader, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
-	if err != nil {
-		return fmt.Errorf("reading the zip directory of %s: %w", archive, err)
-	}
-
-	type candidate struct {
-		name string
-		file *zip.File
-	}
-	var candidates []candidate
-	var nameMatch *candidate
-
-	for _, f := range zipReader.File {
-		if f.FileInfo().IsDir() {
 			continue
 		}
-		// In zip files, we can't reliably check execute bit, so include all regular files
-		c := candidate{name: f.Name, file: f}
-		candidates = append(candidates, c)
-
-		base := filepath.Base(f.Name)
-		if base == b.Name {
-			nameMatch = &candidates[len(candidates)-1]
+		switch {
+		case largest == nil || header.Size > largest.size:
+			ties = []string{header.Name}
+			if named != nil {
+				largest = &candidate{name: header.Name, size: header.Size}
+			} else if largest, err = read(header); err != nil {
+				return err
+			}
+		case header.Size == largest.size:
+			ties = append(ties, header.Name)
 		}
 	}
 
 	var chosen *candidate
-	if nameMatch != nil {
-		chosen = nameMatch
-	} else if len(candidates) == 1 {
-		chosen = &candidates[0]
-	} else if len(candidates) > 1 {
-		// Pick largest file
-		chosen = &candidates[0]
-		for i := range candidates {
-			if candidates[i].file.UncompressedSize64 > chosen.file.UncompressedSize64 {
-				chosen = &candidates[i]
+	switch {
+	case len(names) > 1:
+		return ambiguousError(archive, b.Name, names)
+	case named != nil:
+		chosen = named
+	case largest == nil:
+		return fmt.Errorf("no executable found in archive for %s", b.Name)
+	case len(ties) > 1:
+		return tieError(archive, b.Name, ties)
+	default:
+		chosen = largest
+	}
+
+	return b.writeMember(bytes.NewReader(chosen.data), chosen.name, archive, chosen.size, nil)
+}
+
+// extractFromZipAuto extracts the binary from a zip archive of a release
+// asset. The candidates are the regular files: a symlink, a device or a
+// directory is never the binary. The binary is the one candidate whose base
+// name is b.Name; without one, the single largest candidate (also when it is
+// the only one). Two candidates named b.Name, two largest candidates of the
+// same size, or a regular file with an unsafe name refuse the archive.
+// archive names the archive in errors.
+func (b *Binary) extractFromZipAuto(stream io.Reader, archive string) error {
+	zipReader, err := openZip(stream, archive)
+	if err != nil {
+		return err
+	}
+
+	var named, largest *zip.File
+	var names, ties []string
+	for _, f := range zipReader.File {
+		// In zip files, we can't reliably check execute bit, so include all regular files
+		if !f.Mode().IsRegular() {
+			continue
+		}
+		if unsafeName(f.Name) {
+			return unsafeNameError(archive, f.Name)
+		}
+		if filepath.Base(f.Name) == b.Name {
+			names = append(names, f.Name)
+			if named == nil {
+				named = f
 			}
+			continue
+		}
+		switch {
+		case largest == nil || f.UncompressedSize64 > largest.UncompressedSize64:
+			largest, ties = f, []string{f.Name}
+		case f.UncompressedSize64 == largest.UncompressedSize64:
+			ties = append(ties, f.Name)
 		}
 	}
 
-	if chosen == nil {
+	var chosen *zip.File
+	switch {
+	case len(names) > 1:
+		return ambiguousError(archive, b.Name, names)
+	case named != nil:
+		chosen = named
+	case largest == nil:
 		return fmt.Errorf("no file found in archive for %s", b.Name)
+	case len(ties) > 1:
+		return tieError(archive, b.Name, ties)
+	default:
+		chosen = largest
+	}
+	size, err := zipSize(chosen, archive)
+	if err != nil {
+		return err
 	}
 
-	rc, err := chosen.file.Open()
+	rc, err := chosen.Open()
 	if err != nil {
-		return fmt.Errorf("opening %s in %s: %w", chosen.name, archive, err)
+		return fmt.Errorf("opening %s in %s: %w", chosen.Name, archive, err)
 	}
 	defer rc.Close()
 
-	return b.writeMember(rc, chosen.name, archive, zipSize(chosen.file))
+	return b.writeMember(rc, chosen.Name, archive, size, nil)
 }
 
 // downloadPreset is the original preset-based download path.
@@ -630,7 +845,5 @@ func (b *Binary) downloadPreset() error {
 		return b.extractSingleFileFromZip(resp.Body, archive)
 	}
 
-	return b.writeFile(resp.Body, func(written int64) error {
-		return verifyWritten(downloadOf(b.File), written, resp.ContentLength)
-	})
+	return b.writeFile(resp.Body, downloadOf(b.File), resp.ContentLength, nil)
 }

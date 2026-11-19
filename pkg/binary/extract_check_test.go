@@ -155,6 +155,12 @@ func unknownMethodZip(t *testing.T, name string, content []byte) []byte {
 // broken tar and a zip member that cannot be opened are refused: the old
 // binary stays, no temp file stays, and the error names the archive (and the
 // member, when there is one). A good member installs.
+//
+// Only the empty member reaches the byte count of verifyWritten. The archive
+// reader of the standard library refuses the other cases first (their names
+// say "the reader refuses it"); they prove that the error of the reader
+// reaches the caller and that the old binary stays. TestWriteMember and
+// TestWriteFile_SizeLimit test the count itself.
 func TestExtract_ChecksTheMember(t *testing.T) {
 	good := []byte("tool v2\n")
 	archive := func(t *testing.T, kind string, content []byte) []byte {
@@ -199,19 +205,19 @@ func TestExtract_ChecksTheMember(t *testing.T) {
 		cases := []extractCase{
 			{name: "an empty member", body: func(t *testing.T) []byte { return archive(t, path.kind, nil) },
 				errHas: member + " wrote 0 bytes: the file in the archive is empty"},
-			{name: "a member shorter than its header", body: func(t *testing.T) []byte { return short(t, path.kind) },
+			{name: "a member shorter than its header, the reader refuses it", body: func(t *testing.T) []byte { return short(t, path.kind) },
 				errHas: member + ": ", errIs: io.ErrUnexpectedEOF},
-			{name: "a broken header", body: func(*testing.T) []byte { return []byte("not an archive") },
+			{name: "a broken header, the reader refuses it", body: func(*testing.T) []byte { return []byte("not an archive") },
 				errHas: brokenHeader[path.kind].errHas, errIs: brokenHeader[path.kind].errIs},
 			{name: "a good member", body: func(t *testing.T) []byte { return archive(t, path.kind, good) }},
 		}
 		if path.kind == "zip" {
 			cases = append(cases,
-				extractCase{name: "a member it cannot open", body: func(t *testing.T) []byte { return unknownMethodZip(t, "tool", good) },
+				extractCase{name: "a member it cannot open, the reader refuses it", body: func(t *testing.T) []byte { return unknownMethodZip(t, "tool", good) },
 					errHas: "opening tool in tool.zip: ", errIs: zip.ErrAlgorithm})
 		} else {
 			cases = append(cases,
-				extractCase{name: "a broken tar", body: func(t *testing.T) []byte { return compressed(t, path.kind, []byte("not a tar archive")) },
+				extractCase{name: "a broken tar, the reader refuses it", body: func(t *testing.T) []byte { return compressed(t, path.kind, []byte("not a tar archive")) },
 					errHas: "reading the tar archive tool." + path.kind + ": "})
 		}
 		for _, tc := range cases {
@@ -313,7 +319,7 @@ func TestVerifyWritten(t *testing.T) {
 // also when the reader ends without an error, and it keeps the old binary.
 // (The archive readers of the standard library refuse a short member first,
 // so only a direct call reaches this count.) A read error names the member
-// and the archive.
+// and the archive. A check after the count (then) can refuse the member too.
 func TestWriteMember(t *testing.T) {
 	const member = "extraction of dir/tool from tool.tar.gz"
 	for _, tc := range []struct {
@@ -321,6 +327,7 @@ func TestWriteMember(t *testing.T) {
 		content string
 		size    int64
 		readErr error  // the reader fails with it after content
+		then    error  // the check after the count returns it
 		err     string // "" for no error
 	}{
 		{name: "a member of its size", content: "tool v2\n", size: 8},
@@ -333,6 +340,8 @@ func TestWriteMember(t *testing.T) {
 			err: member + " is incomplete: wrote 12 bytes, its size in the archive is 8; the archive is damaged"},
 		{name: "a read error", content: "tool", size: 8, readErr: io.ErrUnexpectedEOF,
 			err: member + ": unexpected EOF"},
+		{name: "a member that the check after the count refuses", content: "tool v2\n", size: 8,
+			then: errors.New("a second match"), err: "a second match"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -345,8 +354,12 @@ func TestWriteMember(t *testing.T) {
 				r = io.MultiReader(r, iotest.ErrReader(tc.readErr))
 			}
 			b := &Binary{Name: "tool", File: file}
+			var then func() error
+			if tc.then != nil {
+				then = func() error { return tc.then }
+			}
 
-			err := b.writeMember(r, "dir/tool", "tool.tar.gz", tc.size)
+			err := b.writeMember(r, "dir/tool", "tool.tar.gz", tc.size, then)
 			noTempFiles(t, dir)
 			got, rerr := os.ReadFile(file)
 			if rerr != nil {
@@ -409,11 +422,21 @@ func TestArchiveName(t *testing.T) {
 	}
 }
 
-// TestZipSize: a zip size that does not fit an int64 is no size (-1).
+// TestZipSize: a zip size up to maxBinarySize is the size. A larger size is
+// refused, also one that does not fit an int64 (it was "no size" before).
 func TestZipSize(t *testing.T) {
-	for size, want := range map[uint64]int64{0: 0, 7: 7, math.MaxInt64: math.MaxInt64, math.MaxInt64 + 1: -1, math.MaxUint64: -1} {
-		if got := zipSize(&zip.File{FileHeader: zip.FileHeader{UncompressedSize64: size}}); got != want {
-			t.Errorf("zipSize(%d) = %d, want %d", size, got, want)
+	limit := uint64(maxBinarySize)
+	for _, size := range []uint64{0, 7, limit} {
+		got, err := zipSize(&zip.File{FileHeader: zip.FileHeader{Name: "tool", UncompressedSize64: size}}, "tool.zip")
+		if err != nil || got != int64(size) {
+			t.Errorf("zipSize(%d) = %d, %v; want %d, no error", size, got, err, size)
+		}
+	}
+	for _, size := range []uint64{limit + 1, math.MaxInt64, math.MaxInt64 + 1, math.MaxUint64} {
+		want := "extraction of tool from tool.zip is too large: its size in the archive is " +
+			strconv.FormatUint(size, 10) + " bytes, and the limit for a binary is " + strconv.FormatUint(limit, 10) + " bytes"
+		if _, err := zipSize(&zip.File{FileHeader: zip.FileHeader{Name: "tool", UncompressedSize64: size}}, "tool.zip"); err == nil || err.Error() != want {
+			t.Errorf("zipSize(%d): error %v, want %q", size, err, want)
 		}
 	}
 }
