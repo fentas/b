@@ -88,11 +88,46 @@ func TestExtract_DriveNames(t *testing.T) {
 	})
 }
 
+// zipMember is a member of zipCreators: creator is its creator system, and
+// attrs its external attributes.
+type zipMember struct {
+	member
+	creator uint16
+	attrs   uint32
+}
+
+// zipCreators is a zip archive of the members, each with its own creator
+// system and external attributes.
+func zipCreators(t *testing.T, members ...zipMember) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, m := range members {
+		fh := &zip.FileHeader{Name: m.name, Method: zip.Store, CreatorVersion: m.creator << 8, ExternalAttrs: m.attrs}
+		w, err := zw.CreateHeader(fh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.WriteString(w, m.content); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// unixAttrs are the external attributes of a regular file with the Unix
+// mode perm.
+func unixAttrs(perm uint32) uint32 { return (0o100000 | perm) << 16 }
+
 // TestExtract_ExecRule: one rule on every path. A file whose base name is
-// the binary is the binary, with or without an execute bit. The execute bit
+// the binary is the binary, with or without an execute bit. When two or more
+// files match by name, the one executable match is the binary; two or more
+// executable matches, or none, refuse the archive. Otherwise the execute bit
 // counts only for the fallback of the asset paths, when no file matches by
-// name. Two or more files that match by name refuse the archive, whatever
-// their modes.
+// name.
 func TestExtract_ExecRule(t *testing.T) {
 	bin := member{name: "tool", content: "tool v2\n"}
 	completion := member{name: "completions/bash/tool", content: "complete -F _tool tool\n", mode: 0644}
@@ -107,19 +142,64 @@ func TestExtract_ExecRule(t *testing.T) {
 			got, err := installFrom(t, p, archiveFor(t, p.kind, member{name: "tool", content: "tool v2\n", mode: 0644}))
 			wantInstalled(t, got, err, "tool v2\n")
 		})
-		t.Run(p.name+", the binary and a completion script of the same name", func(t *testing.T) {
+		t.Run(p.name+", a completion script of the same name before the binary", func(t *testing.T) {
 			got, err := installFrom(t, p, archiveFor(t, p.kind, completion, bin))
-			wantRefused(t, got, err, "refusing "+archive+`: 2 files in it match the binary tool: "completions/bash/tool", "tool"`, false)
+			wantInstalled(t, got, err, "tool v2\n")
+		})
+		t.Run(p.name+", a completion script of the same name after the binary", func(t *testing.T) {
+			got, err := installFrom(t, p, archiveFor(t, p.kind, bin, completion))
+			wantInstalled(t, got, err, "tool v2\n")
+		})
+		t.Run(p.name+", an executable bin/tool beside a larger data file of the same name", func(t *testing.T) {
+			got, err := installFrom(t, p, archiveFor(t, p.kind,
+				member{name: "share/tool", content: "a data file that is larger than the binary\n", mode: 0644},
+				member{name: "bin/tool", content: "tool v2\n"}))
+			wantInstalled(t, got, err, "tool v2\n")
 		})
 		t.Run(p.name+", two executables named tool", func(t *testing.T) {
+			got, err := installFrom(t, p, archiveFor(t, p.kind, member{name: "bin/tool", content: "tool a\n"}, member{name: "sbin/tool", content: "tool b\n"}))
+			wantRefused(t, got, err, "refusing "+archive+`: 2 files in it match the binary tool: "bin/tool", "sbin/tool"`, false)
+		})
+		t.Run(p.name+", two executables and a completion script named tool", func(t *testing.T) {
 			got, err := installFrom(t, p, archiveFor(t, p.kind, member{name: "tool", content: "tool a\n"}, member{name: "tool", content: "tool b\n"}, completion))
 			wantRefused(t, got, err, "refusing "+archive+`: 3 files in it match the binary tool: "tool", "tool", "completions/bash/tool"`, false)
+		})
+		t.Run(p.name+", two matches without an execute bit", func(t *testing.T) {
+			got, err := installFrom(t, p, archiveFor(t, p.kind, member{name: "tool", content: "tool v2\n", mode: 0644}, completion))
+			wantRefused(t, got, err, "refusing "+archive+`: 2 files in it match the binary tool: "tool", "completions/bash/tool"`, false)
 		})
 	}
 	for _, p := range []archivePath{{name: "a zip preset", kind: "zip"}, {name: "a zip asset", kind: "zip", asset: true}} {
 		t.Run(p.name+" without Unix modes, two files named tool", func(t *testing.T) {
 			got, err := installFrom(t, p, zipNoModes(t, bin, member{name: "tool", content: "not this\n"}))
 			wantRefused(t, got, err, `refusing tool.zip: 2 files in it match the binary tool: "tool", "tool"`, false)
+		})
+		t.Run(p.name+" without Unix modes, the binary and a completion script", func(t *testing.T) {
+			got, err := installFrom(t, p, zipNoModes(t, completion, bin))
+			wantRefused(t, got, err, `refusing tool.zip: 2 files in it match the binary tool: "completions/bash/tool", "tool"`, false)
+		})
+		// A creator other than Unix or macOS gives no Unix mode, even when
+		// the external attributes hold Unix mode bits: no match is
+		// executable.
+		t.Run(p.name+" from an NTFS creator, two matches, one with Unix bits 0755", func(t *testing.T) {
+			got, err := installFrom(t, p, zipCreators(t,
+				zipMember{member: completion, creator: 10, attrs: unixAttrs(0o644)},
+				zipMember{member: bin, creator: 10, attrs: unixAttrs(0o755)}))
+			wantRefused(t, got, err, `refusing tool.zip: 2 files in it match the binary tool: "completions/bash/tool", "tool"`, false)
+		})
+		// Each zip file has its own creator. A Unix binary beside a match
+		// without a Unix mode is the one executable match.
+		t.Run(p.name+", a Unix binary beside a match without a Unix mode", func(t *testing.T) {
+			got, err := installFrom(t, p, zipCreators(t,
+				zipMember{member: member{name: "doc/tool", content: "a page without a mode\n"}, creator: 0},
+				zipMember{member: bin, creator: zipCreatorUnix, attrs: unixAttrs(0o755)}))
+			wantInstalled(t, got, err, "tool v2\n")
+		})
+		t.Run(p.name+", a Unix binary beside a Unix match without permission bits", func(t *testing.T) {
+			got, err := installFrom(t, p, zipCreators(t,
+				zipMember{member: bin, creator: zipCreatorUnix, attrs: unixAttrs(0o755)},
+				zipMember{member: member{name: "doc/tool", content: "a page without permission bits\n"}, creator: zipCreatorUnix, attrs: unixAttrs(0)}))
+			wantInstalled(t, got, err, "tool v2\n")
 		})
 	}
 }

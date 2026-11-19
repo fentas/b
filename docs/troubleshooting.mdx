@@ -172,8 +172,13 @@ and the error names the archive and its files:
 - A file matches the binary when its name without the directory is the name
   of the binary (a preset of a tar archive can also give the file name). The
   file matches with or without an execute bit: b installs the binary with mode
-  `0755`. An archive in which more than one file matches the binary is
-  refused.
+  `0755`.
+- When more than one file matches, the one match with an execute bit is the
+  binary. So `bin/tool` installs beside a completion script
+  `completions/bash/tool`. An archive in which two or more matches have an
+  execute bit, or none has one, is refused. A file in a zip archive has an
+  execute bit only when the zip gives it a Unix mode (a zip made on Linux or
+  macOS).
 - When no file matches, b takes the largest candidate of a release asset: a
   file with an execute bit, or any regular file of a zip archive without Unix
   modes. Two largest candidates of the same size refuse the archive.

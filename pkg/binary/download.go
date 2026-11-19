@@ -142,7 +142,7 @@ func unsafeNameError(archive, name string) error {
 }
 
 // ambiguousError refuses archive because more than one file in it matches
-// the binary.
+// the binary, and not exactly one of them is executable.
 func ambiguousError(archive, binary string, names nameList) error {
 	return fmt.Errorf("refusing %s: %d files in it match the binary %s: %s", archive, names.n, binary, names)
 }
@@ -387,12 +387,20 @@ type entry struct {
 // for it.
 func (e entry) mayRun() bool { return e.exec != execUnset }
 
+// executable reports whether the archive gives the file an execute bit: a
+// tar file whose mode has one, or a zip file with a Unix mode that has one.
+// A zip file without a Unix mode is not executable.
+func (e entry) executable() bool { return e.exec == execSet }
+
 // selector chooses the binary among the regular files of an archive, with
 // the same rule on every path:
 //   - A file that matches the binary by name is the binary, with or without
 //     an execute bit (b installs the binary with mode 0755). A file matches
 //     when its base name (memberBase) is the name of the binary; a tar
-//     preset also takes the names of tarFileMatches. Two or more matches
+//     preset also takes the names of tarFileMatches.
+//   - When two or more files match, the one executable match is the binary
+//     (executable). So a binary beside a completion script or a data file of
+//     the same name installs. Two or more executable matches, or none,
 //     refuse the archive as ambiguous.
 //   - When no file matches, the asset paths (fallback) take the single
 //     largest file that may run (mayRun). Two largest candidates of the
@@ -402,7 +410,8 @@ type selector struct {
 	none            string // the error when no file is the binary
 	fallback        bool
 	matches         nameList // the files that match by name
-	match           *entry   // the first of them
+	runnable        nameList // the matches that are executable
+	match, run      *entry   // the first of each
 	largest         *entry   // the first of the largest candidates
 	ties            nameList // the candidates of the largest size
 }
@@ -415,6 +424,12 @@ func (s *selector) add(e entry, match, candidate bool) {
 		s.matches.add(e.name)
 		if s.match == nil {
 			s.match = &e
+		}
+		if e.executable() {
+			s.runnable.add(e.name)
+			if s.run == nil {
+				s.run = &e
+			}
 		}
 	case candidate && s.fallback:
 		switch {
@@ -432,6 +447,8 @@ func (s *selector) choose() (entry, error) {
 	switch {
 	case s.matches.n == 1:
 		return *s.match, nil
+	case s.matches.n > 1 && s.runnable.n == 1:
+		return *s.run, nil
 	case s.matches.n > 1:
 		return entry{}, ambiguousError(s.archive, s.binary, s.matches)
 	case s.largest == nil:
