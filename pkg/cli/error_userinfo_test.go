@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fentas/b/pkg/envmatch"
 	"github.com/fentas/b/pkg/gitcache"
+	"github.com/fentas/b/pkg/state"
 )
 
 // fakePassword is the password in the refs of these tests. It is not a real
@@ -251,5 +253,96 @@ func TestEnvCommands_PasswordRefRefusedFirst(t *testing.T) {
 	}
 	if c := calls(); c != "" {
 		t.Errorf("git ran:\n%s", strings.ReplaceAll(c, canaryPassword, "<password>"))
+	}
+}
+
+// The "already exists" error of b env add names the key of b.yaml with
+// "***" in place of the user part: the password is in the ref and in the
+// key that b.yaml holds. Run returns it before any git command, and
+// addProfile (the add of each profile that b env add -i selects) returns
+// the same text.
+func TestEnvAdd_ExistsErrorHidesThePassword(t *testing.T) {
+	calls := gitSpy(t)
+	for _, tt := range []struct{ ref, shown string }{
+		{"https://user:" + canaryPassword + "@github.com/org/repo", "https://***@github.com/org/repo#lbl"},
+		{"ssh://user:" + canaryPassword + "@host.example/org/repo", "ssh://***@host.example/org/repo#lbl"},
+	} {
+		want := tt.shown + " already exists in b.yaml — remove it first with `b env remove " + tt.shown + "`"
+		io, out, errOut := bufIO()
+		shared := NewSharedOptions(io, nil)
+		shared.Config = &state.State{Envs: state.EnvList{{Key: tt.ref + "#lbl"}}}
+		o := &EnvAddOptions{SharedOptions: shared}
+		source := &state.EnvEntry{Key: "lbl", Files: map[string]envmatch.GlobConfig{"a/**": {}}}
+		for name, err := range map[string]error{
+			"Run":        o.Run(tt.ref + "#lbl"),
+			"addProfile": o.addProfile(tt.ref, "lbl", "", source, &state.State{Profiles: state.EnvList{source}}),
+		} {
+			if err == nil || err.Error() != want {
+				t.Errorf("%s %s: error %q, want %q", tt.shown, name,
+					strings.ReplaceAll(fmt.Sprint(err), canaryPassword, "<password>"), want)
+			}
+			checkRefusal(t, tt.shown+" "+name, err, want)
+		}
+		if strings.Contains(out.String()+errOut.String(), canaryPassword) {
+			t.Errorf("%s: the output shows the password", tt.shown)
+		}
+	}
+	if c := calls(); c != "" {
+		t.Errorf("git ran:\n%s", strings.ReplaceAll(c, canaryPassword, "<password>"))
+	}
+}
+
+// The profile list headers of b env profiles and b env add -i name the ref
+// with "***" in place of the user part, and so does the "already exists"
+// error of a selected profile. The output of b env add -i shows no part of
+// the password. An ssh:// ref keeps its password up to git; here git reads
+// that URL from a local repo (url.<bare>.insteadOf).
+func TestEnvCommands_ProfileListsHideThePassword(t *testing.T) {
+	saveHooks(t)
+	offlineUpstream(t)
+	t.Setenv(gitcache.SSHAsHTTPSEnv, "")
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_1", os.Getenv("GIT_CONFIG_KEY_0"))
+	t.Setenv("GIT_CONFIG_VALUE_1", "ssh://user:"+canaryPassword+"@github.com/org/repo.git")
+	isTTYFunc = func() bool { return true }
+	const (
+		ref   = "ssh://user:" + canaryPassword + "@github.com/org/repo"
+		shown = "ssh://***@github.com/org/repo"
+	)
+
+	// b env profiles: the header. Its "Install a profile with" hint names
+	// the ref as the user wrote it, so this test reads the header line only.
+	io, out, _ := bufIO()
+	err := (&EnvProfilesOptions{SharedOptions: NewSharedOptions(io, nil)}).Run(ref)
+	if err != nil {
+		t.Fatalf("env profiles: %s", strings.ReplaceAll(err.Error(), canaryPassword, "<password>"))
+	}
+	header := ""
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.HasPrefix(line, "Available profiles from ") {
+			header = line
+			break
+		}
+	}
+	if !strings.HasPrefix(header, "Available profiles from "+shown+" @ ") || strings.Contains(header, canaryPassword) {
+		t.Errorf("env profiles: header %q, want the ref with ***", strings.ReplaceAll(header, canaryPassword, "<password>"))
+	}
+
+	io, out, errOut := bufIO()
+	shared := NewSharedOptions(io, nil)
+	shared.Config = &state.State{Envs: state.EnvList{{Key: ref + "#base"}}}
+	o := &EnvAddOptions{SharedOptions: shared, Interactive: true, stdinReader: strings.NewReader("1\n")}
+	err = o.Run(ref)
+	if err == nil || err.Error() != "no profiles were added" {
+		t.Errorf("env add -i: error %q, want no profiles added", strings.ReplaceAll(fmt.Sprint(err), canaryPassword, "<password>"))
+	}
+	if !strings.Contains(out.String(), "Available profiles from "+shown+":") {
+		t.Errorf("env add -i: output %q, want the header with ***", strings.ReplaceAll(out.String(), canaryPassword, "<password>"))
+	}
+	if !strings.Contains(errOut.String(), shown+"#base already exists in b.yaml") {
+		t.Errorf("env add -i: error output %q, want the exists error with ***", strings.ReplaceAll(errOut.String(), canaryPassword, "<password>"))
+	}
+	if strings.Contains(out.String()+errOut.String(), canaryPassword) {
+		t.Error("env add -i: the output shows the password")
 	}
 }

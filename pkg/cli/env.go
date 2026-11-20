@@ -650,7 +650,7 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 			return sorted[i].Key < sorted[j].Key
 		})
 
-		fmt.Fprintf(o.IO.Out, "Available profiles from %s @ %s:\n\n", ref, versionLabel)
+		fmt.Fprintf(o.IO.Out, "Available profiles from %s @ %s:\n\n", gitcache.RedactUserinfo(ref), versionLabel)
 		for _, e := range sorted {
 			name := e.Key
 			desc := e.Description
@@ -803,7 +803,8 @@ func (o *EnvAddOptions) Run(refArg string) error {
 	localKey := ref + "#" + label
 	if o.Config != nil {
 		if existing := o.Config.Envs.Get(localKey); existing != nil {
-			return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", localKey, localKey)
+			shown := gitcache.RedactUserinfo(localKey)
+			return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", shown, shown)
 		}
 	}
 
@@ -842,7 +843,7 @@ func (o *EnvAddOptions) runInteractive(ref, version, refArg string) error {
 		return sorted[i].Key < sorted[j].Key
 	})
 
-	fmt.Fprintf(o.IO.Out, "Available profiles from %s:\n\n", ref)
+	fmt.Fprintf(o.IO.Out, "Available profiles from %s:\n\n", gitcache.RedactUserinfo(ref))
 	for i, e := range sorted {
 		desc := e.Description
 		if desc == "" {
@@ -946,7 +947,8 @@ func (o *EnvAddOptions) addProfile(ref, label, version string, source *state.Env
 	}
 	config := o.Config
 	if existing := config.Envs.Get(localKey); existing != nil {
-		return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", localKey, localKey)
+		shownKey := gitcache.RedactUserinfo(localKey)
+		return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", shownKey, shownKey)
 	}
 
 	// Resolve includes
