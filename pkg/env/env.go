@@ -24,8 +24,10 @@ const (
 )
 
 // ConflictFunc is called when a file has local changes during an update.
-// It receives source path, dest path, and returns the strategy to use for this file.
-// Return "replace", "client", "merge", or "diff" (shows diff, caller re-prompts).
+// It receives the source path, the dest path and mergeOK, and returns the
+// strategy for this file: "replace", "client" or "merge". SyncEnv treats
+// any other value as "replace", so a resolver that shows a diff must ask
+// again before it returns.
 // mergeOK is false when the file's selectors cannot take a merge (see
 // mergeRefusal): do not offer merge then. If merge comes back anyway,
 // SyncEnv returns the merge-gate error and does not write the file.

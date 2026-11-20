@@ -187,18 +187,11 @@ func mergeRefusal(selectors []string, sourcePath string) error {
 		if !isDottedSelector(sel) {
 			continue
 		}
-		// Tailor the suggestion to the file type. JSON files can't
-		// recover from this with a top-level selector either, because
-		// spliceSelectedScope rejects scoped JSON entirely (the splice
-		// is YAML-only). For JSON, the only path forward is to drop the
-		// select filter or move the data to YAML.
-		suggestion := "use a top-level selector or strategy: replace"
-		if strings.ToLower(filepath.Ext(sourcePath)) == ".json" {
-			suggestion = "JSON splicing is not implemented, drop the select filter or move the data to YAML"
-		}
+		// The same advice holds for YAML and JSON: both splices
+		// (spliceYAML, spliceJSON) take top-level keys.
 		return fmt.Errorf(
-			"a selector with a filter or a nested path on %s is not supported with strategy: merge (%s)",
-			sourcePath, suggestion)
+			"a selector with a filter or a nested path on %s is not supported with strategy: merge (use a top-level selector or strategy: replace)",
+			sourcePath)
 	}
 	return nil
 }
