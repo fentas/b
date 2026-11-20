@@ -920,6 +920,7 @@ func (o *InstallOptions) runEnvInstalls() error {
 	if err != nil {
 		return err
 	}
+	envKeys := o.envKeyLockKeys()
 
 	// Handle SCP-style installs
 	for _, ei := range o.envInstalls {
@@ -950,15 +951,18 @@ func (o *InstallOptions) runEnvInstalls() error {
 			}
 		}
 
-		// Update lock
-		lk.UpsertEnv(lock.EnvEntry{
-			Ref:            result.Ref,
-			Label:          result.Label,
-			Version:        result.Version,
-			Commit:         result.Commit,
-			PreviousCommit: result.PreviousCommit,
-			Files:          result.Files,
-		})
+		// Update lock. An env key of this run with the same lock key gets
+		// its own previous row in syncConfigEnvs, so this row stays out.
+		if !envKeys[[2]string{result.Ref, result.Label}] {
+			lk.UpsertEnv(lock.EnvEntry{
+				Ref:            result.Ref,
+				Label:          result.Label,
+				Version:        result.Version,
+				Commit:         result.Commit,
+				PreviousCommit: result.PreviousCommit,
+				Files:          result.Files,
+			})
+		}
 
 		// Add to config if requested
 		if o.Add {
@@ -968,16 +972,38 @@ func (o *InstallOptions) runEnvInstalls() error {
 		}
 	}
 
-	// Handle config-ref env installs (e.g. `b install github.com/org/infra`)
-	if len(o.configEnvRefs) > 0 {
-		if err := o.syncConfigEnvs(o.configEnvRefs); err != nil {
-			return err
-		}
-		// Re-read lock since syncConfigEnvs writes it
-		return nil
+	if len(o.configEnvRefs) == 0 {
+		return lock.WriteLock(lockDir, lk, o.bVersion)
 	}
 
-	return lock.WriteLock(lockDir, lk, o.bVersion)
+	// Handle config-ref env installs (e.g. `b install github.com/org/infra`).
+	// syncConfigEnvs reads b.lock from disk and writes it. Write the rows of
+	// the SCP-style installs first, so that it keeps them.
+	if len(o.envInstalls) > 0 {
+		if err := lock.WriteLock(lockDir, lk, o.bVersion); err != nil {
+			return err
+		}
+	}
+	return o.syncConfigEnvs(o.configEnvRefs)
+}
+
+// envKeyLockKeys is the set of b.lock keys (ref and label) that
+// syncConfigEnvs reads for the env keys of this run (configEnvRefs): the key
+// of each such env of b.yaml that passes the ref check, computed as
+// syncConfigEnvs computes it.
+func (o *InstallOptions) envKeyLockKeys() map[[2]string]bool {
+	keys := map[[2]string]bool{}
+	if o.Config == nil {
+		return keys
+	}
+	for _, entry := range o.Config.Envs {
+		for _, r := range o.configEnvRefs {
+			if entry.Key == r && gitcache.CheckRef(entry.Key) == nil {
+				keys[[2]string{gitcache.RefBase(entry.Key), gitcache.RefLabel(entry.Key)}] = true
+			}
+		}
+	}
+	return keys
 }
 
 // syncConfigEnvs syncs envs defined in b.yaml. If refs is nil, syncs all.
