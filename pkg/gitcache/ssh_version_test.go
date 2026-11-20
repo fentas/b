@@ -62,6 +62,8 @@ func TestIsSSHUserAt_Forms(t *testing.T) {
 		{"user:pw@github.com/org/repo", true},
 		{"user:pw@github.com:443/org/repo", true},
 		{"tok@github.com/org/repo", true},
+		{"user:p@ss@github.com/org/repo", true}, // an @ in the user part
+		{"a@b@github.com/org/repo", true},
 		{"github.com/org/repo@v2.0", false},
 		{"git@github.com:org/repo@v1", false},
 		{"git@github.com:repo@v1", false},

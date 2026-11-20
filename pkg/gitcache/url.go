@@ -163,6 +163,20 @@ func remoteHTTPS(ref string) ResolvedRef {
 var errRemoteHost = errors.New("the host part is not a plain host name or IP address with an optional port " +
 	"(no user name, password, wildcard, percent sign or trailing dot); b does not run a remote git command for it")
 
+// errUserinfoAt is the error for an https URL with more than one raw "@" in
+// its authority (checkRemote). The text does not echo the URL: a part of
+// the password can look like the host.
+var errUserinfoAt = errors.New("refusing a git ref with more than one @ before its path: remove the user part")
+
+// urlAuthority returns the authority of rest, the part of a URL after
+// "<scheme>://": the text up to the first "/", "?" or "#".
+func urlAuthority(rest string) string {
+	if end := strings.IndexAny(rest, "/?#"); end >= 0 {
+		return rest[:end]
+	}
+	return rest
+}
+
 // remoteHost is the host and port of an https URL, as parseHTTPSHost
 // parses them.
 type remoteHost struct {
@@ -278,6 +292,12 @@ func isSSHImplicit(ref string) bool {
 // true for an @ in an SSH path that a ":" follows ("git@host:x@y:z"): a git
 // ref name has no ":", so that @ is not a version. ResolveGitURL, RefBase,
 // RefVersion and the git provider use it.
+//
+// The authority of a ref ends at its first "/". An @ before that "/" is
+// never a version, also when the user part has an @ of its own
+// ("user:p@ss@host/path"): the version comes after the path. In an
+// scp-style ref the authority ends at the ":", so an @ after the ":" is in
+// the path ("git@host:repo@release/1.0" has the version "release/1.0").
 func IsSSHUserAt(ref string, atIdx int) bool {
 	prefix := ref[:atIdx]
 	rest := ref[atIdx+1:]
@@ -299,8 +319,10 @@ func IsSSHUserAt(ref string, atIdx int) bool {
 	if strings.Contains(rest, ":") {
 		return true
 	}
-	// A user part in front of a host and a path: "user:password@host/path".
-	return !strings.Contains(prefix, "@") && strings.Contains(rest, "/")
+	// A user part in front of a host and a path: "user:password@host/path",
+	// also "user:p@ss@host/path". When the prefix is an scp-style
+	// "user@host:path", this @ is in that path.
+	return strings.Contains(rest, "/") && !isSSHImplicit(prefix)
 }
 
 // RedactUserinfo returns the ref or URL s with the user part of its
