@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,7 +16,9 @@ import (
 // also when one run has both. The env key syncs after the SCP-style argument
 // and reads b.lock from disk, so the rows of the SCP-style argument must be
 // on disk first. An env key that fails gets its ✗ line and the run fails
-// with the summary, but the row of the SCP-style argument stays.
+// with the summary, but the row of the SCP-style argument stays. When the
+// SCP-style argument and the env key are the same ref, the env key syncs
+// from its own previous row and b.lock keeps its row.
 func TestInstall_SCPAndEnvKeyKeepTheirLockRows(t *testing.T) {
 	scp := setupLocalRepo(t)
 	key := setupLocalRepo(t)
@@ -36,6 +39,10 @@ func TestInstall_SCPAndEnvKeyKeepTheirLockRows(t *testing.T) {
 			map[string]string{scp: "from-scp", key: "from-key"}, ""},
 		{"SCP-style argument and a failing env key", append(append([]string{}, scpArgs...), missing),
 			map[string]string{scp: "from-scp"}, "1 env(s) failed: " + missing},
+		// The env key syncs from its own previous row (here none), not
+		// from the row of the SCP-style argument, and its row stays.
+		{"the same ref as SCP argument and env key", []string{key + ":/manifests/*.yaml", "from-scp", key},
+			map[string]string{key: "from-key"}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
@@ -86,8 +93,12 @@ func TestInstall_SCPAndEnvKeyKeepTheirLockRows(t *testing.T) {
 					t.Errorf("b.lock has no row for %s", ref)
 					continue
 				}
-				if e.Commit == "" || len(e.Files) != 2 {
-					t.Errorf("b.lock row for %s: commit %q, %d files, want a commit and 2 files", ref, e.Commit, len(e.Files))
+				// b.lock starts empty, so no row has a previous commit.
+				if e.Commit == "" || e.PreviousCommit != "" || len(e.Files) != 2 {
+					t.Errorf("b.lock row for %s: commit %q, previous commit %q, %d files, want a commit, no previous commit and 2 files", ref, e.Commit, e.PreviousCommit, len(e.Files))
+				}
+				if data, err := os.ReadFile(filepath.Join(project, dest, "a.yaml")); err != nil || string(data) != "a: 1\n" {
+					t.Errorf("%s/a.yaml is %q (read error: %v), want the file of %s", dest, data, err, ref)
 				}
 				for _, f := range e.Files {
 					if !strings.HasPrefix(f.Dest, dest+"/") {
