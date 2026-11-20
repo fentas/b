@@ -865,3 +865,92 @@ func TestParseSCPArg_LegalFormsPass(t *testing.T) {
 		}
 	}
 }
+
+// b install reads the @ of a user part in an argument as a part of the ref,
+// not as the start of the version, with the rule of RefVersion. The ref keeps
+// its user part and its host; a version comes after a later @.
+func TestParseSCPArg_UserPartIsNotAVersion(t *testing.T) {
+	for _, tt := range []struct {
+		arg                       string
+		ref, label, version, glob string
+	}{
+		{"https://user@github.com/org/repo:/glob", "https://user@github.com/org/repo", "", "", "glob"},
+		{"https://user@github.com/org/repo@v1:/glob", "https://user@github.com/org/repo", "", "v1", "glob"},
+		{"https://user@github.com/org/repo#lbl:/glob", "https://user@github.com/org/repo", "lbl", "", "glob"},
+		{"https://user@github.com/org/repo#lbl@v1:/glob", "https://user@github.com/org/repo", "lbl", "v1", "glob"},
+		{"user@github.com/org/repo:/glob", "user@github.com/org/repo", "", "", "glob"},
+		{"user@github.com/org/repo@v1:/glob", "user@github.com/org/repo", "", "v1", "glob"},
+		{"ssh://git@github.com/org/repo:/glob", "ssh://git@github.com/org/repo", "", "", "glob"},
+		{"ssh://git@github.com/org/repo@v1:/glob", "ssh://git@github.com/org/repo", "", "v1", "glob"},
+	} {
+		ei, consumed, ok, err := parseSCPArg(tt.arg, nil)
+		if err != nil || !ok || consumed != 0 {
+			t.Errorf("parseSCPArg(%q): ok %v, consumed %d, error %v; want ok, 0, none", tt.arg, ok, consumed, err)
+			continue
+		}
+		if ei.ref != tt.ref || ei.label != tt.label || ei.version != tt.version || ei.glob != tt.glob || ei.dest != "" {
+			t.Errorf("parseSCPArg(%q) = %+v, want ref %q, label %q, version %q, glob %q, no dest",
+				tt.arg, ei, tt.ref, tt.label, tt.version, tt.glob)
+		}
+	}
+}
+
+// b install keeps the host of an argument with a token as the user name and
+// no password ("https://token@host/org/repo:/glob", also with no scheme and
+// with a version). The sync refuses the https URL with a user part before
+// git runs, so no git command runs and the token does not go to a host. The
+// error names the right host, with "***" in place of the user part. The
+// token is in no output, in no format verb of the error and not in b.yaml
+// or b.lock, with and without a dest, --add and B_GIT_SSH_AS_HTTPS=1.
+func TestInstall_UserNameArgumentKeepsItsHost(t *testing.T) {
+	calls := gitSpy(t)
+	t.Setenv("GITHUB_TOKEN", canaryToken)
+	for _, knob := range []string{"", "1"} {
+		t.Setenv(gitcache.SSHAsHTTPSEnv, knob)
+		for _, host := range []string{"github.com", "host.example"} {
+			for _, user := range []string{"https://" + canaryToken + "@", canaryToken + "@"} {
+				for _, version := range []string{"", "v1"} {
+					ref := user + host + "/org/repo"
+					shown := gitcache.RedactUserinfo(ref)
+					if shown == ref || !strings.HasSuffix(shown, "***@"+host+"/org/repo") {
+						t.Fatalf("RedactUserinfo of a ref with a user part gives %q", shown)
+					}
+					arg := ref + "@" + version + ":/manifests/**"
+					if version == "" {
+						arg = ref + ":/manifests/**"
+					}
+					name := fmt.Sprintf("%s=%q %s %q", gitcache.SSHAsHTTPSEnv, knob, shown, version)
+					ei, _, ok, err := parseSCPArg(arg, nil)
+					if err != nil || !ok || ei.ref != ref || ei.version != version || ei.label != "" || ei.glob != "manifests/**" {
+						t.Errorf("%s: parse: ok %v, error %v, ref %q, version %q, label %q, glob %q; want ok, the ref with its host, version %q",
+							name, ok, err != nil, strings.ReplaceAll(ei.ref, canaryToken, "<token>"),
+							strings.ReplaceAll(ei.version, canaryToken, "<token>"), ei.label, ei.glob, version)
+					}
+					want := "syncing " + shown + ": resolving " + shown + "@" + version + ": refusing https://***@" + host + "/org/repo.git: "
+					for _, args := range [][]string{{arg}, {arg, "out"}, {"--add", arg, "out"}} {
+						name := fmt.Sprintf("%s with %d argument(s)", name, len(args))
+						configPath := installDir(t)
+						io, out, errOut := bufIO()
+						cmd := NewInstallCmd(&SharedOptions{IO: io, ConfigPath: configPath, loadedConfigPath: configPath})
+						cmd.SetOut(out)
+						cmd.SetErr(errOut)
+						cmd.SetArgs(args)
+						err := cmd.Execute()
+						if err == nil || !strings.HasPrefix(err.Error(), want) {
+							t.Errorf("%s: error %q, want it to start with %q", name,
+								strings.ReplaceAll(fmt.Sprint(err), canaryToken, "<token>"), want)
+						}
+						checkRefusalFormats(t, name, err)
+						if all := out.String() + errOut.String(); strings.Contains(all, canaryToken) {
+							t.Errorf("%s: the output shows the token", name)
+						}
+						checkInstallFiles(t, name, configPath)
+					}
+				}
+			}
+		}
+	}
+	if c := calls(); c != "" {
+		t.Errorf("git ran:\n%s", strings.ReplaceAll(c, canaryToken, "<token>"))
+	}
+}

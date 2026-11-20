@@ -841,10 +841,12 @@ func parseSCPArg(arg string, remaining []string) (envInstall, int, bool, error) 
 		return envInstall{}, 0, false, err
 	}
 
-	// Parse ref@version
+	// Parse ref@version, with the rule of RefBase and RefVersion: an @ of a
+	// user part is not a version ("https://token@host/org/repo" keeps its
+	// host; "host/org/repo@v1" has the version v1).
 	ref := refPart
 	version := ""
-	if atIdx := strings.LastIndex(refPart, "@"); atIdx != -1 {
+	if atIdx := strings.LastIndex(refPart, "@"); atIdx > 0 && !gitcache.IsSSHUserAt(refPart, atIdx) {
 		ref = refPart[:atIdx]
 		version = refPart[atIdx+1:]
 	}
@@ -893,14 +895,16 @@ func (o *InstallOptions) runEnvInstalls() error {
 
 		// SCP-style installs always sync fresh (user explicitly requested files)
 		result, err := env.SyncEnv(cfg, projectRoot, "", nil)
+		// The ref as the messages show it: "***" in place of a user part.
+		shown := gitcache.RedactUserinfo(ei.ref)
 		if err != nil {
-			return fmt.Errorf("syncing %s: %w", ei.ref, err)
+			return fmt.Errorf("syncing %s: %w", shown, err)
 		}
 
 		if result.Skipped {
-			fmt.Fprintf(o.IO.Out, "  %-40s %s\n", ei.ref, result.Message)
+			fmt.Fprintf(o.IO.Out, "  %-40s %s\n", shown, result.Message)
 		} else {
-			fmt.Fprintf(o.IO.Out, "  %-40s %s → %s (%s)\n", ei.ref, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)
+			fmt.Fprintf(o.IO.Out, "  %-40s %s → %s (%s)\n", shown, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)
 			for _, f := range result.Files {
 				fmt.Fprintf(o.IO.Out, "    → %-36s ✓ synced\n", f.Dest)
 			}
