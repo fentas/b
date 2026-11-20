@@ -203,9 +203,10 @@ var errRemoteHost = errors.New("the host part is not a plain host name or IP add
 // not echo the ref: a part of the password can look like the host.
 var errUserinfoAt = errors.New("refusing a git ref with a password or more than one @ before its path: remove the user part")
 
-// errScheme is the error for a URL with a scheme that b does not fetch, also
-// the URL "https://<scheme>://..." that ResolveGitURL builds for a ref with
-// such a scheme (checkRemote). The text does not echo the URL.
+// errScheme is the error for a URL with a scheme that b does not fetch or a
+// remote helper, also the URL "https://<scheme>://..." that ResolveGitURL
+// builds for a ref with such a scheme (checkRemote). The text does not echo
+// the URL.
 var errScheme = errors.New("refusing a git ref with a scheme that b does not fetch: use https://, ssh://, git:// or no scheme")
 
 // refusedURL is the URL of a ref that CheckRef refuses (ResolveGitURL). It

@@ -69,6 +69,8 @@ func Fetch(root, ref, commitOrTag string) error {
 // FetchAuth fetches with optional auth token, from the URL that the clone
 // stored (remote.origin.url). It sends the header only when b chooses the
 // same header for the host of that URL (providerAuth), scoped to that host.
+// The stored URL gets the transport check of FetchURLAuth (checkRemote)
+// before git fetches from it.
 //
 // Deprecated: use FetchURLAuth with ResolvedRef.URL and
 // ResolvedRef.AuthHeader, for the reason given at Fetch.
@@ -121,32 +123,74 @@ func HasCommit(root, ref, commit string) bool {
 	return cmd.Run() == nil
 }
 
-// checkRemote refuses an https URL whose host parseHTTPSHost does not accept,
-// before the remote git command (clone, fetch, ls-remote) runs: b and git
-// could read another host from it. The error names the URL without its user
-// part (RedactUserinfo). Three forms get a fixed text that does not echo the
-// URL: a second scheme ("https://http://...", errScheme), an authority with
-// more than one raw "@" (errUserinfoAt), and refusedURL, the URL of a ref
-// that CheckRef refuses (errUserinfoAt). An SSH URL or a local path passes;
-// b gives git no header for those.
+// checkRemote is the transport check for each URL that b gives to a remote
+// git command (clone, fetch, ls-remote), also the URL that a clone stored
+// (FetchAuth). It runs before the command. These forms pass:
+//   - an https URL ("https://", in any case) whose host parseHTTPSHost
+//     accepts. b and git could read another host from the other https URLs.
+//     That error names the URL without its user part (RedactUserinfo);
+//   - an ssh:// URL ("ssh://", lower case);
+//   - an scp-like URL ("git@host:org/repo");
+//   - a local path: a URL with no ":", or with a "/" before its first ":".
+//
+// These forms get a fixed text that does not echo the URL:
+//   - another scheme ("http://", "file://", "git://", "SSH://"), a second
+//     scheme ("https://http://..."), and a remote helper
+//     ("<transport>::<address>"): errScheme;
+//   - more than one raw "@" in the authority, which ends at the first "/",
+//     "?" or "#", or in an scp-like URL at the first ":": errUserinfoAt;
+//   - refusedURL, the URL of a ref that CheckRef refuses: errUserinfoAt.
 func checkRemote(remote string) error {
 	if remote == refusedURL {
 		return errUserinfoAt
 	}
-	if !hasHTTPSScheme(remote) {
+	if remoteHelper(remote) {
+		return errScheme
+	}
+	if !hasScheme(remote) {
+		colon := strings.Index(remote, ":")
+		if colon < 0 || strings.Contains(remote[:colon], "/") {
+			return nil // a local path
+		}
+		if strings.Count(remote[:colon], "@") > 1 {
+			return errUserinfoAt // an scp-like URL
+		}
 		return nil
 	}
-	rest := remote[len("https://"):]
+	i := strings.Index(remote, "://")
+	scheme, rest := remote[:i], remote[i+len("://"):]
 	if hasScheme(rest) {
 		return errScheme
 	}
 	if strings.Count(rest[:authorityEnd(rest)], "@") > 1 {
 		return errUserinfoAt
 	}
-	if _, err := parseHTTPSHost(remote); err != nil {
-		return fmt.Errorf("refusing %s: %w", RedactUserinfo(remote), err)
+	switch {
+	case strings.EqualFold(scheme, "https"):
+		if _, err := parseHTTPSHost(remote); err != nil {
+			return fmt.Errorf("refusing %s: %w", RedactUserinfo(remote), err)
+		}
+	case scheme == "ssh":
+	default:
+		return errScheme
 	}
 	return nil
+}
+
+// remoteHelper reports whether git reads remote as "<transport>::<address>",
+// a remote helper (gitremote-helpers(7)): a letter or digit, then letters,
+// digits, "+", "-" or ".", then "::".
+func remoteHelper(remote string) bool {
+	i := 0
+	for i < len(remote) {
+		c := remote[i]
+		alnum := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+		if !alnum && (i == 0 || c != '+' && c != '-' && c != '.') {
+			break
+		}
+		i++
+	}
+	return i > 0 && strings.HasPrefix(remote[i:], "::")
 }
 
 // redactedError is the error of a git command that b ran with an auth
