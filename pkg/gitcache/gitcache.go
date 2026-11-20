@@ -4,6 +4,7 @@ package gitcache
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
@@ -136,11 +137,9 @@ func checkRemote(remote string) error {
 }
 
 // redactedError is the error of a git command that b ran with an auth
-// header. Error returns the text of the command error with the secret
-// replaced by "***", and nothing more. Unwrap returns the first error in
-// the chain whose text does not hold the secret (for example the
-// *exec.ExitError), so errors.Is and errors.As find it, and no error that
-// Unwrap returns prints the secret.
+// header (redactWrap). Error returns the text of the command error with the
+// secret replaced by "***", and nothing more. Unwrap returns the cause that
+// redactWrap kept, or nil.
 type redactedError struct {
 	msg string
 	err error
@@ -151,15 +150,50 @@ func (e *redactedError) Unwrap() error { return e.err }
 
 // redactWrap returns err with the secret of authHeader removed from its
 // text (redactedError). It returns err as it is when authHeader is empty.
+//
+// redactWrap is only for the errors of b's own git runners (runAuth,
+// outputAuth). Their text holds the git command line and the stderr of git.
+// They do not return a context error today. The result keeps one of these
+// causes, so that errors.Is and errors.As find it:
+//   - the *exec.ExitError that errors.As finds in err;
+//   - context.Canceled or context.DeadlineExceeded, when errors.Is matches it;
+//   - exec.ErrNotFound, when errors.Is matches it (git is not on the PATH).
+//
+// It keeps the cause only when its text holds no secret (for an
+// *exec.ExitError, also its Stderr). It never keeps an error that wraps the
+// cause: a wrapper can hold the secret in its text, in a field or in the
+// errors that it wraps. For every other error, Unwrap gives nil.
 func redactWrap(err error, authHeader string) error {
 	if err == nil || authHeader == "" {
 		return err
 	}
-	inner := err
-	for inner != nil && redactAuth(inner.Error(), authHeader) != inner.Error() {
-		inner = errors.Unwrap(inner)
+	return &redactedError{msg: redactAuth(err.Error(), authHeader), err: keptCause(err, authHeader)}
+}
+
+// keptCause returns the cause of err that redactWrap keeps, or nil.
+func keptCause(err error, authHeader string) error {
+	holdsSecret := func(s string) bool { return redactAuth(s, authHeader) != s }
+	var cause error
+	var exit *exec.ExitError
+	switch {
+	case errors.As(err, &exit):
+		if exit == nil || holdsSecret(string(exit.Stderr)) {
+			return nil
+		}
+		cause = exit
+	case errors.Is(err, context.Canceled):
+		cause = context.Canceled
+	case errors.Is(err, context.DeadlineExceeded):
+		cause = context.DeadlineExceeded
+	case errors.Is(err, exec.ErrNotFound):
+		cause = exec.ErrNotFound
+	default:
+		return nil
 	}
-	return &redactedError{msg: redactAuth(err.Error(), authHeader), err: inner}
+	if holdsSecret(cause.Error()) {
+		return nil
+	}
+	return cause
 }
 
 // ResolveLocalRef resolves a version to a commit SHA for a local repo.
