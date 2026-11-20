@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -148,12 +149,31 @@ func withoutUserinfo(remote string) string {
 	return remote[:len(scheme)] + rest
 }
 
-// redactWrap wraps an error with a redacted message while preserving the error chain.
+// redactedError is the error of a git command that b ran with an auth
+// header. Error returns the text of the command error with the secret
+// replaced by "***", and nothing more. Unwrap returns the first error in
+// the chain whose text does not hold the secret (for example the
+// *exec.ExitError), so errors.Is and errors.As find it, and no error that
+// Unwrap returns prints the secret.
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
+
+// redactWrap returns err with the secret of authHeader removed from its
+// text (redactedError). It returns err as it is when authHeader is empty.
 func redactWrap(err error, authHeader string) error {
-	if authHeader == "" {
+	if err == nil || authHeader == "" {
 		return err
 	}
-	return fmt.Errorf("%s: %w", redactAuth(err.Error(), authHeader), err)
+	inner := err
+	for inner != nil && redactAuth(inner.Error(), authHeader) != inner.Error() {
+		inner = errors.Unwrap(inner)
+	}
+	return &redactedError{msg: redactAuth(err.Error(), authHeader), err: inner}
 }
 
 // ResolveLocalRef resolves a version to a commit SHA for a local repo.

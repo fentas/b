@@ -169,6 +169,10 @@ func urlMatchHeader(t *testing.T, ac AuthCmd, u string) string {
 // transport_get; remote-curl.c http_init), so a rewrite of the user to
 // another host does not get the token. The rewrite here goes to a local bare
 // repo, so no git command leaves the machine.
+//
+// The matcher reads the env that authCmd built (ac.Env), not the env of the
+// git child. TestProductionRunners_ChildGetsScopedHeaderEnv checks that the
+// production runners give the child that env.
 func TestAuthHeader_RealGitScopedToHost(t *testing.T) {
 	isolateGit(t)
 	bare, commit := setupBareRepo(t)
