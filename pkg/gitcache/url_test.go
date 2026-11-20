@@ -377,11 +377,11 @@ func TestResolveGitURL_GitlabRef(t *testing.T) {
 	}
 }
 
-// --- Auth token detection ---
+// --- Auth token detection (providerAuth takes a parsed host) ---
 
 func TestDetectAuth_GitHub(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_test123")
-	auth := detectAuth("github.com/org/repo")
+	auth := providerAuth("github.com")
 	if auth.token != "ghp_test123" {
 		t.Errorf("token = %q", auth.token)
 	}
@@ -392,7 +392,7 @@ func TestDetectAuth_GitHub(t *testing.T) {
 
 func TestDetectAuth_GitLab(t *testing.T) {
 	t.Setenv("GITLAB_TOKEN", "glpat-test")
-	auth := detectAuth("gitlab.com/org/repo")
+	auth := providerAuth("gitlab.com")
 	if auth.token != "glpat-test" {
 		t.Errorf("token = %q", auth.token)
 	}
@@ -403,7 +403,7 @@ func TestDetectAuth_GitLab(t *testing.T) {
 
 func TestDetectAuth_Gitea(t *testing.T) {
 	t.Setenv("GITEA_TOKEN", "giteatok")
-	auth := detectAuth("codeberg.org/org/repo")
+	auth := providerAuth("codeberg.org")
 	if auth.token != "giteatok" {
 		t.Errorf("token = %q", auth.token)
 	}
@@ -416,7 +416,7 @@ func TestDetectAuth_NoToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GITLAB_TOKEN", "")
 	t.Setenv("GITEA_TOKEN", "")
-	auth := detectAuth("github.com/org/repo")
+	auth := providerAuth("github.com")
 	if auth.token != "" {
 		t.Errorf("expected empty token, got %q", auth.token)
 	}
@@ -424,7 +424,7 @@ func TestDetectAuth_NoToken(t *testing.T) {
 
 func TestDetectAuth_UnknownHost(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_test")
-	auth := detectAuth("custom.host.com/org/repo")
+	auth := providerAuth("custom.host.com")
 	if auth.token != "" {
 		t.Errorf("expected empty token for unknown host, got %q", auth.token)
 	}
@@ -432,7 +432,7 @@ func TestDetectAuth_UnknownHost(t *testing.T) {
 
 func TestDetectAuth_SpoofedHost(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_secret")
-	auth := detectAuth("github.evil.example/org/repo")
+	auth := providerAuth("github.evil.example")
 	if auth.token != "" {
 		t.Errorf("spoofed host should not get token, got %q", auth.token)
 	}
@@ -440,7 +440,7 @@ func TestDetectAuth_SpoofedHost(t *testing.T) {
 
 func TestDetectAuth_Subdomain(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_enterprise")
-	auth := detectAuth("enterprise.github.com/org/repo")
+	auth := providerAuth("enterprise.github.com")
 	if auth.token != "ghp_enterprise" {
 		t.Errorf("subdomain should match, got %q", auth.token)
 	}

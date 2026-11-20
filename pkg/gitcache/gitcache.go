@@ -35,6 +35,9 @@ func EnsureClone(root, ref, url string) error {
 
 // EnsureCloneAuth creates a shallow bare clone with optional auth token.
 func EnsureCloneAuth(root, ref, url, authHeader string) error {
+	if err := checkRemote(url); err != nil {
+		return err
+	}
 	dir := CacheDir(root, ref)
 	if _, err := os.Stat(dir); err == nil {
 		return nil // already cached
@@ -62,17 +65,24 @@ func Fetch(root, ref, commitOrTag string) error {
 }
 
 // FetchAuth fetches with optional auth token, from the URL that the clone
-// stored (remote.origin.url). The header is scoped to the host of that URL.
+// stored (remote.origin.url). It sends the header only when b chooses the
+// same header for the host of that URL (providerAuth), scoped to that host.
 //
 // Deprecated: use FetchURLAuth with ResolvedRef.URL and
 // ResolvedRef.AuthHeader, for the reason given at Fetch.
 func FetchAuth(root, ref, commitOrTag, authHeader string) error {
 	dir := CacheDir(root, ref)
-	origin, err := output("git", "-C", dir, "config", "--get", "remote.origin.url")
+	out, err := output("git", "-C", dir, "config", "--get", "remote.origin.url")
 	if err != nil {
 		return fmt.Errorf("reading the stored origin URL of %s: %w", dir, err)
 	}
-	return FetchURLAuth(root, ref, strings.TrimSpace(origin), commitOrTag, authHeader)
+	origin := strings.TrimSpace(out)
+	if authHeader != "" {
+		if h, err := parseHTTPSHost(origin); err != nil || providerAuth(h.host).header != authHeader {
+			authHeader = "" // the header was not chosen for the host of the stored URL
+		}
+	}
+	return FetchURLAuth(root, ref, origin, commitOrTag, authHeader)
 }
 
 // FetchURL fetches a specific commit or tag into the cache for ref, from url.
@@ -86,6 +96,9 @@ func FetchURL(root, ref, url, commitOrTag string) error {
 // over SSH then fetches over https when B_GIT_SSH_AS_HTTPS is on, and the
 // other way round. The fetch does not change the stored remote.
 func FetchURLAuth(root, ref, url, commitOrTag, authHeader string) error {
+	if err := checkRemote(url); err != nil {
+		return err
+	}
 	dir := CacheDir(root, ref)
 	// git fetch has no "--" in its synopsis, but its option parser ends the
 	// options at "--" (parse-options.c), as gitcli(7) says for commands that
@@ -104,6 +117,35 @@ func HasCommit(root, ref, commit string) bool {
 	dir := CacheDir(root, ref)
 	cmd := exec.Command("git", "-C", dir, "cat-file", "-e", commit+"^{commit}")
 	return cmd.Run() == nil
+}
+
+// checkRemote refuses an https URL whose host parseHTTPSHost does not accept,
+// before git runs: b and git could read another host from it. The error
+// names the URL without its user name and password. An SSH URL or a local
+// path passes; b gives git no header for those.
+func checkRemote(remote string) error {
+	if len(remote) < len("https://") || !strings.EqualFold(remote[:len("https://")], "https://") {
+		return nil
+	}
+	if _, err := parseHTTPSHost(remote); err != nil {
+		return fmt.Errorf("refusing %s: %w", withoutUserinfo(remote), err)
+	}
+	return nil
+}
+
+// withoutUserinfo returns an https URL with any "user:password@" of its
+// authority replaced by "***@", for an error message.
+func withoutUserinfo(remote string) string {
+	const scheme = "https://"
+	rest := remote[len(scheme):]
+	end := strings.IndexAny(rest, "/?#")
+	if end < 0 {
+		end = len(rest)
+	}
+	if at := strings.LastIndex(rest[:end], "@"); at >= 0 {
+		rest = "***" + rest[at:]
+	}
+	return remote[:len(scheme)] + rest
 }
 
 // redactWrap wraps an error with a redacted message while preserving the error chain.
@@ -139,6 +181,9 @@ func ResolveRef(url, version string) (string, error) {
 
 // ResolveRefAuth resolves with optional auth token.
 func ResolveRefAuth(url, version, authHeader string) (string, error) {
+	if err := checkRemote(url); err != nil {
+		return "", err
+	}
 	if version == "" {
 		version = "HEAD"
 	}

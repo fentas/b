@@ -1,13 +1,19 @@
 package gitcache
 
 import (
+	"errors"
+	"net"
 	neturl "net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
 // ResolvedRef holds a parsed and resolved git reference.
+//
+// AuthToken and AuthHeader are set only for an https URL whose host
+// parseHTTPSHost accepts and that is a provider host (providerAuth).
 type ResolvedRef struct {
 	URL        string // clone URL (https://, ssh://, git@host:repo, or local path)
 	IsLocal    bool   // true for local filesystem repos
@@ -137,10 +143,101 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 }
 
 // remoteHTTPS resolves a remote ref without a scheme ("github.com/org/repo")
-// to its https URL, with the provider auth for its host.
+// to its https URL, with the provider auth for its host. The token is
+// chosen from the host of that final URL, as parseHTTPSHost parses it, the
+// same parse that scopes the header key (headerKey). A URL whose host the
+// parse does not accept gets no token, and the git commands refuse it
+// (checkRemote).
 func remoteHTTPS(ref string) ResolvedRef {
-	auth := detectAuth(ref)
-	return ResolvedRef{URL: "https://" + ref + ".git", AuthToken: auth.token, AuthHeader: auth.header}
+	u := "https://" + ref + ".git"
+	h, err := parseHTTPSHost(u)
+	if err != nil {
+		return ResolvedRef{URL: u}
+	}
+	auth := providerAuth(h.host)
+	return ResolvedRef{URL: u, AuthToken: auth.token, AuthHeader: auth.header}
+}
+
+// errRemoteHost is the error for an https URL whose host parseHTTPSHost
+// does not accept.
+var errRemoteHost = errors.New("the host part is not a plain host name or IP address with an optional port " +
+	"(no user name, password, wildcard, percent sign or trailing dot); b does not run git for it")
+
+// remoteHost is the host and port of an https URL, as parseHTTPSHost
+// parses them.
+type remoteHost struct {
+	host string // lowercase DNS name or IP address (an IPv6 address has no brackets)
+	port string // "" or a port number from 1 to 65535, without leading zeros
+}
+
+// authority returns the host and port as an http.<url>.* key writes them.
+func (h remoteHost) authority() string {
+	a := h.host
+	if strings.Contains(a, ":") {
+		a = "[" + a + "]"
+	}
+	if h.port != "" {
+		a += ":" + h.port
+	}
+	return a
+}
+
+// parseHTTPSHost parses the host of an https URL. It is the one parser for
+// the choice of the token (remoteHTTPS) and for the scope of the header key
+// (headerKey), so the two always name the same host. It accepts a DNS name
+// (isDNSName) or an IPv6 address in brackets, with an optional port. It
+// refuses a URL with a user name or password, an empty host, a port that is
+// not a number from 1 to 65535, and a host with any other byte (a "*", a
+// "%", a byte outside ASCII).
+func parseHTTPSHost(rawURL string) (remoteHost, error) {
+	u, err := neturl.Parse(rawURL)
+	if err != nil || u.Scheme != "https" || u.Opaque != "" {
+		return remoteHost{}, errRemoteHost
+	}
+	if u.User != nil {
+		return remoteHost{}, errRemoteHost // a user name or a password
+	}
+	host, port := u.Hostname(), u.Port()
+	if strings.HasSuffix(u.Host, ":") {
+		return remoteHost{}, errRemoteHost // a ":" with no port number
+	}
+	if port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 || strings.Trim(port, "0123456789") != "" {
+			return remoteHost{}, errRemoteHost
+		}
+		port = strconv.Itoa(n)
+	}
+	if strings.HasPrefix(u.Host, "[") {
+		if ip := net.ParseIP(host); ip == nil || !strings.Contains(host, ":") {
+			return remoteHost{}, errRemoteHost // not an IPv6 address (a zone has a "%")
+		}
+	} else if !isDNSName(host) {
+		return remoteHost{}, errRemoteHost
+	}
+	return remoteHost{host: strings.ToLower(host), port: port}, nil
+}
+
+// isDNSName reports whether s is a host name of ASCII letters, digits and
+// hyphens, in labels of 1 to 63 bytes between single dots. There is no
+// empty label, so no trailing dot. A "*" is not a label byte: in an
+// http.<url>.* key, git's URL matcher reads a "*" label as a wildcard.
+func isDNSName(s string) bool {
+	if s == "" || len(s) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(s, ".") {
+		if label == "" || len(label) > 63 {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			c := label[i]
+			if !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // resolveRepo determines if a repo path is local or remote.
@@ -197,8 +294,14 @@ func IsSSHURL(url string) bool {
 	return strings.HasPrefix(url, "ssh://") || isSSHImplicit(url)
 }
 
-// matchesTrustedHost reports whether host exactly matches domain or is a subdomain.
+// matchesTrustedHost reports whether host is domain or a subdomain of it at
+// any depth ("api.github.com", "a.b.github.com"), in any case. host is a
+// host name as parseHTTPSHost accepts it: a host with a trailing dot, a
+// port, a wildcard or any other byte outside a DNS name never matches.
 func matchesTrustedHost(host, domain string) bool {
+	if !isDNSName(host) {
+		return false
+	}
 	host = strings.ToLower(host)
 	return host == domain || strings.HasSuffix(host, "."+domain)
 }
@@ -209,16 +312,10 @@ type authInfo struct {
 	header string // pre-formatted header value
 }
 
-// detectAuth returns the auth token and formatted header for a given ref.
-func detectAuth(ref string) authInfo {
-	host := ref
-	if i := strings.Index(host, "/"); i > 0 {
-		host = host[:i]
-	}
-	if i := strings.Index(host, ":"); i > 0 {
-		host = host[:i]
-	}
-
+// providerAuth returns the auth token and formatted header for a host that
+// parseHTTPSHost returned. It does not parse a ref: the caller gives the
+// parsed host of the final URL.
+func providerAuth(host string) authInfo {
 	var token string
 	switch {
 	case matchesTrustedHost(host, "github.com"):
@@ -293,15 +390,17 @@ func authCmd(remote, header string, gitArgs ...string) AuthCmd {
 }
 
 // headerKey returns the git config key that adds an HTTP header only for the
-// host of remote: "http.https://<host>/.extraHeader". git compares an
+// host of remote: "http.https://<host>[:<port>]/.extraHeader", from the
+// same parse that chose the token (parseHTTPSHost). git compares an
 // http.<url>.* key with the URL that it connects to, after its own
 // url.<base>.insteadOf rewrite, so a rewrite to another host does not get
-// the header. It returns "" when remote is not an https URL with a host;
-// then b gives git no header.
+// the header. git does not compare the key with the target of a redirect.
+// It returns "" when parseHTTPSHost refuses remote; then b gives git no
+// header.
 func headerKey(remote string) string {
-	u, err := neturl.Parse(remote)
-	if err != nil || u.Scheme != "https" || u.Host == "" {
+	h, err := parseHTTPSHost(remote)
+	if err != nil {
 		return ""
 	}
-	return "http.https://" + strings.ToLower(u.Host) + "/.extraHeader"
+	return "http.https://" + h.authority() + "/.extraHeader"
 }
