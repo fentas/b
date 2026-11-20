@@ -161,3 +161,59 @@ func TestCheckRef_Forms(t *testing.T) {
 		}
 	}
 }
+
+// The authority ends at the first "/", "?" or "#", as git and curl read an
+// https URL. A ref with another "://" after its authority and an @ in the
+// authority after it ("https://a?b://user:password@host/x") is refused with
+// the fixed text, also with B_GIT_SSH_AS_HTTPS=1. The remote git commands
+// refuse such a URL with the scheme text, also the URL of the ref that
+// RefBase cuts at the @. No error shows the password and no git command
+// runs. An @ after a "?" or "#" in a ref with a scheme is a version.
+func TestAuthorityEnd_QueryAndFragment(t *testing.T) {
+	refs := []string{
+		"https://a?b://user:" + refPassword + "@host.example/x",
+		"https://github.com#b://user:" + refPassword + "@host.example/x",
+		"github.com?b://user:" + refPassword + "@host.example/x",
+		"ssh://git@host.example?b://user:" + refPassword + "@evil.example/x",
+		"git://https://a?b://user:" + refPassword + "@host.example/x",
+	}
+	for _, knob := range []string{"", "1"} {
+		t.Setenv(SSHAsHTTPSEnv, knob)
+		t.Setenv("GITHUB_TOKEN", refToken)
+		for i, ref := range refs {
+			checkRefused(t, fmt.Sprintf("%s=%q ref %d", SSHAsHTTPSEnv, knob, i), ref)
+		}
+	}
+	cmds := recordGit(t)
+	for i, url := range []string{
+		"https://a?b://user:" + refPassword + "@host.example/x",
+		"https://a?b://user:" + refPassword + ".git",
+		"https://github.com/org/repo.git?u=https://user:" + refPassword + "@host.example/x",
+		"ssh://git@host.example#b://user:" + refPassword + "@evil.example/x",
+	} {
+		for op, err := range boundaryErrors(t, url) {
+			if err == nil || err.Error() != schemeText {
+				t.Errorf("URL %d %s: error %q, want the scheme text", i, op,
+					strings.ReplaceAll(fmt.Sprint(err), refPassword, "<password>"))
+			}
+			if err != nil && formatsHold(err, refPassword) {
+				t.Errorf("URL %d %s: the error shows the password", i, op)
+			}
+		}
+	}
+	if len(*cmds) != 0 {
+		t.Errorf("%d git commands ran", len(*cmds))
+	}
+	for _, tt := range []struct{ ref, base, version string }{
+		{"https://github.com#lbl@v1", "https://github.com", "v1"},
+		{"https://github.com?x@v1", "https://github.com?x", "v1"},
+		{"https://user@github.com/org/repo?x@v1", "https://user@github.com/org/repo?x", "v1"},
+	} {
+		if got := RefBase(tt.ref); got != tt.base {
+			t.Errorf("RefBase(%q) = %q, want %q", tt.ref, got, tt.base)
+		}
+		if got := RefVersion(tt.ref); got != tt.version {
+			t.Errorf("RefVersion(%q) = %q, want %q", tt.ref, got, tt.version)
+		}
+	}
+}

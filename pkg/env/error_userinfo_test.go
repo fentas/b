@@ -148,7 +148,8 @@ func TestSyncEnv_ErrorHidesTheUserPart(t *testing.T) {
 }
 
 // SyncEnv refuses a ref with a password or more than one @ in front of the
-// host before anything else: the error is the fixed text alone, the
+// host, or with an @ after another "://", before anything else: the error
+// is the fixed text alone, the
 // pre-sync hook does not run, no token is chosen and no git command runs.
 // This holds with and without a path, a version, a forced commit and
 // B_GIT_SSH_AS_HTTPS=1.
@@ -172,7 +173,8 @@ func TestSyncEnv_PasswordRefRefusedFirst(t *testing.T) {
 	}
 	refs = append(refs,
 		"git@"+canaryPassword+"@github.com:org/repo",
-		"ssh://git@"+canaryPassword+"@github.com/org/repo")
+		"ssh://git@"+canaryPassword+"@github.com/org/repo",
+		"https://a?b://user:"+canaryPassword+"@github.com/org/repo")
 	marker := filepath.Join(t.TempDir(), "hook-ran")
 	for _, knob := range []string{"", "1"} {
 		t.Setenv(gitcache.SSHAsHTTPSEnv, knob)

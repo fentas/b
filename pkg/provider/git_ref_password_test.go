@@ -43,6 +43,7 @@ func TestGitRef_PasswordRefRefusedFirst(t *testing.T) {
 		"git://user:p@" + canaryPassword + "@github.com/org/repo:tool.sh@v1",
 		"git@" + canaryPassword + "@github.com:org/repo:tool.sh",
 		"ssh://git@" + canaryPassword + "@github.com/org/repo:tool.sh",
+		"git://https://a?b://user:" + canaryPassword + "@github.com/org/repo:tool.sh",
 	}
 	for i, ref := range refs {
 		dest := filepath.Join(t.TempDir(), "bin", "tool")

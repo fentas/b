@@ -71,6 +71,8 @@ func TestIsSSHUserAt_Forms(t *testing.T) {
 		{"deploy@host:repo@release/1.0", false}, // an @ in an scp-style path
 		{"ssh://git@github.com/org/repo@v1", false},
 		{"https://github.com/org/repo@v1", false},
+		{"https://github.com#lbl@v1", false}, // the authority ends at the "#"
+		{"https://github.com?x@v1", false},   // and at the "?"
 		{"kubectl@v1.30", false},
 	}
 	for _, tt := range tests {

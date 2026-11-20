@@ -216,7 +216,9 @@ const refusedURL = "https://***@***/"
 
 // authorityEnd returns the end of the authority of s, the text after
 // "<scheme>://" or a ref without a scheme: the index of the first "/", "?"
-// or "#", or len(s). checkRemote and CheckRef use it.
+// or "#", or len(s), as git and curl read an https URL. It is the one rule
+// of checkRemote, CheckRef, RedactUserinfo and IsSSHUserAt (for a ref with
+// a scheme).
 func authorityEnd(s string) int {
 	if end := strings.IndexAny(s, "/?#"); end >= 0 {
 		return end
@@ -232,7 +234,9 @@ func authorityEnd(s string) int {
 //     ("user:password@host"), or more than one "@" in front of the host
 //     (refusedBare);
 //   - a ref with a scheme ("https://", "ssh://") with more than one "@" in
-//     its authority.
+//     its authority;
+//   - a ref with another "://" after its authority and an "@" in the
+//     authority that follows it ("https://a?b://user:pw@host/x").
 //
 // A local path passes. Call CheckRef with the ref as the user wrote it,
 // before RefBase, RefVersion or any message that shows the ref. The remote
@@ -255,7 +259,18 @@ func CheckRef(ref string) error {
 		start > 0 && strings.Count(s[start:start+authorityEnd(s[start:])], "@") > 1 {
 		return errUserinfoAt
 	}
-	return nil
+	// Another "://" after the authority: git and curl read the text after
+	// it as a path, a query or a fragment, but it can hold a user part.
+	for rest := s[start:]; ; {
+		i := strings.Index(rest, "://")
+		if i < 0 {
+			return nil
+		}
+		rest = rest[i+len("://"):]
+		if strings.Contains(rest[:authorityEnd(rest)], "@") {
+			return errUserinfoAt
+		}
+	}
 }
 
 // refusedBare reports whether a ref without a scheme has a user part that b
@@ -399,11 +414,14 @@ func isSSHImplicit(ref string) bool {
 // ref name has no ":", so that @ is not a version. ResolveGitURL, RefBase,
 // RefVersion and the git provider use it.
 //
-// The authority of a ref ends at its first "/". An @ before that "/" is
-// never a version, also when the user part has an @ of its own
-// ("user:p@ss@host/path"): the version comes after the path. In an
-// scp-style ref the authority ends at the ":", so an @ after the ":" is in
-// the path ("git@host:repo@release/1.0" has the version "release/1.0").
+// The authority of a ref with a scheme ends at its first "/", "?" or "#"
+// (authorityEnd), as git and curl read an https URL: an @ after it is a
+// version ("https://github.com#lbl@v1"). The first part of a ref without a
+// scheme ends at its first "/". An @ before that "/" is never a version,
+// also when the user part has an @ of its own ("user:p@ss@host/path"): the
+// version comes after the path. In an scp-style ref the authority ends at
+// the ":", so an @ after the ":" is in the path ("git@host:repo@release/1.0"
+// has the version "release/1.0").
 //
 // In the first part of a ref without a scheme that CheckRef refuses (a
 // password, or more than one @ in front of the host), no @ is a version:
@@ -412,15 +430,16 @@ func IsSSHUserAt(ref string, atIdx int) bool {
 	prefix := ref[:atIdx]
 	rest := ref[atIdx+1:]
 
-	// With a scheme, the user part is in the authority: no "/" follows the
-	// scheme before the @.
+	// With a scheme, the user part is in the authority: no "/", "?" or "#"
+	// follows the scheme before the @ (authorityEnd).
 	if i := strings.Index(prefix, "://"); i > 0 && !strings.ContainsAny(prefix[:i], "/@") {
 		// A URL in the ref ("git://http://user:pw@host/path"): the user part
 		// is in the authority of the inner URL.
-		if inner := i + len("://"); hasScheme(prefix[inner:]) {
+		inner := i + len("://")
+		if hasScheme(prefix[inner:]) {
 			return IsSSHUserAt(ref[inner:], atIdx-inner)
 		}
-		if !strings.Contains(prefix[i+len("://"):], "/") {
+		if authorityEnd(prefix[inner:]) == len(prefix)-inner {
 			return true
 		}
 		return strings.HasPrefix(prefix, "ssh://") && strings.Contains(rest, ":")
@@ -444,8 +463,8 @@ func IsSSHUserAt(ref string, atIdx int) bool {
 }
 
 // RedactUserinfo returns the ref or URL s with the user part of its
-// authority (the text before the last @ of the authority) replaced by
-// "***", for a message. It keeps the user name of an SSH ref
+// authority (the text before the last @ of the authority, which ends at the
+// first "/", "?" or "#": authorityEnd) replaced by "***", for a message. It keeps the user name of an SSH ref
 // ("git@github.com:org/repo", "ssh://git@host/org/repo") that has no
 // password: that is not a secret. Text with no user part does not change.
 func RedactUserinfo(s string) string {
@@ -462,11 +481,7 @@ func RedactUserinfo(s string) string {
 		return s // scp-style "user@host:path": the user part has no password
 	}
 	rest := s[start:]
-	end := strings.IndexAny(rest, "/?#")
-	if end < 0 {
-		end = len(rest)
-	}
-	at := strings.LastIndex(rest[:end], "@")
+	at := strings.LastIndex(rest[:authorityEnd(rest)], "@")
 	if at < 0 {
 		return s
 	}

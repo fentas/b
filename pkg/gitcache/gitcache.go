@@ -135,8 +135,8 @@ func HasCommit(root, ref, commit string) bool {
 //
 // These forms get a fixed text that does not echo the URL:
 //   - another scheme ("http://", "file://", "git://", "SSH://"), a second
-//     scheme ("https://http://..."), and a remote helper
-//     ("<transport>::<address>"): errScheme;
+//     "://" (also after the authority: "https://a?b://user:pw@host/x"),
+//     and a remote helper ("<transport>::<address>"): errScheme;
 //   - more than one raw "@" in the authority, which ends at the first "/",
 //     "?" or "#", or in an scp-like URL at the first ":": errUserinfoAt;
 //   - refusedURL, the URL of a ref that CheckRef refuses: errUserinfoAt.
@@ -159,8 +159,8 @@ func checkRemote(remote string) error {
 	}
 	i := strings.Index(remote, "://")
 	scheme, rest := remote[:i], remote[i+len("://"):]
-	if hasScheme(rest) {
-		return errScheme
+	if strings.Contains(rest, "://") {
+		return errScheme // also after the authority: "https://a?b://user:pw@host/x"
 	}
 	if strings.Count(rest[:authorityEnd(rest)], "@") > 1 {
 		return errUserinfoAt

@@ -186,7 +186,8 @@ func TestEnvAdd_RefErrorsHideTheUserPart(t *testing.T) {
 }
 
 // b env add, b env match and b env profiles refuse a ref with a password or
-// more than one @ in front of the host before anything else: the error is
+// more than one @ in front of the host, or with an @ after another "://",
+// before anything else: the error is
 // the fixed text alone. This holds for b env add with no #label and for
 // b env add -i with no terminal, whose errors name the ref, with and
 // without a path and a version. No token is chosen and no git command runs.
@@ -207,7 +208,8 @@ func TestEnvCommands_PasswordRefRefusedFirst(t *testing.T) {
 	}
 	refs = append(refs,
 		"git@"+canaryPassword+"@github.com:org/repo",
-		"ssh://git@"+canaryPassword+"@github.com/org/repo")
+		"ssh://git@"+canaryPassword+"@github.com/org/repo",
+		"https://a?b://user:"+canaryPassword+"@github.com/org/repo")
 	for _, knob := range []string{"", "1"} {
 		t.Setenv(gitcache.SSHAsHTTPSEnv, knob)
 		for i, ref := range refs {
