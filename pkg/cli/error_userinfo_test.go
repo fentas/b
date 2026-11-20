@@ -650,3 +650,218 @@ func TestInstall_KeyWithUserPartShownRedacted(t *testing.T) {
 		t.Errorf("b.lock has %d env entries, want one for the ssh:// key", len(lk.Envs))
 	}
 }
+
+// installDir makes the project dir of a b install test: PATH_BASE and
+// PATH_BIN, a b.yaml with no entries and an empty b.lock. It returns the
+// path of b.yaml.
+func installDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("PATH_BASE", dir)
+	t.Setenv("PATH_BIN", dir)
+	configPath := filepath.Join(dir, "b.yaml")
+	mustWrite(t, configPath, []byte("binaries: {}\n"))
+	if err := lock.WriteLock(dir, &lock.Lock{Version: 1}, "test"); err != nil {
+		t.Fatal(err)
+	}
+	return configPath
+}
+
+// checkInstallFiles fails the test when b.yaml or b.lock in the dir of
+// configPath cannot be read or holds the password or the token.
+func checkInstallFiles(t *testing.T, name, configPath string) {
+	t.Helper()
+	for _, file := range []string{configPath, filepath.Join(filepath.Dir(configPath), "b.lock")} {
+		b, err := os.ReadFile(file)
+		if err != nil || strings.Contains(string(b), canaryPassword) || strings.Contains(string(b), canaryToken) {
+			t.Errorf("%s: %s cannot be read or holds the password or the token (read error: %v)", name, filepath.Base(file), err != nil)
+		}
+	}
+}
+
+// b install refuses an env key of b.yaml with a password or more than one @
+// in front of its host, or with an @ after another "://", before it splits
+// the key (RefLabel, RefBase), as b update does. With no argument, each such
+// key gets one ✗ line with the fixed text and "<refused env key #N>" in
+// place of the key: N is the place of the key in the sorted list of the env
+// keys. With the key as the argument, b install stops with the fixed text
+// alone. The password and the token are in no output, in no format verb of
+// the error and not in b.yaml or b.lock. No token is chosen and no git
+// command runs.
+func TestInstall_RefusedKeyRefusedFirst(t *testing.T) {
+	calls := gitSpy(t)
+	t.Setenv("GITHUB_TOKEN", canaryToken)
+	const refusal = "refusing a git ref with a password or more than one @ before its path: remove the user part"
+	keys := []string{
+		"user:p@" + canaryPassword + "@github.com/org/repo#lbl",
+		"https://a?b://user:" + canaryPassword + "@host.example/x",
+		"ssh://git@" + canaryPassword + "@github.com/org/repo",
+	}
+	// The sorted order of the keys: https://..., ssh://..., user:...
+	placeholders := []string{"<refused env key #3>", "<refused env key #1>", "<refused env key #2>"}
+	envs := func() state.EnvList {
+		var list state.EnvList
+		for _, key := range keys {
+			list = append(list, &state.EnvEntry{Key: key, Files: map[string]envmatch.GlobConfig{"a/**": {}}})
+		}
+		return list
+	}
+	for _, knob := range []string{"", "1"} {
+		t.Setenv(gitcache.SSHAsHTTPSEnv, knob)
+		for i, key := range keys {
+			if gitcache.ResolveGitURL(key, "").AuthToken != "" {
+				t.Errorf("%s=%q: a token is chosen for key %d", gitcache.SSHAsHTTPSEnv, knob, i)
+			}
+		}
+
+		// No argument: each key of b.yaml.
+		name := fmt.Sprintf("%s=%q no argument", gitcache.SSHAsHTTPSEnv, knob)
+		configPath := installDir(t)
+		io, out, errOut := bufIO()
+		o := &InstallOptions{SharedOptions: &SharedOptions{
+			IO:               io,
+			ConfigPath:       configPath,
+			loadedConfigPath: configPath,
+			Config:           &state.State{Envs: envs()},
+		}}
+		err := o.Complete(nil)
+		if err == nil {
+			err = o.Run()
+		}
+		if err != nil {
+			t.Errorf("%s: error %q, want none", name, strings.ReplaceAll(err.Error(), canaryPassword, "<password>"))
+		}
+		checkRefusalFormats(t, name, err)
+		for _, placeholder := range placeholders {
+			line := "  " + fmt.Sprintf("%-40s", placeholder) + " ✗ " + refusal + "\n"
+			if got := strings.Count(errOut.String(), line); got != 1 {
+				t.Errorf("%s: %d refusal lines for %s, want 1; error output %q", name, got, placeholder,
+					strings.ReplaceAll(errOut.String(), canaryPassword, "<password>"))
+			}
+		}
+		if got := strings.Count(errOut.String(), " ✗ "); got != len(keys) {
+			t.Errorf("%s: %d ✗ lines, want %d", name, got, len(keys))
+		}
+		if all := out.String() + errOut.String(); strings.Contains(all, canaryPassword) || strings.Contains(all, canaryToken) {
+			t.Errorf("%s: the output shows the password or the token", name)
+		}
+		checkInstallFiles(t, name, configPath)
+
+		// The key as the argument, also with --add.
+		for i, key := range keys {
+			for _, args := range [][]string{{key}, {"--add", key}} {
+				name := fmt.Sprintf("%s=%q key %d %v", gitcache.SSHAsHTTPSEnv, knob, i, args[:len(args)-1])
+				configPath := installDir(t)
+				io, out, errOut := bufIO()
+				cmd := NewInstallCmd(&SharedOptions{
+					IO:               io,
+					ConfigPath:       configPath,
+					loadedConfigPath: configPath,
+					Config:           &state.State{Envs: envs()},
+				})
+				cmd.SetOut(out)
+				cmd.SetErr(errOut)
+				cmd.SetArgs(args)
+				err := cmd.Execute()
+				if err == nil || err.Error() != refusal {
+					t.Errorf("%s: error %q, want the fixed text alone", name,
+						strings.ReplaceAll(fmt.Sprint(err), canaryPassword, "<password>"))
+				}
+				checkRefusal(t, name, err, refusal)
+				if all := out.String() + errOut.String(); strings.Contains(all, canaryPassword) || strings.Contains(all, canaryToken) {
+					t.Errorf("%s: the output shows the password or the token", name)
+				}
+				checkInstallFiles(t, name, configPath)
+			}
+		}
+	}
+	if c := calls(); c != "" {
+		t.Errorf("git ran:\n%s", strings.ReplaceAll(c, canaryPassword, "<password>"))
+	}
+}
+
+// b install refuses an argument with a password or more than one @ in front
+// of its host before it splits the argument, with the fixed text alone:
+//   - "user:password@host/org/repo:/glob": the split at the last @ gave the
+//     ref "user:password";
+//   - "user.name:password@host/org/repo:/glob": the colon scan stops at the
+//     first ":" after a ".", so it gave the ref "user.name" and put the
+//     password in the glob;
+//   - an argument with no glob, which b would read as a binary.
+//
+// This holds with and without a version, a dest and --add. The password and
+// the token are in no output, in no format verb of the error and not in
+// b.yaml or b.lock, and no git command runs.
+func TestInstall_RefusedArgumentRefusedFirst(t *testing.T) {
+	calls := gitSpy(t)
+	t.Setenv("GITHUB_TOKEN", canaryToken)
+	const refusal = "refusing a git ref with a password or more than one @ before its path: remove the user part"
+	var refs []string
+	for _, user := range []string{"user:" + canaryPassword + "@", "user.name:" + canaryPassword + "@", "user:p@" + canaryPassword + "@"} {
+		for _, version := range []string{"", "@v1"} {
+			refs = append(refs, user+"github.com/org/repo"+version)
+		}
+	}
+	refs = append(refs,
+		"git@"+canaryPassword+"@github.com:org/repo",
+		"https://a?b://user:"+canaryPassword+"@host.example/x")
+	for _, knob := range []string{"", "1"} {
+		t.Setenv(gitcache.SSHAsHTTPSEnv, knob)
+		for i, ref := range refs {
+			for _, args := range [][]string{
+				{ref + ":/manifests/**"},
+				{ref + ":manifests/**", "out"},
+				{"--add", ref + ":/manifests/**", "out"},
+				{ref},
+			} {
+				name := fmt.Sprintf("%s=%q ref %d with %d argument(s)", gitcache.SSHAsHTTPSEnv, knob, i, len(args))
+				configPath := installDir(t)
+				io, out, errOut := bufIO()
+				cmd := NewInstallCmd(&SharedOptions{IO: io, ConfigPath: configPath, loadedConfigPath: configPath})
+				cmd.SetOut(out)
+				cmd.SetErr(errOut)
+				cmd.SetArgs(args)
+				err := cmd.Execute()
+				if err == nil || err.Error() != refusal {
+					t.Errorf("%s: error %q, want the fixed text alone", name,
+						strings.ReplaceAll(fmt.Sprint(err), canaryPassword, "<password>"))
+				}
+				checkRefusal(t, name, err, refusal)
+				if all := out.String() + errOut.String(); strings.Contains(all, canaryPassword) || strings.Contains(all, canaryToken) {
+					t.Errorf("%s: the output shows the password or the token", name)
+				}
+				checkInstallFiles(t, name, configPath)
+			}
+		}
+	}
+	if c := calls(); c != "" {
+		t.Errorf("git ran:\n%s", strings.ReplaceAll(c, canaryPassword, "<password>"))
+	}
+}
+
+// The ref check of b install does not change an argument that b fetched
+// before: each form still parses to the same ref, version, label, glob and
+// dest, with no error.
+func TestParseSCPArg_LegalFormsPass(t *testing.T) {
+	for _, tt := range []struct {
+		arg                       string
+		ref, label, version, glob string
+	}{
+		{"github.com/org/repo:/glob", "github.com/org/repo", "", "", "glob"},
+		{"github.com/org/repo@v1:/glob", "github.com/org/repo", "", "v1", "glob"},
+		{"github.com/org/repo#lbl@v1:/glob", "github.com/org/repo", "lbl", "v1", "glob"},
+		{"https://github.com/org/repo@v1:/glob", "https://github.com/org/repo", "", "v1", "glob"},
+		{"github.com/org/repo@v1:/a/@scope/**", "github.com/org/repo", "", "v1", "a/@scope/**"},
+		{"./local/repo:/glob", "./local/repo", "", "", "glob"},
+	} {
+		ei, consumed, ok, err := parseSCPArg(tt.arg, []string{"out"})
+		if err != nil || !ok || consumed != 1 {
+			t.Errorf("parseSCPArg(%q): ok %v, consumed %d, error %v; want ok, 1, none", tt.arg, ok, consumed, err)
+			continue
+		}
+		if ei.ref != tt.ref || ei.label != tt.label || ei.version != tt.version || ei.glob != tt.glob || ei.dest != "out" {
+			t.Errorf("parseSCPArg(%q) = %+v, want ref %q, label %q, version %q, glob %q, dest out",
+				tt.arg, ei, tt.ref, tt.label, tt.version, tt.glob)
+		}
+	}
+}

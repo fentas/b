@@ -80,7 +80,9 @@ type SyncResult struct {
 // lockEntry is the existing lock entry (nil if first sync).
 func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEntry) (*SyncResult, error) {
 	// A ref with a password or more than one @ in front of its host is
-	// refused before any message shows a part of it.
+	// refused before any message shows a part of it. SyncEnv sees cfg.Ref
+	// only: RefBase can cut a key so that this check passes, so a caller
+	// that cuts an env key checks the key first (b update, b install).
 	if err := gitcache.CheckRef(cfg.Ref); err != nil {
 		return nil, err
 	}

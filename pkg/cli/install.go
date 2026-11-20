@@ -177,8 +177,13 @@ func (o *InstallOptions) Complete(args []string) error {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 
-		// Check for SCP syntax: ref@version:/glob [dest]
-		if ei, consumed, ok := parseSCPArg(arg, args[i+1:]); ok {
+		// Check for SCP syntax: ref@version:/glob [dest]. A refused
+		// argument stops the command before any message shows it.
+		ei, consumed, ok, err := parseSCPArg(arg, args[i+1:])
+		if err != nil {
+			return err
+		}
+		if ok {
 			o.envInstalls = append(o.envInstalls, ei)
 			i += consumed // skip dest arg if consumed
 			continue
@@ -789,11 +794,20 @@ func parseBinaryArg(arg string) (name, version string) {
 //	ref@version:/glob [dest]
 //
 // Returns the parsed envInstall, how many additional args were consumed, and whether it matched.
-func parseSCPArg(arg string, remaining []string) (envInstall, int, bool) {
+// It returns the error of gitcache.CheckRef for an argument with a password
+// or more than one @ in front of its host, before any message shows it.
+func parseSCPArg(arg string, remaining []string) (envInstall, int, bool, error) {
 	// docker:// and oci:// are always binary installs (never env SCP), even
 	// though they may contain ":/path" for in-container binary location.
 	if strings.HasPrefix(arg, "docker://") || strings.HasPrefix(arg, "oci://") {
-		return envInstall{}, 0, false
+		return envInstall{}, 0, false, nil
+	}
+
+	// Before the colon scan: the scan takes the first ":" after a "/" or a
+	// ".", which can be the ":" of a password ("user.name:password@host/
+	// org/repo:/glob" gives the ref "user.name").
+	if err := gitcache.CheckRef(arg); err != nil {
+		return envInstall{}, 0, false, err
 	}
 
 	// Look for colon that signals SCP syntax — must come after a ref (contains /)
@@ -814,11 +828,18 @@ func parseSCPArg(arg string, remaining []string) (envInstall, int, bool) {
 		}
 	}
 	if colonIdx == -1 {
-		return envInstall{}, 0, false
+		return envInstall{}, 0, false, nil
 	}
 
 	refPart := arg[:colonIdx]
 	glob := strings.TrimPrefix(arg[colonIdx+1:], "/")
+
+	// Before the version split: the split at the last @ can cut the ref in
+	// its user part ("user:password@host/org/repo" gives the ref
+	// "user:password").
+	if err := gitcache.CheckRef(refPart); err != nil {
+		return envInstall{}, 0, false, err
+	}
 
 	// Parse ref@version
 	ref := refPart
@@ -846,7 +867,7 @@ func parseSCPArg(arg string, remaining []string) (envInstall, int, bool) {
 		version: version,
 		glob:    glob,
 		dest:    dest,
-	}, consumed, true
+	}, consumed, true, nil
 }
 
 // runEnvInstalls handles SCP-style and config-ref env installs.
@@ -943,6 +964,14 @@ func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 			}
 		}
 
+		// Before RefLabel, RefBase and every message that shows the key, as
+		// b update does: a key with a password or more than one @ in front
+		// of its host. RefBase can cut such a key so that SyncEnv no longer
+		// sees the part that CheckRef refuses.
+		if err := gitcache.CheckRef(entry.Key); err != nil {
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", refusedEnvKey(o.Config.Envs, entry.Key), err)
+			continue
+		}
 		// The key as the lines below show it: "***" in place of a user part.
 		shown := gitcache.RedactUserinfo(entry.Key)
 
