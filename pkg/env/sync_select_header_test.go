@@ -268,7 +268,7 @@ func TestSyncEnv_ProfileSelectUnderMergeErrors(t *testing.T) {
 		t.Fatal("a profile select with strategy: merge must error")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "a selector with a filter or a nested path on .bin/b.yaml is not supported with strategy: merge") {
+	if !strings.Contains(msg, "a selector with a dot on .bin/b.yaml is not supported with strategy: merge") {
 		t.Errorf("unexpected error: %v", err)
 	}
 	if strings.Contains(msg, "nested selector") {

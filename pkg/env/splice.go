@@ -171,8 +171,8 @@ func multiSelectHashKeys(sel string) ([]string, bool) {
 
 // isDottedSelector reports whether sel has a dot after an optional
 // leading one: a nested path (`database.host`), a quoted key with a dot,
-// or a filter expression. The splice cannot take such a selector at
-// top-level key granularity.
+// or a filter with a dot in it. A filter with no dot is not dotted. The
+// splice cannot take a dotted selector at top-level key granularity.
 func isDottedSelector(sel string) bool {
 	return strings.Contains(strings.TrimPrefix(sel, "."), ".")
 }
@@ -190,7 +190,7 @@ func mergeRefusal(selectors []string, sourcePath string) error {
 		// The same advice holds for YAML and JSON: both splices
 		// (spliceYAML, spliceJSON) take top-level keys.
 		return fmt.Errorf(
-			"a selector with a filter or a nested path on %s is not supported with strategy: merge (use a top-level selector or strategy: replace)",
+			"a selector with a dot on %s is not supported with strategy: merge (use a top-level selector or strategy: replace)",
 			sourcePath)
 	}
 	return nil
