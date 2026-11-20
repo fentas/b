@@ -231,13 +231,17 @@ func isDNSName(s string) bool {
 			return false
 		}
 		for i := 0; i < len(label); i++ {
-			c := label[i]
-			if !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '-') {
+			if !isLabelByte(label[i]) {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+// isLabelByte reports whether c is an ASCII letter, a digit or a hyphen.
+func isLabelByte(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '-'
 }
 
 // resolveRepo determines if a repo path is local or remote.
