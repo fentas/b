@@ -968,16 +968,19 @@ func (o *InstallOptions) runEnvInstalls() error {
 		}
 	}
 
-	// Handle config-ref env installs (e.g. `b install github.com/org/infra`)
-	if len(o.configEnvRefs) > 0 {
-		if err := o.syncConfigEnvs(o.configEnvRefs); err != nil {
-			return err
-		}
-		// Re-read lock since syncConfigEnvs writes it
-		return nil
+	if len(o.configEnvRefs) == 0 {
+		return lock.WriteLock(lockDir, lk, o.bVersion)
 	}
 
-	return lock.WriteLock(lockDir, lk, o.bVersion)
+	// Handle config-ref env installs (e.g. `b install github.com/org/infra`).
+	// syncConfigEnvs reads b.lock from disk and writes it. Write the rows of
+	// the SCP-style installs first, so that it keeps them.
+	if len(o.envInstalls) > 0 {
+		if err := lock.WriteLock(lockDir, lk, o.bVersion); err != nil {
+			return err
+		}
+	}
+	return o.syncConfigEnvs(o.configEnvRefs)
 }
 
 // syncConfigEnvs syncs envs defined in b.yaml. If refs is nil, syncs all.
