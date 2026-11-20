@@ -13,8 +13,10 @@ import (
 )
 
 // wantsVersionBanner reports whether THIS invocation asked for b's own version
-// banner. Extracted from PersistentPreRunE so it is directly testable — the
-// caller os.Exit(0)s, which a test cannot survive.
+// banner: the root's persistent bool --version is set to true. Changed alone
+// is not enough, because pflag also sets it for `--version=false`. Extracted
+// from PersistentPreRunE so it is directly testable — the caller os.Exit(0)s,
+// which a test cannot survive.
 //
 // `cmd` is whatever subcommand is running (cobra invokes the root's
 // PersistentPreRunE for the whole tree), and a subcommand may legitimately own
@@ -27,8 +29,10 @@ func wantsVersionBanner(cmd *cobra.Command) bool {
 	// is declared, and cmd.Flags() is unreliable here — a subcommand's local
 	// same-named flag shadows the persistent one, and on the root itself the
 	// persistent flags are not merged into Flags() until cobra parses.
+	// A lookup that misses (a renamed flag) returns false and prints nothing,
+	// so the tests parse the real --version arguments to pin the name.
 	f := cmd.Root().PersistentFlags().Lookup("version")
-	return f != nil && f.Changed && f.Value.Type() == "bool"
+	return f != nil && f.Changed && f.Value.Type() == "bool" && f.Value.String() == "true"
 }
 
 // NewRootCmd creates the new root command with subcommands.
