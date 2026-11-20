@@ -159,6 +159,7 @@ func TestResolveGitURL_SchemeRefusals(t *testing.T) {
 		{"ftp://" + user + "h.example/x", scheme},
 		{"git+ssh://git@github.com/org/repo", scheme},
 		{"SSH://git@github.com/org/repo", scheme},
+		{"GIT://github.com/org/repo", scheme},
 		{"git://http://" + user + "github.com/org/repo", scheme},
 		{"git://https://" + user + "github.com/org/repo", scheme},
 	}
