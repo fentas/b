@@ -289,7 +289,12 @@ Overwrites local files with upstream content. The behavior depends on the **safe
       [r]eplace  [k]eep  [m]erge  [d]iff > _
   ```
 
-  This lets you make per-file decisions during apply.
+  This lets you make per-file decisions during apply. If the file's `select` has a filter or a nested path, the prompt does not offer `[m]erge`, because a merge takes only top-level selectors (see `merge` + `select` below):
+
+  ```
+    config/app.yaml has local changes.
+      [r]eplace  [k]eep  [d]iff (no merge: the select has a filter or a nested path) > _
+  ```
 
 - **`safety: strict` / `safety: prompt`** (default): uses the **plan-based gate** instead of the legacy per-file resolver. You see the full plan up-front, then approve or reject the whole batch — there are no per-file prompts during apply, because the plan you approved IS the apply contract. If you need per-file granularity, switch the env to `safety: auto`.
 
@@ -350,7 +355,9 @@ participates in the merge.
 
 1. The underlying 3-way merge is line-based (`git merge-file`), so concurrent *adjacent* additions inside the scoped region — e.g. local adds `argsh`, upstream adds `tilt` — can produce a spurious conflict marker even though the changes are semantically independent. The data-loss bug (losing out-of-scope content) is fixed; the cosmetic spurious-conflict issue is tracked as a follow-up.
 
-2. **JSON files are not supported in `select` + non-trivial sync.** The splice that puts a (filtered or merged) scope back into the consumer's full file is implemented for YAML only. If you have a JSON file with a `select:` filter, `b` will error out at sync time — including the very first sync to a non-existent destination, so you can't accidentally end up with a half-written file. Either drop the `select:`, move the data to YAML, or wait for JSON splice support. Tracked as a follow-up.
+2. **On a JSON file, only a top-level selector keeps the rest of the file.** With a top-level selector (`binaries`), the JSON splice puts the in-scope keys back into the consumer's file and keeps the other keys. `b` writes the file again with `encoding/json`: the out-of-scope keys keep their order, and new in-scope keys come at the end. A selector with a dot (`database.host`, a filter with a dot) uses the legacy `select` write: the filtered content replaces the whole file. A complex JMESPath selector with no dot stops the sync with an error. A merge that leaves conflict markers in a JSON file also stops with an error, and `b` does not write the file.
+
+3. **A merge takes only top-level selectors.** The splice puts the merged scope back by top-level key. A selector with a filter or a nested path (`database.host`, a profile's `from_items(...)` filter) would replace the whole top-level node with the selected part, and drop its siblings. So `strategy: merge` stops with an error for such a selector, and the interactive prompt does not offer `[m]erge` for it. Use a top-level selector or `strategy: replace`.
 
 ---
 

@@ -43,16 +43,16 @@ import (
 // Splicing is only correct when `merged` contains the COMPLETE value
 // for each in-scope top-level key. Nested selectors like `database.host`
 // must NOT reach this function — the caller (SyncEnv) classifies them
-// upstream and either errors out (for `merge`) or skips the splice
-// entirely (for `replace`). If a nested selector did reach the splice,
-// the in-scope view would be a truncated `{database: {host: ...}}`
-// mapping, and replacing the consumer's full `database` node with that
-// would silently drop sibling fields like `database.port`. The
-// classification rules live in pkg/env/env.go's `allTopLevelSelectors`
-// and `legacyWrite` flags (a dotted multi-select hash on a YAML file
-// does reach this function: its scope is the keys that the hash
-// names); this comment
-// exists to keep splice.go honest about the preconditions it relies on.
+// upstream and either errors out (for `merge`, also when the conflict
+// resolver returns it) or skips the splice entirely (for `replace`). If
+// a nested selector did reach the splice, the in-scope view would be a
+// truncated `{database: {host: ...}}` mapping, and replacing the
+// consumer's full `database` node with that would silently drop sibling
+// fields like `database.port`. The classification rules live in
+// `mergeRefusal` and pkg/env/env.go's `legacyWrite` flag (a dotted
+// multi-select hash on a YAML file does reach this function: its scope
+// is the keys that the hash names); this comment exists to keep
+// splice.go honest about the preconditions it relies on.
 func spliceSelectedScope(local, merged []byte, selectors []string, filePath string) ([]byte, error) {
 	if len(selectors) == 0 {
 		return merged, nil
@@ -167,6 +167,33 @@ func multiSelectHashKeys(sel string) ([]string, bool) {
 		return nil, false
 	}
 	return keys, true
+}
+
+// isDottedSelector reports whether sel has a dot after an optional
+// leading one: a nested path (`database.host`), a quoted key with a dot,
+// or a filter expression. The splice cannot take such a selector at
+// top-level key granularity.
+func isDottedSelector(sel string) bool {
+	return strings.Contains(strings.TrimPrefix(sel, "."), ".")
+}
+
+// mergeRefusal returns the error that `strategy: merge` gives for these
+// selectors, or nil when a merge can take them. The merge result is
+// spliced back by top-level key, so a merge takes only top-level
+// selectors. Both the strategy gate and the conflict resolver path in
+// SyncEnv use this one check.
+func mergeRefusal(selectors []string, sourcePath string) error {
+	for _, sel := range selectors {
+		if !isDottedSelector(sel) {
+			continue
+		}
+		// The same advice holds for YAML and JSON: both splices
+		// (spliceYAML, spliceJSON) take top-level keys.
+		return fmt.Errorf(
+			"a selector with a filter or a nested path on %s is not supported with strategy: merge (use a top-level selector or strategy: replace)",
+			sourcePath)
+	}
+	return nil
 }
 
 // splitTopLevel splits on sep, ignoring separators nested inside brackets,

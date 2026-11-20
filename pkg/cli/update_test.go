@@ -970,7 +970,7 @@ func TestInteractiveResolver_Replace(t *testing.T) {
 	}
 
 	resolver := o.interactiveConflictResolver("github.com/org/repo", &lock.Lock{})
-	result := resolver("src/a.yaml", "dest/a.yaml")
+	result := resolver("src/a.yaml", "dest/a.yaml", true)
 	if result != env.StrategyReplace {
 		t.Errorf("result = %q, want %q", result, env.StrategyReplace)
 	}
@@ -985,7 +985,7 @@ func TestInteractiveResolver_ReplaceFullWord(t *testing.T) {
 	}
 
 	resolver := o.interactiveConflictResolver("ref", &lock.Lock{})
-	if got := resolver("s", "d"); got != env.StrategyReplace {
+	if got := resolver("s", "d", true); got != env.StrategyReplace {
 		t.Errorf("got %q", got)
 	}
 }
@@ -999,7 +999,7 @@ func TestInteractiveResolver_Keep(t *testing.T) {
 	}
 
 	resolver := o.interactiveConflictResolver("ref", &lock.Lock{})
-	if got := resolver("s", "d"); got != env.StrategyClient {
+	if got := resolver("s", "d", true); got != env.StrategyClient {
 		t.Errorf("got %q, want %q", got, env.StrategyClient)
 	}
 }
@@ -1013,8 +1013,60 @@ func TestInteractiveResolver_Merge(t *testing.T) {
 	}
 
 	resolver := o.interactiveConflictResolver("ref", &lock.Lock{})
-	if got := resolver("s", "d"); got != env.StrategyMerge {
+	if got := resolver("s", "d", true); got != env.StrategyMerge {
 		t.Errorf("got %q, want %q", got, env.StrategyMerge)
+	}
+}
+
+// TestInteractiveResolver_MergeOffered: when the selectors can take a
+// merge (a top-level select, or none), the prompt offers [m]erge and an
+// "m" returns merge.
+func TestInteractiveResolver_MergeOffered(t *testing.T) {
+	var errBuf bytes.Buffer
+	o := &UpdateOptions{
+		SharedOptions: &SharedOptions{
+			IO: &streams.IO{Out: &bytes.Buffer{}, ErrOut: &errBuf},
+		},
+		stdinReader: strings.NewReader("m\n"),
+	}
+
+	resolver := o.interactiveConflictResolver("ref", &lock.Lock{})
+	if got := resolver("s", "d", true); got != env.StrategyMerge {
+		t.Errorf("got %q, want %q", got, env.StrategyMerge)
+	}
+	if want := "[r]eplace  [k]eep  [m]erge  [d]iff > "; !strings.Contains(errBuf.String(), want) {
+		t.Errorf("prompt does not offer merge, want %q in:\n%s", want, errBuf.String())
+	}
+}
+
+// TestInteractiveResolver_MergeNotOffered: when the merge gate refuses the
+// selectors (a filter or a nested path), the prompt does not offer
+// [m]erge, says why, and an "m" does not return merge.
+func TestInteractiveResolver_MergeNotOffered(t *testing.T) {
+	var errBuf bytes.Buffer
+	o := &UpdateOptions{
+		SharedOptions: &SharedOptions{
+			IO: &streams.IO{Out: &bytes.Buffer{}, ErrOut: &errBuf},
+		},
+		stdinReader: strings.NewReader("m\nmerge\nx\nk\n"),
+	}
+
+	resolver := o.interactiveConflictResolver("ref", &lock.Lock{})
+	if got := resolver("s", "d", false); got != env.StrategyClient {
+		t.Errorf("got %q, want %q (the m and merge answers must not return merge)", got, env.StrategyClient)
+	}
+	out := errBuf.String()
+	if strings.Contains(out, "[m]erge") {
+		t.Errorf("prompt offers merge:\n%s", out)
+	}
+	if want := "[r]eplace  [k]eep  [d]iff (no merge: the select has a filter or a nested path) > "; strings.Count(out, want) != 4 {
+		t.Errorf("want the prompt %q 4 times, got:\n%s", want, out)
+	}
+	if want := "Merge is not offered for this file. Try r, k, or d."; strings.Count(out, want) != 2 {
+		t.Errorf("want %q twice, got:\n%s", want, out)
+	}
+	if want := "Invalid choice. Try r, k, or d."; !strings.Contains(out, want) {
+		t.Errorf("want %q, got:\n%s", want, out)
 	}
 }
 
@@ -1028,7 +1080,7 @@ func TestInteractiveResolver_InvalidThenReplace(t *testing.T) {
 	}
 
 	resolver := o.interactiveConflictResolver("ref", &lock.Lock{})
-	result := resolver("s", "d")
+	result := resolver("s", "d", true)
 	if result != env.StrategyReplace {
 		t.Errorf("got %q", result)
 	}
@@ -1046,7 +1098,7 @@ func TestInteractiveResolver_EOF(t *testing.T) {
 	}
 
 	resolver := o.interactiveConflictResolver("ref", &lock.Lock{})
-	result := resolver("s", "d")
+	result := resolver("s", "d", true)
 	if result != env.StrategyReplace {
 		t.Errorf("got %q, want %q (default on EOF)", result, env.StrategyReplace)
 	}
@@ -1068,7 +1120,7 @@ func TestInteractiveResolver_DiffThenReplace(t *testing.T) {
 	}
 
 	resolver := o.interactiveConflictResolver("github.com/org/repo", &lock.Lock{})
-	result := resolver("src.yaml", "/nonexistent/file.yaml")
+	result := resolver("src.yaml", "/nonexistent/file.yaml", true)
 	if result != env.StrategyReplace {
 		t.Errorf("got %q", result)
 	}
@@ -1636,7 +1688,7 @@ func TestInteractiveResolver_NilStdinReader(t *testing.T) {
 	}
 
 	resolver := o.interactiveConflictResolver("ref", &lock.Lock{})
-	result := resolver("s", "d")
+	result := resolver("s", "d", true)
 	if result != env.StrategyReplace {
 		t.Errorf("got %q, want %q", result, env.StrategyReplace)
 	}

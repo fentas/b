@@ -24,9 +24,14 @@ const (
 )
 
 // ConflictFunc is called when a file has local changes during an update.
-// It receives source path, dest path, and returns the strategy to use for this file.
-// Return "replace", "client", "merge", or "diff" (shows diff, caller re-prompts).
-type ConflictFunc func(sourcePath, destPath string) string
+// It receives the source path, the dest path and mergeOK, and returns the
+// strategy for this file: "replace", "client" or "merge". SyncEnv treats
+// any other value as "replace", so a resolver that shows a diff must ask
+// again before it returns.
+// mergeOK is false when the file's selectors cannot take a merge (see
+// mergeRefusal): do not offer merge then. If merge comes back anyway,
+// SyncEnv returns the merge-gate error and does not write the file.
+type ConflictFunc func(sourcePath, destPath string, mergeOK bool) string
 
 // EnvConfig is the parsed configuration for a single env entry from b.yaml.
 type EnvConfig struct {
@@ -222,12 +227,14 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		// nested selector like `database.host` would, when spliced,
 		// replace the entire `database` top-level node with the
 		// truncated `{host: ...}` view and silently drop siblings
-		// like `database.port`. Two flags decide what happens to a
+		// like `database.port`. Two checks decide what happens to a
 		// selector with a dot in it:
 		//
-		// allTopLevelSelectors gates `merge` only: with any dotted
-		// selector, `merge` errors out (the merge result is
-		// unrecoverable without the splice).
+		// mergeRefusal gates `merge` only: with any dotted selector,
+		// `merge` errors out (the merge result is unrecoverable
+		// without the splice). The same error stops a merge that the
+		// conflict resolver returns, and the resolver is told not to
+		// offer it.
 		//
 		// legacyWrite decides the splice on the other strategies.
 		// When it is set, the sync falls back to the pre-#126
@@ -247,35 +254,20 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		// `binaries.kubectl | @`) can return an object whose keys are
 		// not top-level keys, and a JSON file has a splice for simple
 		// dot-paths only, so both keep the legacy write.
-		allTopLevelSelectors := true
+		mergeBlocked := mergeRefusal(m.Select, m.SourcePath)
 		legacyWrite := false
 		if len(m.Select) > 0 {
 			ext := strings.ToLower(filepath.Ext(m.SourcePath))
 			yamlFile := ext == ".yaml" || ext == ".yml"
 			for _, sel := range m.Select {
-				key := strings.TrimPrefix(sel, ".")
-				if strings.Contains(key, ".") {
-					allTopLevelSelectors = false
+				if isDottedSelector(sel) {
 					if _, hash := multiSelectHashKeys(sel); !hash || !yamlFile {
 						legacyWrite = true
 					}
 				}
 			}
-			if !allTopLevelSelectors && strategy == StrategyMerge {
-				// Tailor the suggestion to the file type. JSON files
-				// can't recover from this with a top-level selector
-				// either, because spliceSelectedScope rejects scoped
-				// JSON entirely (the splice is YAML-only). For JSON,
-				// the only path forward is to drop the select filter
-				// or move the data to YAML.
-				ext := strings.ToLower(filepath.Ext(m.SourcePath))
-				suggestion := "use a top-level selector or strategy: replace"
-				if ext == ".json" {
-					suggestion = "JSON splicing is not implemented, drop the select filter or move the data to YAML"
-				}
-				return nil, fmt.Errorf(
-					"a selector with a filter or a nested path on %s is not supported with strategy: merge (%s)",
-					m.SourcePath, suggestion)
+			if mergeBlocked != nil && strategy == StrategyMerge {
+				return nil, mergeBlocked
 			}
 			sel := m.Select
 			src := m.SourcePath
@@ -426,7 +418,14 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		// Determine per-file strategy
 		fileStrategy := strategy
 		if localChanged && cfg.ResolveConflict != nil {
-			fileStrategy = cfg.ResolveConflict(m.SourcePath, destPath)
+			fileStrategy = cfg.ResolveConflict(m.SourcePath, destPath, mergeBlocked == nil)
+			// The resolver can return merge although it was told not to
+			// offer it. The merge splice below would then replace whole
+			// top-level nodes, so stop with the merge-gate error before
+			// anything is written.
+			if fileStrategy == StrategyMerge && mergeBlocked != nil {
+				return nil, mergeBlocked
+			}
 		}
 
 		// Apply strategy
