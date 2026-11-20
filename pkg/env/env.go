@@ -218,33 +218,35 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		// base and local get filtered symmetrically. When no select is set,
 		// the closure is nil and doMerge skips filtering.
 		var filterFn func([]byte) ([]byte, error)
-		// allTopLevelSelectors decides whether the splice path is
-		// safe. The splice operates at top-level key granularity, so
-		// a nested selector like `database.host` would, when spliced,
+		// The splice operates at top-level key granularity, so a
+		// nested selector like `database.host` would, when spliced,
 		// replace the entire `database` top-level node with the
 		// truncated `{host: ...}` view and silently drop siblings
-		// like `database.port`.
+		// like `database.port`. Two flags decide what happens to a
+		// selector with a dot in it:
 		//
-		// When all selectors are top-level, splice is correct and we
-		// use it. When any selector is nested, splice is unsafe — for
-		// `merge` we error out (the merge result is unrecoverable
-		// without the splice), and for `replace` we fall back to the
-		// pre-#126 behavior of writing the filtered content directly
-		// (legacy `select` semantics: extract a subset, overwrite the
-		// destination — out-of-scope content is intentionally
-		// dropped because the user opted into it via `select`).
+		// allTopLevelSelectors gates `merge` only: with any dotted
+		// selector, `merge` errors out (the merge result is
+		// unrecoverable without the splice).
 		//
-		// A dot inside a COMPLEX selector is not a nested path: a profile's
-		// `{binaries: from_items(items(binaries)[?[1].groups && …])}` has
-		// dots in its filter, but its result is whole top-level keys, and
-		// the YAML splice reads its scope from the keys that the filter
-		// emits. So on the non-merge strategies a YAML file with such a
-		// selector is spliced too. Without that, the sync wrote the filtered
-		// content over the whole file, and the header comments and every
-		// out-of-scope key were lost (#185). Only a simple dot-path below
-		// the top level (`database.host`), or a JSON file (its splice takes
-		// simple dot-paths only), keeps the legacy write. The merge gate
-		// below does not change.
+		// legacyWrite decides the splice on the other strategies.
+		// When it is set, the sync falls back to the pre-#126
+		// behavior of writing the filtered content directly (legacy
+		// `select` semantics: extract a subset, overwrite the
+		// destination; out-of-scope content is intentionally dropped
+		// because the user opted into it via `select`). It is set for
+		// every dotted selector, with one exception: a multi-select
+		// hash on a YAML file. A profile's
+		// `{binaries: from_items(items(binaries)[?[1].groups && …])}`
+		// has dots in its filter, but its result is exactly the keys
+		// that the hash names, and the YAML splice reads its scope
+		// from those keys. Without the exception, the sync wrote the
+		// filtered content over the whole file, and the header
+		// comments and every out-of-scope key were lost (#185). Any
+		// other dotted selector (`database.host`, `"my.key"`,
+		// `binaries.kubectl | @`) can return an object whose keys are
+		// not top-level keys, and a JSON file has a splice for simple
+		// dot-paths only, so both keep the legacy write.
 		allTopLevelSelectors := true
 		legacyWrite := false
 		if len(m.Select) > 0 {
@@ -254,7 +256,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 				key := strings.TrimPrefix(sel, ".")
 				if strings.Contains(key, ".") {
 					allTopLevelSelectors = false
-					if isSimpleDotPath(sel) || !yamlFile {
+					if _, hash := multiSelectHashKeys(sel); !hash || !yamlFile {
 						legacyWrite = true
 					}
 				}
@@ -272,7 +274,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 					suggestion = "JSON splicing is not implemented, drop the select filter or move the data to YAML"
 				}
 				return nil, fmt.Errorf(
-					"nested selector on %s is not supported with strategy: merge — %s",
+					"a selector with a filter or a nested path on %s is not supported with strategy: merge (%s)",
 					m.SourcePath, suggestion)
 			}
 			sel := m.Select
@@ -310,8 +312,8 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			if filterFn == nil {
 				return content, nil
 			}
-			// Nested dot-path selectors (and complex selectors on a
-			// JSON file) with non-merge strategies skip the splice
+			// Dotted selectors (except a multi-select hash on a YAML
+			// file) with non-merge strategies skip the splice
 			// entirely and write the filtered content directly. This
 			// preserves the legacy `select` semantics (extract a
 			// subset, overwrite the destination) for callers that

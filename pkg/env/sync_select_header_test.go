@@ -41,6 +41,10 @@ const headerUpstreamFile = `binaries:
     groups: [local]
 `
 
+// headerProfileSelect is the select form of a profile: a multi-select hash
+// whose filter has dots ([1].groups). It keeps kubectl and kubeone.
+const headerProfileSelect = "{binaries: from_items(items(binaries)[?[1].groups && contains([1].groups, 'kubeone')])}"
+
 // setupHeaderRepo creates a local bare repo with one commit of .bin/b.yaml.
 func setupHeaderRepo(t *testing.T) string {
 	t.Helper()
@@ -80,14 +84,15 @@ func setupHeaderRepoFiles(t *testing.T, files map[string]string) string {
 
 func TestSyncEnv_ScopedSyncKeepsTheHeaderAndTheOutOfScopeKeys(t *testing.T) {
 	selects := []struct {
-		name string
-		sel  string
+		name   string
+		sel    string
+		absent string // an upstream entry that the filter drops ("" = none)
 	}{
 		// The select form of a profile: its filter has dots ([1].groups).
-		{"profile hash", "{binaries: from_items(items(binaries)[?[1].groups && contains([1].groups, 'kubeone')])}"},
+		{"profile hash", headerProfileSelect, "kind:"},
 		// A hash with no dot in it.
-		{"plain hash", "{binaries: binaries}"},
-		{"dot path", "binaries"},
+		{"plain hash", "{binaries: binaries}", ""},
+		{"dot path", "binaries", ""},
 	}
 	layouts := []struct {
 		name  string
@@ -116,7 +121,9 @@ func TestSyncEnv_ScopedSyncKeepsTheHeaderAndTheOutOfScopeKeys(t *testing.T) {
 						".bin/b.yaml": {Select: []string{s.sel}},
 					},
 				}
-				if _, err := SyncEnv(cfg, project, t.TempDir(), nil); err != nil {
+				cacheRoot := t.TempDir()
+				res, err := SyncEnv(cfg, project, cacheRoot, nil)
+				if err != nil {
 					t.Fatalf("SyncEnv: %v", err)
 				}
 				got, err := os.ReadFile(dest)
@@ -136,6 +143,25 @@ func TestSyncEnv_ScopedSyncKeepsTheHeaderAndTheOutOfScopeKeys(t *testing.T) {
 				}
 				if strings.Contains(out, "Tools that the framework needs") {
 					t.Errorf("the scoped key kept its local body, so it was not replaced:\n%s", out)
+				}
+				if s.absent != "" && strings.Contains(out, s.absent) {
+					t.Errorf("the filter drops %q, but the scoped key holds it:\n%s", s.absent, out)
+				}
+
+				// A second sync with the lock of the first one is a no-op.
+				res2, err := SyncEnv(cfg, project, cacheRoot, lockFromResult(res))
+				if err != nil {
+					t.Fatalf("second SyncEnv: %v", err)
+				}
+				if !res2.Skipped || res2.Message != "(up to date)" {
+					t.Errorf("second sync: Skipped=%v Message=%q, want true %q", res2.Skipped, res2.Message, "(up to date)")
+				}
+				again, err := os.ReadFile(dest)
+				if err != nil {
+					t.Fatalf("ReadFile: %v", err)
+				}
+				if string(again) != out {
+					t.Errorf("the second sync changed the file:\n%s", again)
 				}
 			})
 		}
@@ -171,6 +197,89 @@ func TestSyncEnv_NestedDotPathKeepsTheLegacyWrite(t *testing.T) {
 	}
 	if strings.Contains(string(got), "envs:") {
 		t.Errorf("a nested dot-path was spliced; the legacy write must replace the file:\n%s", got)
+	}
+}
+
+// A dotted complex selector that is not a multi-select hash keeps the legacy
+// write: its result can be an object whose keys are not top-level keys, so
+// the file gets exactly the filter output.
+func TestSyncEnv_DottedComplexSelectorKeepsTheLegacyWrite(t *testing.T) {
+	upstream := headerUpstreamFile + "my.key:\n  a: 1\n"
+	for _, sel := range []string{"binaries.kubectl | @", `"my.key"`} {
+		t.Run(sel, func(t *testing.T) {
+			bare := setupHeaderRepoFiles(t, map[string]string{".bin/b.yaml": upstream})
+			project := t.TempDir()
+			dest := filepath.Join(project, ".bin", "b.yaml")
+			if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+				t.Fatalf("MkdirAll: %v", err)
+			}
+			local := headerConsumerHeader + headerConsumerBinaries + headerConsumerEnvs
+			if err := os.WriteFile(dest, []byte(local), 0644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			want, err := filterContent([]byte(upstream), []string{sel}, ".bin/b.yaml")
+			if err != nil {
+				t.Fatalf("filterContent: %v", err)
+			}
+			cfg := EnvConfig{
+				Ref:      bare,
+				Strategy: StrategyReplace,
+				Files: map[string]envmatch.GlobConfig{
+					".bin/b.yaml": {Select: []string{sel}},
+				},
+			}
+			if _, err := SyncEnv(cfg, project, t.TempDir(), nil); err != nil {
+				t.Fatalf("SyncEnv: %v", err)
+			}
+			got, err := os.ReadFile(dest)
+			if err != nil {
+				t.Fatalf("ReadFile: %v", err)
+			}
+			if string(got) != string(want) {
+				t.Errorf("the file is not exactly the filter output (legacy write):\ngot:\n%s\nwant:\n%s", got, want)
+			}
+		})
+	}
+}
+
+// A profile select under strategy: merge errors out, as before (a merge
+// filters the consumer's side too), and the error does not call it a
+// nested selector. The file does not change.
+func TestSyncEnv_ProfileSelectUnderMergeErrors(t *testing.T) {
+	bare := setupHeaderRepo(t)
+	project := t.TempDir()
+	dest := filepath.Join(project, ".bin", "b.yaml")
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	local := headerConsumerHeader + headerConsumerBinaries + headerConsumerEnvs
+	if err := os.WriteFile(dest, []byte(local), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cfg := EnvConfig{
+		Ref:      bare,
+		Strategy: StrategyMerge,
+		Files: map[string]envmatch.GlobConfig{
+			".bin/b.yaml": {Select: []string{headerProfileSelect}},
+		},
+	}
+	_, err := SyncEnv(cfg, project, t.TempDir(), nil)
+	if err == nil {
+		t.Fatal("a profile select with strategy: merge must error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "a selector with a filter or a nested path on .bin/b.yaml is not supported with strategy: merge") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if strings.Contains(msg, "nested selector") {
+		t.Errorf("the error calls a profile hash a nested selector: %v", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != local {
+		t.Errorf("the failed merge changed the file:\n%s", got)
 	}
 }
 
