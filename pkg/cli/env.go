@@ -803,8 +803,7 @@ func (o *EnvAddOptions) Run(refArg string) error {
 	localKey := ref + "#" + label
 	if o.Config != nil {
 		if existing := o.Config.Envs.Get(localKey); existing != nil {
-			shown := gitcache.RedactUserinfo(localKey)
-			return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", shown, shown)
+			return envExistsError(localKey)
 		}
 	}
 
@@ -937,6 +936,18 @@ func (o *EnvAddOptions) findProfile(label, ref string, upstream *state.State) (*
 	return nil, fmt.Errorf("no profiles found in %s's b.yaml", ref)
 }
 
+// envExistsError is the "already exists" error of b env add for the b.yaml
+// key key. It shows the key with "***" in place of a user part
+// (RedactUserinfo). The hint names the `b env remove` command only for a key
+// that shows as it is: a command with "***" in it does not remove the key.
+func envExistsError(key string) error {
+	shown := gitcache.RedactUserinfo(key)
+	if shown != key {
+		return fmt.Errorf("%s already exists in b.yaml — remove it from b.yaml first", shown)
+	}
+	return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", shown, shown)
+}
+
 // addProfile resolves includes and adds a single profile to the local config.
 func (o *EnvAddOptions) addProfile(ref, label, version string, source *state.EnvEntry, upstream *state.State) error {
 	localKey := ref + "#" + label
@@ -947,8 +958,7 @@ func (o *EnvAddOptions) addProfile(ref, label, version string, source *state.Env
 	}
 	config := o.Config
 	if existing := config.Envs.Get(localKey); existing != nil {
-		shownKey := gitcache.RedactUserinfo(localKey)
-		return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", shownKey, shownKey)
+		return envExistsError(localKey)
 	}
 
 	// Resolve includes

@@ -943,6 +943,9 @@ func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 			}
 		}
 
+		// The key as the lines below show it: "***" in place of a user part.
+		shown := gitcache.RedactUserinfo(entry.Key)
+
 		label := gitcache.RefLabel(entry.Key)
 		ref := gitcache.RefBase(entry.Key)
 
@@ -959,16 +962,16 @@ func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 		lockEntry := lk.FindEnv(ref, label)
 		result, err := env.SyncEnv(cfg, projectRoot, "", lockEntry)
 		if err != nil {
-			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", shown, firstLine(err.Error()))
 			continue
 		}
 
 		if result.Skipped {
-			fmt.Fprintf(o.IO.Out, "  %-40s %s\n", entry.Key, result.Message)
+			fmt.Fprintf(o.IO.Out, "  %-40s %s\n", shown, result.Message)
 			continue // don't overwrite lock entry when up-to-date
 		}
 
-		fmt.Fprintf(o.IO.Out, "  %-40s %s → %s (%s)\n", entry.Key, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)
+		fmt.Fprintf(o.IO.Out, "  %-40s %s → %s (%s)\n", shown, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)
 		for _, f := range result.Files {
 			fmt.Fprintf(o.IO.Out, "    → %-36s ✓ synced\n", f.Dest)
 		}

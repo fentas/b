@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fentas/b/pkg/env"
 	"github.com/fentas/b/pkg/envmatch"
 	"github.com/fentas/b/pkg/gitcache"
 	"github.com/fentas/b/pkg/lock"
@@ -261,14 +263,25 @@ func TestEnvCommands_PasswordRefRefusedFirst(t *testing.T) {
 // "***" in place of the user part: the password is in the ref and in the
 // key that b.yaml holds. Run returns it before any git command, and
 // addProfile (the add of each profile that b env add -i selects) returns
-// the same text.
+// the same text. For a key with "***", the hint names no `b env remove`
+// command: that command would not remove the key. A key that shows as it
+// is (no user part, or an SSH user name with no password) keeps the
+// command.
 func TestEnvAdd_ExistsErrorHidesThePassword(t *testing.T) {
 	calls := gitSpy(t)
-	for _, tt := range []struct{ ref, shown string }{
-		{"https://user:" + canaryPassword + "@github.com/org/repo", "https://***@github.com/org/repo#lbl"},
-		{"ssh://user:" + canaryPassword + "@host.example/org/repo", "ssh://***@host.example/org/repo#lbl"},
+	for _, tt := range []struct {
+		ref, shown string
+		command    bool
+	}{
+		{"https://user:" + canaryPassword + "@github.com/org/repo", "https://***@github.com/org/repo#lbl", false},
+		{"ssh://user:" + canaryPassword + "@host.example/org/repo", "ssh://***@host.example/org/repo#lbl", false},
+		{"github.com/org/repo", "github.com/org/repo#lbl", true},
+		{"git@github.com:org/repo", "git@github.com:org/repo#lbl", true},
 	} {
-		want := tt.shown + " already exists in b.yaml — remove it first with `b env remove " + tt.shown + "`"
+		want := tt.shown + " already exists in b.yaml — remove it from b.yaml first"
+		if tt.command {
+			want = tt.shown + " already exists in b.yaml — remove it first with `b env remove " + tt.shown + "`"
+		}
 		io, out, errOut := bufIO()
 		shared := NewSharedOptions(io, nil)
 		shared.Config = &state.State{Envs: state.EnvList{{Key: tt.ref + "#lbl"}}}
@@ -351,12 +364,14 @@ func TestEnvCommands_ProfileListsHideThePassword(t *testing.T) {
 // b update refuses an env key of b.yaml with a password or more than one @
 // in front of its host, or with an @ after another "://", before it splits
 // the key (RefLabel, RefBase). Each such key gets one ✗ line with the fixed
-// text and "<refused env key>" in place of the key, and the failure summary
-// names the same text. There is no "resolving" line, no token is chosen, no
-// git command runs, and b.lock does not get the key. This holds for b update
-// with no argument and with the key as its argument, with and without
-// B_GIT_SSH_AS_HTTPS=1. RedactUserinfo does not hide the first and the last
-// key, so the key column shows the fixed text.
+// text and "<refused env key #N>" in place of the key, and the failure
+// summary names the same text. N is the place of the key in the sorted list
+// of the env keys, so the three keys get three texts. There is no
+// "resolving" line, no token is chosen, no git command runs, and b.lock does
+// not get the key. This holds for b update with no argument and with the key
+// as its argument, with and without B_GIT_SSH_AS_HTTPS=1. RedactUserinfo
+// does not hide the first and the last key, so the key column shows the
+// fixed text.
 func TestUpdateEnvs_RefusedKeyRefusedFirst(t *testing.T) {
 	saveHooks(t)
 	calls := gitSpy(t)
@@ -367,6 +382,8 @@ func TestUpdateEnvs_RefusedKeyRefusedFirst(t *testing.T) {
 		"user:p@" + canaryPassword + "@github.com/org/repo#lbl",
 		"ssh://git@" + canaryPassword + "@github.com/org/repo",
 	}
+	// The sorted order of the keys: https://..., ssh://..., user:...
+	placeholders := []string{"<refused env key #1>", "<refused env key #3>", "<refused env key #2>"}
 	for i, key := range keys {
 		if gitcache.ResolveGitURL(key, "").AuthToken != "" {
 			t.Errorf("a token is chosen for key %d", i)
@@ -403,21 +420,26 @@ func TestUpdateEnvs_RefusedKeyRefusedFirst(t *testing.T) {
 					Config:           &state.State{Envs: envs},
 				}}
 				name := fmt.Sprintf("%s=%q %s %d", gitcache.SSHAsHTTPSEnv, knob, run.name, i)
-				want := len(keys)
+				shown := placeholders // the keys in the order of the env list
 				if refs != nil {
 					o.specifiedEnvRefs = refs
-					want = len(refs)
+					shown = placeholders[i : i+1]
 				}
 				err := o.Run()
-				if err == nil || !strings.HasSuffix(err.Error(), "env(s) failed: "+strings.TrimSuffix(strings.Repeat(refusedEnvKey+", ", want), ", ")) {
-					t.Errorf("%s: error %q, want the failure summary with the fixed key text", name,
-						strings.ReplaceAll(fmt.Sprint(err), canaryPassword, "<password>"))
+				if err == nil || !strings.HasSuffix(err.Error(), "env(s) failed: "+strings.Join(shown, ", ")) {
+					t.Errorf("%s: error %q, want the failure summary with the fixed key texts %q", name,
+						strings.ReplaceAll(fmt.Sprint(err), canaryPassword, "<password>"), shown)
 				}
 				checkRefusalFormats(t, name, err)
-				line := "  " + fmt.Sprintf("%-40s", refusedEnvKey) + " ✗ " + refusal + "\n"
-				if got := strings.Count(errOut.String(), line); got != want {
-					t.Errorf("%s: %d refusal lines, want %d; error output %q", name, got, want,
-						strings.ReplaceAll(errOut.String(), canaryPassword, "<password>"))
+				for _, placeholder := range shown {
+					line := "  " + fmt.Sprintf("%-40s", placeholder) + " ✗ " + refusal + "\n"
+					if got := strings.Count(errOut.String(), line); got != 1 {
+						t.Errorf("%s: %d refusal lines for %s, want 1; error output %q", name, got, placeholder,
+							strings.ReplaceAll(errOut.String(), canaryPassword, "<password>"))
+					}
+				}
+				if got := strings.Count(errOut.String(), " ✗ "); got != len(shown) {
+					t.Errorf("%s: %d ✗ lines, want %d", name, got, len(shown))
 				}
 				all := out.String() + errOut.String()
 				if strings.Contains(all, canaryPassword) || strings.Contains(all, canaryToken) {
@@ -445,5 +467,186 @@ func checkRefusalFormats(t *testing.T, name string, err error) {
 		if text := fmt.Sprintf(verb, err); strings.Contains(text, canaryPassword) || strings.Contains(text, canaryToken) {
 			t.Errorf("%s: the %s text shows the password or the token", name, verb)
 		}
+	}
+}
+
+// b update shows an env key that gitcache.CheckRef lets pass with "***" in
+// place of its user part, in each line that names the key and in the
+// summary: the rollback error, the error of the first and of the second
+// sync, the up-to-date line, the plan header and the safety refusal. Each
+// key holds a password: the https:// key gets the host error from the real
+// sync, and no git command runs for it. The password and the token are in
+// no output, in no format verb of the error and not in b.lock.
+func TestUpdateEnvs_KeyWithUserPartShownRedacted(t *testing.T) {
+	saveHooks(t)
+	calls := gitSpy(t)
+	t.Setenv("GITHUB_TOKEN", canaryToken)
+	t.Setenv(gitcache.SSHAsHTTPSEnv, "")
+	isTTYFunc = func() bool { return false }
+	result := func(cfg env.EnvConfig, status string) *env.SyncResult {
+		return &env.SyncResult{Ref: cfg.Ref, Label: cfg.Label, Commit: "c0ffee1",
+			Files: []lock.LockFile{{Path: "a.yaml", Dest: "a.yaml", Status: status}}}
+	}
+	for _, k := range []struct{ key, shown string }{
+		{"https://user:" + canaryPassword + "@github.com/org/repo", "https://***@github.com/org/repo"},
+		{"ssh://user:" + canaryPassword + "@host.example/org/repo#lbl", "ssh://***@host.example/org/repo#lbl"},
+	} {
+		for _, tt := range []struct {
+			name    string
+			setup   func(o *UpdateOptions, e *state.EnvEntry)
+			sync    func(cfg env.EnvConfig) (*env.SyncResult, error) // nil: the real sync
+			line    string                                           // the text after the key column
+			stdout  bool                                             // the line is on stdout
+			summary string                                           // the error of Run without the key; "" for no error
+		}{
+			{"rollback, no previous commit", func(o *UpdateOptions, _ *state.EnvEntry) { o.Rollback = true },
+				func(env.EnvConfig) (*env.SyncResult, error) { return nil, errors.New("the sync ran") },
+				" ✗ no previous commit to rollback to", false, "1 env(s) failed: "},
+			{"first sync, the host error", nil, nil,
+				" ✗ resolving https://***@github.com/org/repo@: refusing https://***@github.com/org/repo.git: the host part",
+				false, "1 env(s) failed: "},
+			{"first sync fails", nil,
+				func(env.EnvConfig) (*env.SyncResult, error) { return nil, errors.New("upstream failure") },
+				" ✗ upstream failure", false, "1 env(s) failed: "},
+			{"up to date", nil,
+				func(cfg env.EnvConfig) (*env.SyncResult, error) {
+					return &env.SyncResult{Ref: cfg.Ref, Label: cfg.Label, Skipped: true, Message: "(up to date)"}, nil
+				},
+				" (up to date)", true, ""},
+			{"plan header, dry run", func(o *UpdateOptions, _ *state.EnvEntry) { o.DryRun = true },
+				func(cfg env.EnvConfig) (*env.SyncResult, error) { return result(cfg, "replaced"), nil },
+				" (new) → c0ffee1", true, ""},
+			{"safety refusal", func(_ *UpdateOptions, e *state.EnvEntry) { e.Safety = state.SafetyStrict },
+				func(cfg env.EnvConfig) (*env.SyncResult, error) { return result(cfg, "conflict"), nil },
+				" ✗ strict safety: plan contains 1 conflict", false, "safety refused 1 env(s): "},
+			{"second sync fails", func(_ *UpdateOptions, e *state.EnvEntry) { e.Safety = state.SafetyStrict },
+				func(cfg env.EnvConfig) (*env.SyncResult, error) {
+					if cfg.DryRun {
+						return result(cfg, "replaced"), nil
+					}
+					return nil, errors.New("apply failure")
+				},
+				" ✗ apply failure", false, "1 env(s) failed: "},
+		} {
+			if tt.sync == nil && !strings.HasPrefix(k.key, "https://") {
+				continue // the real sync of the ssh:// key runs git
+			}
+			name := k.shown + " " + tt.name
+			syncEnvFunc = env.SyncEnv
+			if tt.sync != nil {
+				sync := tt.sync
+				syncEnvFunc = func(cfg env.EnvConfig, _, _ string, _ *lock.EnvEntry) (*env.SyncResult, error) {
+					return sync(cfg)
+				}
+			}
+			dir := t.TempDir()
+			t.Setenv("PATH_BASE", dir)
+			configPath := filepath.Join(dir, "b.yaml")
+			if err := os.WriteFile(configPath, []byte("binaries: {}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := lock.WriteLock(dir, &lock.Lock{Version: 1}, "test"); err != nil {
+				t.Fatal(err)
+			}
+			io, out, errOut := bufIO()
+			e := &state.EnvEntry{Key: k.key, Files: map[string]envmatch.GlobConfig{"a/**": {}}}
+			o := &UpdateOptions{SharedOptions: &SharedOptions{
+				IO:               io,
+				ConfigPath:       configPath,
+				loadedConfigPath: configPath,
+				Config:           &state.State{Envs: state.EnvList{e}},
+			}}
+			if tt.setup != nil {
+				tt.setup(o, e)
+			}
+			err := o.Run()
+			switch {
+			case tt.summary == "" && err != nil:
+				t.Errorf("%s: error %q, want none", name, strings.ReplaceAll(err.Error(), canaryPassword, "<password>"))
+			case tt.summary != "" && (err == nil || err.Error() != tt.summary+k.shown):
+				t.Errorf("%s: error %q, want %q", name,
+					strings.ReplaceAll(fmt.Sprint(err), canaryPassword, "<password>"), tt.summary+k.shown)
+			}
+			checkRefusalFormats(t, name, err)
+			stream := errOut.String()
+			if tt.stdout {
+				stream = out.String()
+			}
+			if want := "  " + fmt.Sprintf("%-40s", k.shown) + tt.line; !strings.Contains(stream, want) {
+				t.Errorf("%s: output %q, want the line %q", name, strings.ReplaceAll(stream, canaryPassword, "<password>"), want)
+			}
+			all := out.String() + errOut.String()
+			if strings.Contains(all, canaryPassword) || strings.Contains(all, canaryToken) {
+				t.Errorf("%s: the output shows the password or the token", name)
+			}
+			if b, err := os.ReadFile(filepath.Join(dir, "b.lock")); err != nil || strings.Contains(string(b), canaryPassword) {
+				t.Errorf("%s: b.lock cannot be read or holds the password (read error: %v)", name, err != nil)
+			}
+		}
+	}
+	if c := calls(); c != "" {
+		t.Errorf("git ran:\n%s", strings.ReplaceAll(c, canaryPassword, "<password>"))
+	}
+}
+
+// b install shows an env key of b.yaml that gitcache.CheckRef lets pass
+// with "***" in place of its user part, in its ✗ line, its sync line and its
+// up-to-date line. The https:// key gets the host error, and no git command
+// runs for it. git reads the ssh:// key from a local repo
+// (url.<bare>.insteadOf). The password and the token are in no output. b.lock
+// gets an entry for the ssh:// key only, with the ref as b.yaml has it.
+func TestInstall_KeyWithUserPartShownRedacted(t *testing.T) {
+	offlineUpstream(t)
+	t.Setenv(gitcache.SSHAsHTTPSEnv, "")
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_1", os.Getenv("GIT_CONFIG_KEY_0"))
+	t.Setenv("GIT_CONFIG_VALUE_1", "ssh://user:"+canaryPassword+"@github.com/org/repo.git")
+	t.Setenv("GITHUB_TOKEN", canaryToken)
+	dir := t.TempDir()
+	t.Setenv("PATH_BASE", dir)
+	t.Setenv("PATH_BIN", dir)
+	configPath := filepath.Join(dir, "b.yaml")
+	mustWrite(t, configPath, []byte("binaries: {}\n"))
+	const (
+		httpsKey   = "https://user:" + canaryPassword + "@github.com/org/repo"
+		httpsShown = "https://***@github.com/org/repo"
+		sshKey     = "ssh://user:" + canaryPassword + "@github.com/org/repo#lbl"
+		sshShown   = "ssh://***@github.com/org/repo#lbl"
+	)
+	files := map[string]envmatch.GlobConfig{"manifests/*.yaml": {Dest: "out"}}
+	for _, run := range []struct{ name, sshLine string }{
+		{"first run", " (new) → "},
+		{"second run", " (up to date)"},
+	} {
+		io, out, errOut := bufIO()
+		o := &InstallOptions{SharedOptions: &SharedOptions{
+			IO:               io,
+			ConfigPath:       configPath,
+			loadedConfigPath: configPath,
+			Config:           &state.State{Envs: state.EnvList{{Key: httpsKey, Files: files}, {Key: sshKey, Files: files}}},
+		}}
+		if err := o.Complete(nil); err != nil {
+			t.Fatalf("%s: Complete: %s", run.name, strings.ReplaceAll(err.Error(), canaryPassword, "<password>"))
+		}
+		if err := o.Run(); err != nil {
+			t.Fatalf("%s: Run: %s", run.name, strings.ReplaceAll(err.Error(), canaryPassword, "<password>"))
+		}
+		if want := "  " + fmt.Sprintf("%-40s", httpsShown) + " ✗ resolving " + httpsShown + "@: refusing https://***@github.com/org/repo.git"; !strings.Contains(errOut.String(), want) {
+			t.Errorf("%s: error output %q, want the line %q", run.name, strings.ReplaceAll(errOut.String(), canaryPassword, "<password>"), want)
+		}
+		if want := "  " + fmt.Sprintf("%-40s", sshShown) + run.sshLine; !strings.Contains(out.String(), want) {
+			t.Errorf("%s: output %q, want the line %q", run.name, strings.ReplaceAll(out.String(), canaryPassword, "<password>"), want)
+		}
+		all := out.String() + errOut.String()
+		if strings.Contains(all, canaryPassword) || strings.Contains(all, canaryToken) {
+			t.Errorf("%s: the output shows the password or the token", run.name)
+		}
+	}
+	lk, err := lock.ReadLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lk.Envs) != 1 || lk.Envs[0].Ref != gitcache.RefBase(sshKey) || lk.Envs[0].Label != "lbl" {
+		t.Errorf("b.lock has %d env entries, want one for the ssh:// key", len(lk.Envs))
 	}
 }
