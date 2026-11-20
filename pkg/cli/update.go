@@ -603,12 +603,12 @@ func (o *UpdateOptions) callUpdateBinaries(binaries []*binary.Binary) error {
 }
 
 // refusedEnvKey is the text that b update and b install show in place of an
-// env key that gitcache.CheckRef refuses, in its ✗ line and in the failure
-// summary of b update. The key can hold a password. The text names the
-// position of the key, so two refused keys get two texts: its place, from 1,
-// in the sorted list of the env keys of b.yaml. b.yaml keeps the envs in a
-// map, so b does not know their order in the file; the sorted order is the
-// same in each run.
+// env key that gitcache.CheckRef refuses, in its ✗ line and in their failure
+// summary. The key can hold a password. The text names the position of the
+// key, so two refused keys get two texts: its place, from 1, in the sorted
+// list of the env keys of b.yaml. b.yaml keeps the envs in a map, so b does
+// not know their order in the file; the sorted order is the same in each
+// run.
 func refusedEnvKey(envs state.EnvList, key string) string {
 	n := 1
 	for _, e := range envs {

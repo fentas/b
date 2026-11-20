@@ -26,6 +26,8 @@ If a `b.yaml` file is present, this command will install all binaries and sync a
 b install
 ```
 
+When an env of b.yaml fails, or b refuses its key, `b install` shows a `✗` line for that env. It syncs the other envs and installs the binaries. Then it stops with an error that gives the number of envs that failed and names each one as its `✗` line does (exit code 1), as `b update` does. This is also true for `b install <key>` with the key of an env of b.yaml. When a download also fails, the error names both.
+
 ### Install a specific binary
 
 Install the latest version of a specific binary.

@@ -50,6 +50,10 @@ type InstallOptions struct {
 	plans    map[*binary.Binary]installPlan
 	failedMu sync.Mutex
 	failed   map[*binary.Binary]error
+
+	// Set by syncConfigEnvs for Run: each env of b.yaml that failed or
+	// whose key the ref check refused, as its ✗ line shows it.
+	failedEnvs []string
 }
 
 // installPlan is what an install does to one binary's file, decided before
@@ -399,7 +403,10 @@ func (o *InstallOptions) Validate() error {
 	return nil
 }
 
-// Run executes the install operation
+// Run executes the install operation. An env of b.yaml that fails, or whose
+// key the ref check refuses, stops nothing else: the other envs and the
+// binaries still sync, and Run returns the error of these envs at the end
+// (envError), also after the error of the failed downloads.
 func (o *InstallOptions) Run() error {
 	// Handle env installs (SCP-style or config-based)
 	if len(o.envInstalls) > 0 || len(o.configEnvRefs) > 0 {
@@ -435,7 +442,7 @@ func (o *InstallOptions) Run() error {
 			}
 		}
 		fmt.Fprintln(o.IO.Out, "No binaries or envs to install")
-		return nil
+		return o.envError()
 	}
 
 	if len(binariesToInstall) > 0 {
@@ -458,15 +465,27 @@ func (o *InstallOptions) Run() error {
 		// A failed download is an error. --add then writes no b.yaml: its
 		// entries would name binaries that are not installed.
 		if err := o.downloadError(binariesToInstall); err != nil {
-			return err
+			return withDownloadErr(err, o.envError())
 		}
 
 		if o.Add {
-			return o.addToConfig(binariesToInstall)
+			if err := o.addToConfig(binariesToInstall); err != nil {
+				return err
+			}
 		}
 	}
 
-	return nil
+	// After the binaries: the envs that failed or were refused make the
+	// run fail.
+	return o.envError()
+}
+
+// envError is the error of the envs of b.yaml that failed or were refused
+// in this run (failedEnvs), nil when none did. It is the summary of b update
+// (aggregateEnvErrors): the number of these envs, and each one as its ✗
+// line shows it.
+func (o *InstallOptions) envError() error {
+	return aggregateEnvErrors(nil, o.failedEnvs)
 }
 
 // downloadError is the error of the downloads that failed in
@@ -962,6 +981,9 @@ func (o *InstallOptions) runEnvInstalls() error {
 }
 
 // syncConfigEnvs syncs envs defined in b.yaml. If refs is nil, syncs all.
+// An env that fails, or whose key the ref check refuses, gets a ✗ line and
+// goes into failedEnvs, and the other envs still sync. The returned error is
+// that of b.lock only; Run returns the error of failedEnvs (envError).
 func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 	if o.Config == nil {
 		return nil
@@ -994,7 +1016,9 @@ func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 		// of its host. RefBase can cut such a key so that SyncEnv no longer
 		// sees the part that CheckRef refuses.
 		if err := gitcache.CheckRef(entry.Key); err != nil {
-			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", refusedEnvKey(o.Config.Envs, entry.Key), err)
+			placeholder := refusedEnvKey(o.Config.Envs, entry.Key)
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", placeholder, err)
+			o.failedEnvs = append(o.failedEnvs, placeholder)
 			continue
 		}
 		// The key as the lines below show it: "***" in place of a user part.
@@ -1017,6 +1041,7 @@ func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 		result, err := env.SyncEnv(cfg, projectRoot, "", lockEntry)
 		if err != nil {
 			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", shown, firstLine(err.Error()))
+			o.failedEnvs = append(o.failedEnvs, shown)
 			continue
 		}
 
