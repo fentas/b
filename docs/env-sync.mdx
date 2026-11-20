@@ -289,7 +289,7 @@ Overwrites local files with upstream content. The behavior depends on the **safe
       [r]eplace  [k]eep  [m]erge  [d]iff > _
   ```
 
-  This lets you make per-file decisions during apply. With no answer (the end of input, or a terminal that closed), the prompt keeps the local file and says so. If the file's `select` has a selector with a dot (`database.host`, a filter with a dot), the prompt does not offer `[m]erge`, because a merge takes only top-level selectors (see `merge` + `select` below):
+  This lets you make per-file decisions during apply. With no answer (the end of input, or a terminal that closed), the prompt keeps the local file for this update only and says so (keeps are one-shot, see below). If the file's `select` has a selector with a dot (`database.host`, a filter with a dot), the prompt does not offer `[m]erge`, because a merge takes only top-level selectors (see `merge` + `select` below):
 
   ```
     config/app.yaml has local changes.

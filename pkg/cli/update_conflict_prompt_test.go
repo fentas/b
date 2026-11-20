@@ -43,21 +43,21 @@ func TestInteractiveResolver_NoAnswerKeepsTheLocalFile(t *testing.T) {
 		want    []string // in the output, in this order
 	}{
 		{"EOF at once", strings.NewReader(""), "d", true,
-			[]string{"[d]iff > \n      no answer (end of input): keeping the local file d\n"}},
+			[]string{"[d]iff > \n      no answer (end of input): keeping the local file d for this update only\n"}},
 		{"EOF after an invalid answer", strings.NewReader("x\n"), "d", true,
-			[]string{"Invalid choice. Try r, k, m, or d.", "no answer (end of input): keeping the local file d\n"}},
+			[]string{"Invalid choice. Try r, k, m, or d.", "no answer (end of input): keeping the local file d for this update only\n"}},
 		{"EOF after an invalid last answer with no newline", strings.NewReader("x"), "d", true,
-			[]string{"Invalid choice. Try r, k, m, or d.", "no answer (end of input): keeping the local file d\n"}},
+			[]string{"Invalid choice. Try r, k, m, or d.", "no answer (end of input): keeping the local file d for this update only\n"}},
 		{"EOF after a merge that is not offered", strings.NewReader("m\n"), "d", false,
-			[]string{"Merge is not offered for this file. Try r, k, or d.", "no answer (end of input): keeping the local file d\n"}},
+			[]string{"Merge is not offered for this file. Try r, k, or d.", "no answer (end of input): keeping the local file d for this update only\n"}},
 		{"EOF after a diff", strings.NewReader("d\n"), missing, true,
-			[]string{"Error reading local file", "no answer (end of input): keeping the local file " + missing + "\n"}},
+			[]string{"Error reading local file", "no answer (end of input): keeping the local file " + missing + " for this update only\n"}},
 		{"a read error (a closed terminal)", iotest.ErrReader(errors.New(closedTTY)), "d", true,
-			[]string{"no answer (read error: " + closedTTY + "): keeping the local file d\n"}},
+			[]string{"no answer (read error: " + closedTTY + "): keeping the local file d for this update only\n"}},
 		// A read error is no answer, also after part of a line: the "r"
 		// never got its newline, so it does not count.
 		{"a read error after a partial r", io.MultiReader(strings.NewReader("r"), iotest.ErrReader(errors.New(closedTTY))), "d", true,
-			[]string{"no answer (read error: " + closedTTY + "): keeping the local file d\n"}},
+			[]string{"no answer (read error: " + closedTTY + "): keeping the local file d for this update only\n"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -120,7 +120,7 @@ func TestInteractiveResolver_NoAnswerForEachFile(t *testing.T) {
 		if got := resolver("s", dest, true); got != env.StrategyClient {
 			t.Errorf("%s: got %q, want %q", dest, got, env.StrategyClient)
 		}
-		if want := "no answer (end of input): keeping the local file " + dest + "\n"; !strings.Contains(errBuf.String(), want) {
+		if want := "no answer (end of input): keeping the local file " + dest + " for this update only\n"; !strings.Contains(errBuf.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, errBuf.String())
 		}
 	}

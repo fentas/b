@@ -1105,7 +1105,7 @@ func TestInteractiveResolver_EOF(t *testing.T) {
 	if result != env.StrategyClient {
 		t.Errorf("got %q, want %q (no answer keeps the local file)", result, env.StrategyClient)
 	}
-	if want := "no answer (end of input): keeping the local file d"; !strings.Contains(errBuf.String(), want) {
+	if want := "no answer (end of input): keeping the local file d for this update only"; !strings.Contains(errBuf.String(), want) {
 		t.Errorf("output lacks %q:\n%s", want, errBuf.String())
 	}
 }

@@ -1123,9 +1123,9 @@ func (o *UpdateOptions) interactiveConflictResolver(ref string, lk *lock.Lock) e
 				if !errors.Is(err, io.EOF) || strings.TrimSpace(input) == "" {
 					// The prompt line has no newline: end it first.
 					if errors.Is(err, io.EOF) {
-						fmt.Fprintf(o.IO.ErrOut, "\n      no answer (end of input): keeping the local file %s\n", destPath)
+						fmt.Fprintf(o.IO.ErrOut, "\n      no answer (end of input): keeping the local file %s for this update only\n", destPath)
 					} else {
-						fmt.Fprintf(o.IO.ErrOut, "\n      no answer (read error: %v): keeping the local file %s\n", err, destPath)
+						fmt.Fprintf(o.IO.ErrOut, "\n      no answer (read error: %v): keeping the local file %s for this update only\n", err, destPath)
 					}
 					return env.StrategyClient
 				}

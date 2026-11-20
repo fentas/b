@@ -425,7 +425,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			// top-level nodes, so stop with the merge-gate error before
 			// anything is written. The gate's text says "strategy:
 			// merge", but this env can use replace: the wrap names the
-			// prompt as the cause, and errors.Is still finds the gate's
+			// prompt as the cause, and errors.Unwrap gives the gate's
 			// error.
 			if fileStrategy == StrategyMerge && mergeBlocked != nil {
 				return nil, fmt.Errorf("the conflict prompt chose merge: %w", mergeBlocked)
