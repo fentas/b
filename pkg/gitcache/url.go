@@ -146,7 +146,7 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 // to its https URL, with the provider auth for its host. The token is
 // chosen from the host of that final URL, as parseHTTPSHost parses it, the
 // same parse that scopes the header key (headerKey). A URL whose host the
-// parse does not accept gets no token, and the git commands refuse it
+// parse does not accept gets no token, and the remote git commands refuse it
 // (checkRemote).
 func remoteHTTPS(ref string) ResolvedRef {
 	u := "https://" + ref + ".git"
@@ -161,7 +161,7 @@ func remoteHTTPS(ref string) ResolvedRef {
 // errRemoteHost is the error for an https URL whose host parseHTTPSHost
 // does not accept.
 var errRemoteHost = errors.New("the host part is not a plain host name or IP address with an optional port " +
-	"(no user name, password, wildcard, percent sign or trailing dot); b does not run git for it")
+	"(no user name, password, wildcard, percent sign or trailing dot); b does not run a remote git command for it")
 
 // remoteHost is the host and port of an https URL, as parseHTTPSHost
 // parses them.
@@ -301,6 +301,33 @@ func IsSSHUserAt(ref string, atIdx int) bool {
 	}
 	// A user part in front of a host and a path: "user:password@host/path".
 	return !strings.Contains(prefix, "@") && strings.Contains(rest, "/")
+}
+
+// RedactUserinfo returns the ref or URL s with the user part of its
+// authority (the text before the last @ of the authority) replaced by
+// "***", for a message. It keeps the user name of an SSH ref
+// ("git@github.com:org/repo", "ssh://git@host/org/repo") that has no
+// password: that is not a secret. Text with no user part does not change.
+func RedactUserinfo(s string) string {
+	start, scheme := 0, ""
+	if i := strings.Index(s, "://"); i > 0 && !strings.ContainsAny(s[:i], "/@") {
+		start, scheme = i+len("://"), strings.ToLower(s[:i])
+	} else if isSSHImplicit(s) {
+		return s // scp-style "user@host:path": the user part has no password
+	}
+	rest := s[start:]
+	end := strings.IndexAny(rest, "/?#")
+	if end < 0 {
+		end = len(rest)
+	}
+	at := strings.LastIndex(rest[:end], "@")
+	if at < 0 {
+		return s
+	}
+	if scheme == "ssh" && !strings.Contains(rest[:at], ":") {
+		return s
+	}
+	return s[:start] + "***" + rest[at:]
 }
 
 // IsSSHURL returns true if a URL uses SSH transport.

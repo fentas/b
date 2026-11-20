@@ -95,7 +95,8 @@ func TestMatchesTrustedHost_Forms(t *testing.T) {
 
 // The token is chosen from the host of the final URL, as parseHTTPSHost
 // parses it, and the header key names that same host. A ref whose host the
-// parse refuses gets no token and no key, and b runs no git command for it.
+// parse refuses gets no token and no key, and b runs no remote git command
+// for it.
 func TestResolveGitURL_TokenFromParsedHost(t *testing.T) {
 	gh := "Authorization: Bearer " + fakeGH
 	gl := "PRIVATE-TOKEN: " + fakeGL
@@ -150,7 +151,7 @@ func TestResolveGitURL_TokenFromParsedHost(t *testing.T) {
 
 // For a URL whose host parseHTTPSHost refuses, ls-remote, clone and fetch
 // return a fixed error that names the URL without its user name and
-// password, and no git command runs.
+// password, and no remote git command runs.
 func TestGitCommands_RefuseUnparsedHost(t *testing.T) {
 	setProviderEnv(t, "")
 	cmds := recordGit(t)

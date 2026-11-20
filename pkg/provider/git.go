@@ -90,7 +90,7 @@ func (g *Git) installFromRemote(repo, filePath, version, dest string) error {
 	resolved := gitcache.ResolveGitURL(repo, "")
 
 	if err := gitcache.EnsureCloneAuth(cacheRoot, repo, resolved.URL, resolved.AuthHeader); err != nil {
-		return fmt.Errorf("cloning %s: %w", resolved.URL, err)
+		return fmt.Errorf("cloning %s: %w", gitcache.RedactUserinfo(resolved.URL), err)
 	}
 
 	commit := version

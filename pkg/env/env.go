@@ -101,7 +101,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 	} else {
 		commit, err = gitcache.ResolveRefAuth(resolved.URL, cfg.Version, resolved.AuthHeader)
 		if err != nil {
-			return nil, fmt.Errorf("resolving %s@%s: %w", cfg.Ref, cfg.Version, err)
+			return nil, fmt.Errorf("resolving %s@%s: %w", gitcache.RedactUserinfo(cfg.Ref), cfg.Version, err)
 		}
 	}
 
@@ -151,7 +151,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		repoDir = resolved.URL
 	} else {
 		if err := gitcache.EnsureCloneAuth(cacheRoot, baseRef, resolved.URL, resolved.AuthHeader); err != nil {
-			return nil, fmt.Errorf("cloning %s: %w", resolved.URL, err)
+			return nil, fmt.Errorf("cloning %s: %w", gitcache.RedactUserinfo(resolved.URL), err)
 		}
 		if err := gitcache.FetchURLAuth(cacheRoot, baseRef, resolved.URL, commit, resolved.AuthHeader); err != nil {
 			return nil, fmt.Errorf("fetching %s: %w", commit, err)

@@ -121,32 +121,18 @@ func HasCommit(root, ref, commit string) bool {
 }
 
 // checkRemote refuses an https URL whose host parseHTTPSHost does not accept,
-// before git runs: b and git could read another host from it. The error
-// names the URL without its user name and password. An SSH URL or a local
-// path passes; b gives git no header for those.
+// before the remote git command (clone, fetch, ls-remote) runs: b and git
+// could read another host from it. The error names the URL without its user
+// part (RedactUserinfo). An SSH URL or a local path passes; b gives git no
+// header for those.
 func checkRemote(remote string) error {
 	if len(remote) < len("https://") || !strings.EqualFold(remote[:len("https://")], "https://") {
 		return nil
 	}
 	if _, err := parseHTTPSHost(remote); err != nil {
-		return fmt.Errorf("refusing %s: %w", withoutUserinfo(remote), err)
+		return fmt.Errorf("refusing %s: %w", RedactUserinfo(remote), err)
 	}
 	return nil
-}
-
-// withoutUserinfo returns an https URL with any "user:password@" of its
-// authority replaced by "***@", for an error message.
-func withoutUserinfo(remote string) string {
-	const scheme = "https://"
-	rest := remote[len(scheme):]
-	end := strings.IndexAny(rest, "/?#")
-	if end < 0 {
-		end = len(rest)
-	}
-	if at := strings.LastIndex(rest[:end], "@"); at >= 0 {
-		rest = "***" + rest[at:]
-	}
-	return remote[:len(scheme)] + rest
 }
 
 // redactedError is the error of a git command that b ran with an auth
@@ -211,7 +197,7 @@ func ResolveRefAuth(url, version, authHeader string) (string, error) {
 	ac := authCmd(url, authHeader, "ls-remote", "--", url, version)
 	out, err := outputGit(ac)
 	if err != nil {
-		return "", fmt.Errorf("git ls-remote %s %s: %w", url, version, redactWrap(err, authHeader))
+		return "", fmt.Errorf("git ls-remote %s %s: %w", RedactUserinfo(url), version, redactWrap(err, authHeader))
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	for _, line := range lines {
@@ -233,7 +219,7 @@ func ResolveRefAuth(url, version, authHeader string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("could not resolve %q for %s", version, url)
+	return "", fmt.Errorf("could not resolve %q for %s", version, RedactUserinfo(url))
 }
 
 // TreeEntry represents a single entry from git ls-tree with its file mode.
@@ -340,7 +326,7 @@ func runAuth(ac AuthCmd) error {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %w\n%s", strings.Join(ac.Args, " "), err, stderr.String())
+		return fmt.Errorf("%s: %w\n%s", argsText(ac.Args), err, stderr.String())
 	}
 	return nil
 }
@@ -360,9 +346,19 @@ func outputAuth(ac AuthCmd) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%s: %w\n%s", strings.Join(ac.Args, " "), err, stderr.String())
+		return "", fmt.Errorf("%s: %w\n%s", argsText(ac.Args), err, stderr.String())
 	}
 	return stdout.String(), nil
+}
+
+// argsText is the command line of a git command for an error message, with
+// the user part of a URL replaced (RedactUserinfo).
+func argsText(args []string) string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = RedactUserinfo(a)
+	}
+	return strings.Join(out, " ")
 }
 
 // outputBytes executes a git command and returns stdout as bytes.
