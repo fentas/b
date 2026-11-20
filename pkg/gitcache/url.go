@@ -90,10 +90,12 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 		cleanRef = cleanRef[:i]
 	}
 
-	// Opt-in: an SSH ref for github.com takes the https path below.
+	// Opt-in: an SSH ref for github.com resolves as the https ref. It returns
+	// here: the path can hold "@" and ":" ("git@github.com:x@y:z"), and the
+	// SSH checks below would read "github.com/x@y:z" as SSH again.
 	if sshAsHTTPS() {
 		if path := githubSSHPath(cleanRef); path != "" {
-			cleanRef = "github.com/" + path
+			return remoteHTTPS("github.com/" + path)
 		}
 	}
 
@@ -130,9 +132,14 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 	}
 
 	// Remote ref: "github.com/org/repo" → "https://github.com/org/repo.git"
-	url := "https://" + cleanRef + ".git"
-	auth := detectAuth(cleanRef)
-	return ResolvedRef{URL: url, IsLocal: false, AuthToken: auth.token, AuthHeader: auth.header}
+	return remoteHTTPS(cleanRef)
+}
+
+// remoteHTTPS resolves a remote ref without a scheme ("github.com/org/repo")
+// to its https URL, with the provider auth for its host.
+func remoteHTTPS(ref string) ResolvedRef {
+	auth := detectAuth(ref)
+	return ResolvedRef{URL: "https://" + ref + ".git", AuthToken: auth.token, AuthHeader: auth.header}
 }
 
 // resolveRepo determines if a repo path is local or remote.
@@ -148,9 +155,7 @@ func resolveRepo(repo, configDir string) ResolvedRef {
 		return ResolvedRef{URL: abs, IsLocal: true}
 	}
 	// Remote
-	url := "https://" + repo + ".git"
-	auth := detectAuth(repo)
-	return ResolvedRef{URL: url, IsLocal: false, AuthToken: auth.token, AuthHeader: auth.header}
+	return remoteHTTPS(repo)
 }
 
 // isSSHImplicit detects the "git@host:path" SSH URL format.

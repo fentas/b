@@ -39,6 +39,9 @@ func TestResolveGitURL_SSHAsHTTPS(t *testing.T) {
 		{"ssh implicit host case", "git@GitHub.com:org/repo", ghHTTPS, false, "git@GitHub.com:org/repo.git", true},
 		{"ssh explicit", "ssh://git@github.com/org/repo", ghHTTPS, false, "ssh://git@github.com/org/repo.git", true},
 		{"ssh explicit .git", "ssh://git@github.com/org/repo.git", ghHTTPS, false, "ssh://git@github.com/org/repo.git", true},
+		// The path holds "@" and ":": the https ref must not read as SSH again.
+		{"ssh implicit @ and : in path", "git@github.com:x@y:z", "https://github.com/x@y:z.git", false, "git@github.com:x@y:z.git", true},
+		{"ssh explicit @ and : in path", "ssh://git@github.com/x@y:z", "https://github.com/x@y:z.git", false, "ssh://git@github.com/x@y:z.git", true},
 		{"https", "github.com/org/repo", ghHTTPS, false, ghHTTPS, true},
 		{"git:// remote", "git://github.com/org/repo:file", ghHTTPS, false, ghHTTPS, true},
 		{"local path", "/srv/repos/repo", "/srv/repos/repo", false, "/srv/repos/repo", false},
