@@ -49,8 +49,10 @@ import (
 // mapping, and replacing the consumer's full `database` node with that
 // would silently drop sibling fields like `database.port`. The
 // classification rules live in pkg/env/env.go's `allTopLevelSelectors`
-// flag; this comment exists to keep splice.go honest about the
-// preconditions it relies on.
+// and `legacyWrite` flags (a dotted multi-select hash on a YAML file
+// does reach this function: its scope is the keys that the hash
+// names); this comment
+// exists to keep splice.go honest about the preconditions it relies on.
 func spliceSelectedScope(local, merged []byte, selectors []string, filePath string) ([]byte, error) {
 	if len(selectors) == 0 {
 		return merged, nil
