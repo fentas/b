@@ -1,6 +1,7 @@
 package gitcache
 
 import (
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -267,21 +268,40 @@ type AuthCmd struct {
 	Env  []string // extra environment variables (e.g. GIT_CONFIG_*)
 }
 
-// authCmd builds a git command with optional auth header.
-// The header is injected via GIT_CONFIG_* environment variables instead of
-// command-line args to prevent exposure in process listings.
+// authCmd builds a git command that can reach the remote at remote (clone,
+// fetch, ls-remote), with an optional auth header.
+//
+// The header goes to git in GIT_CONFIG_* environment variables, not in argv,
+// so a process listing does not show it. The config key is scoped to the
+// host of remote (headerKey), so git sends the header to that host only.
 // Pass header from ResolvedRef.AuthHeader (provider-specific format).
-func authCmd(header string, gitArgs ...string) AuthCmd {
+//
+// GIT_TERMINAL_PROMPT=0 stops git from asking for a user name or a password
+// on the terminal: a private repo with no token and no credential helper
+// then fails at once and does not wait for input.
+func authCmd(remote, header string, gitArgs ...string) AuthCmd {
 	args := append([]string{"git"}, gitArgs...)
-	if header == "" {
-		return AuthCmd{Args: args}
-	}
-	return AuthCmd{
-		Args: args,
-		Env: []string{
+	env := []string{"GIT_TERMINAL_PROMPT=0"}
+	if key := headerKey(remote); header != "" && key != "" {
+		env = append(env,
 			"GIT_CONFIG_COUNT=1",
-			"GIT_CONFIG_KEY_0=http.extraHeader",
-			"GIT_CONFIG_VALUE_0=" + header,
-		},
+			"GIT_CONFIG_KEY_0="+key,
+			"GIT_CONFIG_VALUE_0="+header,
+		)
 	}
+	return AuthCmd{Args: args, Env: env}
+}
+
+// headerKey returns the git config key that adds an HTTP header only for the
+// host of remote: "http.https://<host>/.extraHeader". git compares an
+// http.<url>.* key with the URL that it connects to, after its own
+// url.<base>.insteadOf rewrite, so a rewrite to another host does not get
+// the header. It returns "" when remote is not an https URL with a host;
+// then b gives git no header.
+func headerKey(remote string) string {
+	u, err := neturl.Parse(remote)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return ""
+	}
+	return "http.https://" + strings.ToLower(u.Host) + "/.extraHeader"
 }

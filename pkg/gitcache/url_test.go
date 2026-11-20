@@ -567,21 +567,23 @@ func TestResolveLocalRef_Integration(t *testing.T) {
 // --- authCmd ---
 
 func TestAuthCmd_NoToken(t *testing.T) {
-	ac := authCmd("", "ls-remote", "https://github.com/org/repo.git", "HEAD")
+	const u = "https://github.com/org/repo.git"
+	ac := authCmd(u, "", "ls-remote", u, "HEAD")
 	if ac.Args[0] != "git" {
 		t.Errorf("Args[0] = %q, want 'git'", ac.Args[0])
 	}
 	if ac.Args[1] != "ls-remote" {
 		t.Errorf("Args[1] = %q, want 'ls-remote'", ac.Args[1])
 	}
-	if len(ac.Env) != 0 {
-		t.Errorf("Env should be empty without token, got %v", ac.Env)
+	if len(ac.Env) != 1 || ac.Env[0] != "GIT_TERMINAL_PROMPT=0" {
+		t.Errorf("Env without token = %v, want only GIT_TERMINAL_PROMPT=0", ac.Env)
 	}
 }
 
 func TestAuthCmd_WithHeader(t *testing.T) {
 	header := "Authorization: Bearer ghp_secret"
-	ac := authCmd(header, "clone", "--bare", "https://github.com/org/repo.git")
+	const u = "https://github.com/org/repo.git"
+	ac := authCmd(u, header, "clone", "--bare", u)
 	if ac.Args[0] != "git" {
 		t.Errorf("Args[0] = %q", ac.Args[0])
 	}
@@ -607,7 +609,8 @@ func TestAuthCmd_WithHeader(t *testing.T) {
 }
 
 func TestAuthCmd_TokenNotInProcessArgs(t *testing.T) {
-	ac := authCmd("Authorization: Bearer ghp_supersecret", "ls-remote", "https://github.com/org/repo.git")
+	const u = "https://github.com/org/repo.git"
+	ac := authCmd(u, "Authorization: Bearer ghp_supersecret", "ls-remote", u)
 	// The whole point: token must not be in Args (visible in ps/top)
 	joined := strings.Join(ac.Args, " ")
 	if strings.Contains(joined, "ghp_supersecret") {

@@ -42,22 +42,37 @@ func EnsureCloneAuth(root, ref, url, authHeader string) error {
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return fmt.Errorf("creating cache root %s: %w", root, err)
 	}
-	ac := authCmd(authHeader, "clone", "--bare", "--depth", "1", url, dir)
+	// "--" ends the options: git reads a URL that starts with "-" as the
+	// repository, not as an option.
+	ac := authCmd(url, authHeader, "clone", "--bare", "--depth", "1", "--", url, dir)
 	if err := runGit(ac); err != nil {
 		return redactWrap(err, authHeader)
 	}
 	return nil
 }
 
-// Fetch fetches a specific commit or tag into the cache, from the remote
-// that the clone stored ("origin"). FetchURL fetches from a given URL.
+// Fetch fetches a specific commit or tag into the cache, from the URL that
+// the clone stored (remote.origin.url).
+//
+// Deprecated: use FetchURL with the URL that the ref resolves to now
+// (GitURL or ResolveGitURL). The stored URL can be the SSH URL of a cache
+// that was cloned before B_GIT_SSH_AS_HTTPS was on.
 func Fetch(root, ref, commitOrTag string) error {
 	return FetchAuth(root, ref, commitOrTag, "")
 }
 
-// FetchAuth fetches with optional auth token, from "origin".
+// FetchAuth fetches with optional auth token, from the URL that the clone
+// stored (remote.origin.url). The header is scoped to the host of that URL.
+//
+// Deprecated: use FetchURLAuth with ResolvedRef.URL and
+// ResolvedRef.AuthHeader, for the reason given at Fetch.
 func FetchAuth(root, ref, commitOrTag, authHeader string) error {
-	return FetchURLAuth(root, ref, "origin", commitOrTag, authHeader)
+	dir := CacheDir(root, ref)
+	origin, err := output("git", "-C", dir, "config", "--get", "remote.origin.url")
+	if err != nil {
+		return fmt.Errorf("reading the stored origin URL of %s: %w", dir, err)
+	}
+	return FetchURLAuth(root, ref, strings.TrimSpace(origin), commitOrTag, authHeader)
 }
 
 // FetchURL fetches a specific commit or tag into the cache for ref, from url.
@@ -72,7 +87,10 @@ func FetchURL(root, ref, url, commitOrTag string) error {
 // other way round. The fetch does not change the stored remote.
 func FetchURLAuth(root, ref, url, commitOrTag, authHeader string) error {
 	dir := CacheDir(root, ref)
-	ac := authCmd(authHeader, "-C", dir, "fetch", "--depth", "1", url, commitOrTag)
+	// git fetch has no "--" in its synopsis, but its option parser ends the
+	// options at "--" (parse-options.c), as gitcli(7) says for commands that
+	// do not tell revisions from paths.
+	ac := authCmd(url, authHeader, "-C", dir, "fetch", "--depth", "1", "--", url, commitOrTag)
 	if err := runGit(ac); err != nil {
 		return redactWrap(err, authHeader)
 	}
@@ -124,7 +142,8 @@ func ResolveRefAuth(url, version, authHeader string) (string, error) {
 	if version == "" {
 		version = "HEAD"
 	}
-	ac := authCmd(authHeader, "ls-remote", url, version)
+	// "--" ends the options, as at FetchURLAuth.
+	ac := authCmd(url, authHeader, "ls-remote", "--", url, version)
 	out, err := outputGit(ac)
 	if err != nil {
 		return "", fmt.Errorf("git ls-remote %s %s: %w", url, version, redactWrap(err, authHeader))
@@ -139,7 +158,7 @@ func ResolveRefAuth(url, version, authHeader string) (string, error) {
 	// If version is HEAD and ls-remote returned nothing useful, try refs/heads/main, master
 	if version == "HEAD" {
 		for _, branch := range []string{"refs/heads/main", "refs/heads/master"} {
-			fallbackAC := authCmd(authHeader, "ls-remote", url, branch)
+			fallbackAC := authCmd(url, authHeader, "ls-remote", "--", url, branch)
 			out, err = outputGit(fallbackAC)
 			if err == nil {
 				parts := strings.Fields(strings.TrimSpace(out))
