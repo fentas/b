@@ -596,11 +596,12 @@ func TestUpdateEnvs_KeyWithUserPartShownRedacted(t *testing.T) {
 }
 
 // b install shows an env key of b.yaml that gitcache.CheckRef lets pass
-// with "***" in place of its user part, in its ✗ line, its sync line and its
-// up-to-date line. The https:// key gets the host error, and no git command
-// runs for it. git reads the ssh:// key from a local repo
-// (url.<bare>.insteadOf). The password and the token are in no output. b.lock
-// gets an entry for the ssh:// key only, with the ref as b.yaml has it.
+// with "***" in place of its user part, in its ✗ line, its sync line, its
+// up-to-date line and the failure summary. The https:// key gets the host
+// error, and no git command runs for it. git reads the ssh:// key from a
+// local repo (url.<bare>.insteadOf). The password and the token are in no
+// output and in no format verb of the error. b.lock gets an entry for the
+// ssh:// key only, with the ref as b.yaml has it.
 func TestInstall_KeyWithUserPartShownRedacted(t *testing.T) {
 	offlineUpstream(t)
 	t.Setenv(gitcache.SSHAsHTTPSEnv, "")
@@ -634,9 +635,11 @@ func TestInstall_KeyWithUserPartShownRedacted(t *testing.T) {
 		if err := o.Complete(nil); err != nil {
 			t.Fatalf("%s: Complete: %s", run.name, strings.ReplaceAll(err.Error(), canaryPassword, "<password>"))
 		}
-		if err := o.Run(); err != nil {
-			t.Fatalf("%s: Run: %s", run.name, strings.ReplaceAll(err.Error(), canaryPassword, "<password>"))
+		err := o.Run()
+		if want := "1 env(s) failed: " + httpsShown; err == nil || err.Error() != want {
+			t.Errorf("%s: Run: error %q, want %q", run.name, hideCanaries(fmt.Sprint(err)), want)
 		}
+		checkRefusalFormats(t, run.name, err)
 		if want := "  " + fmt.Sprintf("%-40s", httpsShown) + " ✗ resolving " + httpsShown + "@: refusing https://***@github.com/org/repo.git"; !strings.Contains(errOut.String(), want) {
 			t.Errorf("%s: error output %q, want the line %q", run.name, strings.ReplaceAll(errOut.String(), canaryPassword, "<password>"), want)
 		}
@@ -690,8 +693,8 @@ func checkInstallFiles(t *testing.T, name, configPath string) {
 // the key (RefLabel, RefBase), as b update does. With no argument, each such
 // key gets one ✗ line with the fixed text and "<refused env key #N>" in
 // place of the key: N is the place of the key in the sorted list of the env
-// keys. With the key as the argument, b install stops with the fixed text
-// alone. The password and the token are in no output, in no format verb of
+// keys. The failure summary names the same texts. With the key as the
+// argument, b install stops with the fixed text alone. The password and the token are in no output, in no format verb of
 // the error and not in b.yaml or b.lock. No token is chosen and no git
 // command runs.
 func TestInstall_RefusedKeyRefusedFirst(t *testing.T) {
@@ -734,8 +737,8 @@ func TestInstall_RefusedKeyRefusedFirst(t *testing.T) {
 		if err == nil {
 			err = o.Run()
 		}
-		if err != nil {
-			t.Errorf("%s: error %q, want none", name, strings.ReplaceAll(err.Error(), canaryPassword, "<password>"))
+		if want := "3 env(s) failed: " + strings.Join(placeholders, ", "); err == nil || err.Error() != want {
+			t.Errorf("%s: error %q, want %q", name, hideCanaries(fmt.Sprint(err)), want)
 		}
 		checkRefusalFormats(t, name, err)
 		for _, placeholder := range placeholders {
