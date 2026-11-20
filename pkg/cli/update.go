@@ -1092,16 +1092,22 @@ func (o *UpdateOptions) printFileStatus(f lock.LockFile) {
 }
 
 // interactiveConflictResolver returns a ConflictFunc that prompts the user per-file.
+// When the file's selectors cannot take a merge (mergeOK false), the
+// prompt does not offer [m]erge and refuses an "m".
 func (o *UpdateOptions) interactiveConflictResolver(ref string, lk *lock.Lock) env.ConflictFunc {
 	r := o.stdinReader
 	if r == nil {
 		r = os.Stdin
 	}
 	reader := bufio.NewReader(r)
-	return func(sourcePath, destPath string) string {
+	return func(sourcePath, destPath string, mergeOK bool) string {
 		for {
 			fmt.Fprintf(o.IO.ErrOut, "    %s has local changes.\n", destPath)
-			fmt.Fprintf(o.IO.ErrOut, "      [r]eplace  [k]eep  [m]erge  [d]iff > ")
+			if mergeOK {
+				fmt.Fprintf(o.IO.ErrOut, "      [r]eplace  [k]eep  [m]erge  [d]iff > ")
+			} else {
+				fmt.Fprintf(o.IO.ErrOut, "      [r]eplace  [k]eep  [d]iff (no merge: the select has a filter or a nested path) > ")
+			}
 
 			input, err := reader.ReadString('\n')
 			if err != nil {
@@ -1115,12 +1121,20 @@ func (o *UpdateOptions) interactiveConflictResolver(ref string, lk *lock.Lock) e
 			case "k", "keep":
 				return env.StrategyClient
 			case "m", "merge":
-				return env.StrategyMerge
+				if mergeOK {
+					return env.StrategyMerge
+				}
+				fmt.Fprintf(o.IO.ErrOut, "      Merge is not offered for this file. Try r, k, or d.\n")
+				continue
 			case "d", "diff":
 				o.showDiff(ref, sourcePath, destPath, lk)
 				continue // re-prompt
 			default:
-				fmt.Fprintf(o.IO.ErrOut, "      Invalid choice. Try r, k, m, or d.\n")
+				if mergeOK {
+					fmt.Fprintf(o.IO.ErrOut, "      Invalid choice. Try r, k, m, or d.\n")
+				} else {
+					fmt.Fprintf(o.IO.ErrOut, "      Invalid choice. Try r, k, or d.\n")
+				}
 				continue
 			}
 		}

@@ -343,7 +343,7 @@ func TestSyncEnv_ReplaceKeepIsOneShot(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(project, "configs", "a.yaml"), []byte("mine: 1\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	cfg.ResolveConflict = func(sourcePath, destPath string) string { return StrategyClient }
+	cfg.ResolveConflict = func(sourcePath, destPath string, mergeOK bool) string { return StrategyClient }
 	res2, err := SyncEnv(cfg, project, t.TempDir(), le)
 	if err != nil {
 		t.Fatalf("keep sync: %v", err)
