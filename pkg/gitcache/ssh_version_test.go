@@ -64,6 +64,7 @@ func TestIsSSHUserAt_Forms(t *testing.T) {
 		{"tok@github.com/org/repo", true},
 		{"user:p@ss@github.com/org/repo", true}, // an @ in the user part
 		{"a@b@github.com/org/repo", true},
+		{"git://http://user:pw@github.com/org/repo", true}, // the authority of the inner URL
 		{"github.com/org/repo@v2.0", false},
 		{"git@github.com:org/repo@v1", false},
 		{"git@github.com:repo@v1", false},

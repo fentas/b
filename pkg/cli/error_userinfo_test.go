@@ -76,9 +76,22 @@ func TestEnvCommands_RefusedRefShowsNoPassword(t *testing.T) {
 	calls := gitSpy(t)
 	t.Setenv("GITHUB_TOKEN", canaryToken)
 	io, _, _ := bufIO()
+	const (
+		atText     = "refusing a git ref with more than one @ before its path: remove the user part"
+		schemeText = "refusing a git ref with a scheme that b does not fetch: use https://, ssh://, git:// or no scheme"
+		hostText   = "refusing https://***@github.com/org/repo.git: the host part is not a plain host name or IP address " +
+			"with an optional port (no user name, password, wildcard, percent sign or trailing dot); " +
+			"b does not run a remote git command for it"
+	)
+	user := "user:" + canaryPassword + "@"
 	tests := []struct{ ref, refusal string }{
-		{"user:" + canaryPassword + "@" + canaryPassword + "@github.com/org/repo",
-			"refusing a git ref with more than one @ before its path: remove the user part"},
+		{user + canaryPassword + "@github.com/org/repo", atText},
+		{"https://" + user + canaryPassword + "@github.com/org/repo", atText},
+		{"https://" + user + "github.com/org/repo", hostText},
+		{"HTTPS://" + user + "github.com/org/repo", hostText},
+		{"Https://" + user + "github.com/org/repo", hostText},
+		{"http://" + user + "github.com/org/repo", schemeText},
+		{"ftp://" + user + "h.example/x", schemeText},
 	}
 	for _, knob := range []string{"", "1"} {
 		t.Setenv(gitcache.SSHAsHTTPSEnv, knob)
@@ -130,5 +143,41 @@ func TestEnvCommands_ResolveErrorHidesTheUserPart(t *testing.T) {
 		if !strings.HasPrefix(msg, "resolving ***@github.com/org/repo: refusing https://***@github.com/org/repo.git") {
 			t.Errorf("%s: error %q, want the resolve prefix and the refused URL with ***@", tt.name, msg)
 		}
+	}
+}
+
+// b env add with no #label, and b env add -i with no terminal, name the ref
+// in their error with "***" in place of the user part. No git command runs.
+func TestEnvAdd_RefErrorsHideTheUserPart(t *testing.T) {
+	saveHooks(t)
+	isTTYFunc = func() bool { return false }
+	calls := gitSpy(t)
+	t.Setenv("GITHUB_TOKEN", canaryToken)
+	io, _, _ := bufIO()
+	const ref = "https://user:" + canaryPassword + "@github.com/org/repo"
+	for _, tt := range []struct {
+		interactive bool
+		want        string
+	}{
+		{false, "profile name required — use https://***@github.com/org/repo#<name>"},
+		{true, "interactive mode requires a terminal — use https://***@github.com/org/repo#<name> syntax instead"},
+	} {
+		err := (&EnvAddOptions{SharedOptions: NewSharedOptions(io, nil), Interactive: tt.interactive}).Run(ref)
+		if err == nil {
+			t.Fatalf("interactive %v: no error", tt.interactive)
+		}
+		for _, verb := range []string{"%s", "%v", "%+v", "%q", "%#v"} {
+			text := fmt.Sprintf(verb, err)
+			if strings.Contains(text, canaryPassword) || strings.Contains(text, canaryToken) {
+				t.Errorf("interactive %v: the %s text shows the password or the token", tt.interactive, verb)
+			}
+		}
+		if !strings.HasPrefix(err.Error(), tt.want) {
+			t.Errorf("interactive %v: error %q, want the prefix %q", tt.interactive,
+				strings.ReplaceAll(err.Error(), canaryPassword, "<password>"), tt.want)
+		}
+	}
+	if c := calls(); c != "" {
+		t.Errorf("git ran:\n%s", strings.ReplaceAll(c, canaryPassword, "<password>"))
 	}
 }

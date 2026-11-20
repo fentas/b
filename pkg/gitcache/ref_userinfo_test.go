@@ -84,3 +84,105 @@ func TestResolveGitURL_MoreThanOneAtBeforePath(t *testing.T) {
 		}
 	}
 }
+
+// An https ref, with the scheme in any case, resolves as the same ref
+// without the scheme: the same URL, the same token choice and the same
+// header key, so the token goes to the same host. B_GIT_SSH_AS_HTTPS does
+// not change this.
+func TestResolveGitURL_HTTPSRefAsBareRef(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", refToken)
+	t.Setenv("GITLAB_TOKEN", refToken)
+	t.Setenv("GITEA_TOKEN", "")
+	tests := []struct{ ref, bare string }{
+		{"https://github.com/org/repo", "github.com/org/repo"},
+		{"HTTPS://github.com/org/repo", "github.com/org/repo"},
+		{"Https://github.com/org/repo", "github.com/org/repo"},
+		{"https://github.com/org/repo@v1", "github.com/org/repo@v1"},
+		{"https://github.com/org/repo#lbl@v1", "github.com/org/repo#lbl@v1"},
+		{"https://GitHub.com/org/repo", "GitHub.com/org/repo"},
+		{"https://gitlab.com/group/project", "gitlab.com/group/project"},
+		{"https://host.example:8443/org/repo", "host.example:8443/org/repo"},
+	}
+	for _, knob := range []string{"", "1"} {
+		t.Setenv(SSHAsHTTPSEnv, knob)
+		for _, tt := range tests {
+			got, want := ResolveGitURL(tt.ref, ""), ResolveGitURL(tt.bare, "")
+			if got != want {
+				t.Errorf("%s=%q: ResolveGitURL(%q) = URL %q, token set %v; want the result of %q: URL %q, token set %v",
+					SSHAsHTTPSEnv, knob, tt.ref, got.URL, got.AuthToken != "", tt.bare, want.URL, want.AuthToken != "")
+			}
+			if headerKey(got.URL) != headerKey(want.URL) {
+				t.Errorf("%q: header key %q, want %q", tt.ref, headerKey(got.URL), headerKey(want.URL))
+			}
+			if RefVersion(tt.ref) != RefVersion(tt.bare) || RefLabel(tt.ref) != RefLabel(tt.bare) {
+				t.Errorf("%q: version %q label %q, want %q %q", tt.ref,
+					RefVersion(tt.ref), RefLabel(tt.ref), RefVersion(tt.bare), RefLabel(tt.bare))
+			}
+			if err := checkRemote(got.URL); err != nil {
+				t.Errorf("%q: checkRemote refuses %q: %v", tt.ref, got.URL, err)
+			}
+		}
+	}
+	r := ResolveGitURL("https://github.com/org/repo", "")
+	if r.URL != "https://github.com/org/repo.git" || r.AuthToken != refToken ||
+		headerKey(r.URL) != "http.https://github.com/.extraHeader" {
+		t.Errorf("https://github.com/org/repo: URL %q, token set %v, header key %q",
+			r.URL, r.AuthToken != "", headerKey(r.URL))
+	}
+}
+
+// An https ref with a user part gets the same refusal as the ref without
+// the scheme. A ref with another scheme, also http, is refused with one
+// fixed text. Neither text shows a part of the password, the URL that the
+// callers print shows "***" in place of the user part, no token is chosen
+// and no git command runs.
+func TestResolveGitURL_SchemeRefusals(t *testing.T) {
+	const scheme = "refusing a git ref with a scheme that b does not fetch: use https://, ssh://, git:// or no scheme"
+	const at = "refusing a git ref with more than one @ before its path: remove the user part"
+	user := "user:" + refPassword + "@"
+	tests := []struct{ ref, refusal string }{
+		{"https://" + user + "github.com/org/repo",
+			"refusing https://***@github.com/org/repo.git: " + errRemoteHost.Error()},
+		{"HTTPS://" + user + "github.com/org/repo",
+			"refusing https://***@github.com/org/repo.git: " + errRemoteHost.Error()},
+		{"Https://" + user + "github.com/org/repo@v1",
+			"refusing https://***@github.com/org/repo.git: " + errRemoteHost.Error()},
+		{"https://" + user + refPassword + "@github.com/org/repo", at},
+		{"HTTPS://" + user + refPassword + "@github.com/org/repo", at},
+		{"http://github.com/org/repo", scheme},
+		{"http://" + user + "github.com/org/repo", scheme},
+		{"HTTP://" + user + "github.com/org/repo", scheme},
+		{"file:///srv/repo", scheme},
+		{"ftp://" + user + "h.example/x", scheme},
+		{"git+ssh://git@github.com/org/repo", scheme},
+		{"SSH://git@github.com/org/repo", scheme},
+		{"git://http://" + user + "github.com/org/repo", scheme},
+		{"git://https://" + user + "github.com/org/repo", scheme},
+	}
+	for _, knob := range []string{"", "1"} {
+		t.Setenv(SSHAsHTTPSEnv, knob)
+		t.Setenv("GITHUB_TOKEN", refToken)
+		for _, tt := range tests {
+			cmds := recordGit(t)
+			r := ResolveGitURL(tt.ref, "")
+			if r.AuthToken != "" || r.AuthHeader != "" {
+				t.Errorf("%s=%q %q: a token is chosen", SSHAsHTTPSEnv, knob, tt.ref)
+			}
+			if strings.Contains(RedactUserinfo(r.URL), refPassword) || strings.Contains(RedactUserinfo(tt.ref), refPassword) {
+				t.Errorf("%s=%q %q: RedactUserinfo of the ref or the URL shows the password", SSHAsHTTPSEnv, knob, tt.ref)
+			}
+			for op, err := range remoteErrors(t, tt.ref, r) {
+				if err == nil || err.Error() != tt.refusal {
+					t.Errorf("%s=%q %q %s: error %q, want %q", SSHAsHTTPSEnv, knob, tt.ref, op,
+						strings.ReplaceAll(fmt.Sprint(err), refPassword, "<password>"), tt.refusal)
+				}
+				if err != nil && formatsHold(err, refPassword) {
+					t.Errorf("%s=%q %q %s: the error shows the password", SSHAsHTTPSEnv, knob, tt.ref, op)
+				}
+			}
+			if len(*cmds) != 0 {
+				t.Errorf("%s=%q %q: %d git commands ran", SSHAsHTTPSEnv, knob, tt.ref, len(*cmds))
+			}
+		}
+	}
+}

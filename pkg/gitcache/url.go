@@ -63,8 +63,14 @@ func githubSSHPath(cleanRef string) string {
 //   - SSH refs: "git@github.com:org/repo" → passed through as-is (uses ssh-agent)
 //   - SSH protocol: "ssh://git@host/org/repo" → passed through as-is
 //   - Remote refs: "github.com/org/repo" → "https://github.com/org/repo.git"
+//   - HTTPS refs: "https://github.com/org/repo" (the scheme in any case) →
+//     "https://github.com/org/repo.git", as the remote ref without the scheme
 //   - git:// protocol: "git://../../repo" → resolved local path or remote URL
 //   - Local paths: "/abs/path" or "../../rel" → resolved to absolute
+//
+// A ref with another scheme ("http://", "file://", "SSH://") and a ref with
+// more than one @ before its path resolve to a URL that the remote git
+// commands refuse with a fixed text (checkRemote).
 //
 // SSH URLs use the system's SSH agent (SSH_AUTH_SOCK) for authentication.
 // HTTPS URLs use AuthToken injected via GIT_CONFIG_* environment variables.
@@ -138,8 +144,29 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 		return resolveRepo(raw, configDir)
 	}
 
-	// Remote ref: "github.com/org/repo" → "https://github.com/org/repo.git"
+	// An explicit https scheme, in any case ("https://", "HTTPS://"): the ref
+	// is that URL. It resolves as the ref without the scheme, so it gets the
+	// same URL and the same token.
+	if hasHTTPSScheme(cleanRef) {
+		return remoteHTTPS(cleanRef[len("https://"):])
+	}
+
+	// Remote ref: "github.com/org/repo" → "https://github.com/org/repo.git".
+	// A ref with another scheme ("http://", "file://") gets the URL
+	// "https://<scheme>://...", which checkRemote refuses (errScheme).
 	return remoteHTTPS(cleanRef)
+}
+
+// hasHTTPSScheme reports whether s starts with "https://", in any case.
+func hasHTTPSScheme(s string) bool {
+	return len(s) >= len("https://") && strings.EqualFold(s[:len("https://")], "https://")
+}
+
+// hasScheme reports whether s starts with a scheme and "://": the text in
+// front of the first "://" is not empty and has no "/", "?", "#" or "@".
+func hasScheme(s string) bool {
+	i := strings.Index(s, "://")
+	return i > 0 && !strings.ContainsAny(s[:i], "/?#@")
 }
 
 // remoteHTTPS resolves a remote ref without a scheme ("github.com/org/repo")
@@ -167,6 +194,11 @@ var errRemoteHost = errors.New("the host part is not a plain host name or IP add
 // its authority (checkRemote). The text does not echo the URL: a part of
 // the password can look like the host.
 var errUserinfoAt = errors.New("refusing a git ref with more than one @ before its path: remove the user part")
+
+// errScheme is the error for the URL "https://<scheme>://..." that
+// ResolveGitURL builds for a ref with a scheme that b does not fetch
+// (checkRemote). The text does not echo the URL.
+var errScheme = errors.New("refusing a git ref with a scheme that b does not fetch: use https://, ssh://, git:// or no scheme")
 
 // urlAuthority returns the authority of rest, the part of a URL after
 // "<scheme>://": the text up to the first "/", "?" or "#".
@@ -305,6 +337,11 @@ func IsSSHUserAt(ref string, atIdx int) bool {
 	// With a scheme, the user part is in the authority: no "/" follows the
 	// scheme before the @.
 	if i := strings.Index(prefix, "://"); i > 0 && !strings.ContainsAny(prefix[:i], "/@") {
+		// A URL in the ref ("git://http://user:pw@host/path"): the user part
+		// is in the authority of the inner URL.
+		if inner := i + len("://"); hasScheme(prefix[inner:]) {
+			return IsSSHUserAt(ref[inner:], atIdx-inner)
+		}
 		if !strings.Contains(prefix[i+len("://"):], "/") {
 			return true
 		}
@@ -334,6 +371,12 @@ func RedactUserinfo(s string) string {
 	start, scheme := 0, ""
 	if i := strings.Index(s, "://"); i > 0 && !strings.ContainsAny(s[:i], "/@") {
 		start, scheme = i+len("://"), strings.ToLower(s[:i])
+		// A URL with a second scheme ("https://http://user:pw@host/path",
+		// the URL that b builds for a ref with a scheme that it does not
+		// fetch): the user part is in the authority of the inner URL.
+		if hasScheme(s[start:]) {
+			return s[:start] + RedactUserinfo(s[start:])
+		}
 	} else if isSSHImplicit(s) {
 		return s // scp-style "user@host:path": the user part has no password
 	}

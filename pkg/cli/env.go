@@ -785,7 +785,8 @@ func (o *EnvAddOptions) Run(refArg string) error {
 	}
 
 	if label == "" {
-		return fmt.Errorf("profile name required — use %s#<name>\n  Hint: run `b env profiles %s` to see available profiles\n  Hint: use -i for interactive selection", ref, ref)
+		shown := gitcache.RedactUserinfo(ref)
+		return fmt.Errorf("profile name required — use %s#<name>\n  Hint: run `b env profiles %s` to see available profiles\n  Hint: use -i for interactive selection", shown, shown)
 	}
 
 	// Fail fast if already in local config
@@ -812,7 +813,7 @@ func (o *EnvAddOptions) Run(refArg string) error {
 // runInteractive shows a numbered list of profiles and lets the user select.
 func (o *EnvAddOptions) runInteractive(ref, version, refArg string) error {
 	if !isTTYFunc() {
-		return fmt.Errorf("interactive mode requires a terminal — use %s#<name> syntax instead", ref)
+		return fmt.Errorf("interactive mode requires a terminal — use %s#<name> syntax instead", gitcache.RedactUserinfo(ref))
 	}
 
 	upstream, err := o.fetchUpstream(ref, version, refArg)

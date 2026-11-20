@@ -56,9 +56,23 @@ func TestSyncEnv_RefusedRefShowsNoPassword(t *testing.T) {
 	isolateGit(t)
 	t.Setenv("GITHUB_TOKEN", canaryToken)
 	calls := gitSpy(t)
+	const (
+		atText     = "refusing a git ref with more than one @ before its path: remove the user part"
+		schemeText = "refusing a git ref with a scheme that b does not fetch: use https://, ssh://, git:// or no scheme"
+		hostText   = "refusing https://***@github.com/org/repo.git: the host part is not a plain host name or IP address " +
+			"with an optional port (no user name, password, wildcard, percent sign or trailing dot); " +
+			"b does not run a remote git command for it"
+	)
+	user := "user:" + canaryPassword + "@"
 	tests := []struct{ ref, refusal string }{
-		{"user:" + canaryPassword + "@" + canaryPassword + "@github.com/org/repo",
-			"refusing a git ref with more than one @ before its path: remove the user part"},
+		{user + canaryPassword + "@github.com/org/repo", atText},
+		{"https://" + user + canaryPassword + "@github.com/org/repo", atText},
+		{"https://" + user + "github.com/org/repo", hostText},
+		{"HTTPS://" + user + "github.com/org/repo", hostText},
+		{"Https://" + user + "github.com/org/repo", hostText},
+		{"http://" + user + "github.com/org/repo", schemeText},
+		{"ftp://" + user + "h.example/x", schemeText},
+		{"git://http://" + user + "github.com/org/repo", schemeText},
 	}
 	for _, knob := range []string{"", "1"} {
 		t.Setenv(gitcache.SSHAsHTTPSEnv, knob)
