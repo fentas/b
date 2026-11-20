@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/fentas/b/pkg/binary"
+	"gopkg.in/yaml.v3"
 )
 
 // TestSaveConfig_KeepsRelativeFilePaths verifies that a load→modify→save
@@ -170,6 +171,105 @@ func TestSaveConfig_KeepsRelativeFileOutsideTheConfigDir(t *testing.T) {
 	}
 }
 
+// TestSaveConfig_FileRoundTrip: a load→modify→save round-trip writes each
+// unchanged `file:` back as b.yaml writes it: a relative path outside the
+// config dir (../shared/tool), one inside it (tools/x), and an untidy one
+// (./tools/y). An absolute path outside the config dir stays absolute. An
+// absolute path inside the config dir becomes relative to it, as before.
+func TestSaveConfig_FileRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".bin")
+	configPath := filepath.Join(configDir, "b.yaml")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(tmpDir, "opt", "z")
+	inside := filepath.Join(configDir, "tools", "w")
+	initial := "binaries:\n" +
+		"  shared:\n    file: ../shared/tool\n" +
+		"  inside:\n    file: tools/x\n" +
+		"  untidy:\n    file: ./tools/y\n" +
+		"  outside:\n    file: " + outside + "\n" +
+		"  absinside:\n    file: " + inside + "\n"
+	if err := os.WriteFile(configPath, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadConfigFromPath(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Binaries = append(config.Binaries, &binary.LocalBinary{Name: "yq"})
+	if err := SaveConfig(config, configPath); err != nil {
+		t.Fatal(err)
+	}
+
+	got := writtenFiles(t, configPath)
+	want := map[string]string{
+		"shared":    "../shared/tool",
+		"inside":    "tools/x",
+		"untidy":    "./tools/y",
+		"outside":   outside,
+		"absinside": "tools/w",
+	}
+	for name, w := range want {
+		if got[name] != w {
+			t.Errorf("file: of %s after the save: %q, want %q", name, got[name], w)
+		}
+	}
+	if got := mustFile(config, "shared"); got != filepath.Join(tmpDir, "shared", "tool") {
+		t.Errorf("File of shared in memory after the save: %q, want the resolved path", got)
+	}
+}
+
+// TestSaveConfig_ChangedFileWritesTheNewValue: when a caller changes the
+// File of an entry after the load, the save writes the new file and not the
+// old `file:` of b.yaml. A new file inside the config dir is written
+// relative to it, and a new file outside it is written absolute. A reload
+// resolves both to the new files.
+func TestSaveConfig_ChangedFileWritesTheNewValue(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".bin")
+	configPath := filepath.Join(configDir, "b.yaml")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initial := "binaries:\n" +
+		"  moved:\n    file: ../shared/tool\n" +
+		"  away:\n    file: ../shared/other\n"
+	if err := os.WriteFile(configPath, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadConfigFromPath(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newInside := filepath.Join(configDir, "tools", "new")
+	newOutside := filepath.Join(tmpDir, "opt", "z")
+	config.Binaries.Get("moved").File = newInside
+	config.Binaries.Get("away").File = newOutside
+	if err := SaveConfig(config, configPath); err != nil {
+		t.Fatal(err)
+	}
+
+	got := writtenFiles(t, configPath)
+	if got["moved"] != "tools/new" {
+		t.Errorf("file: of moved after the save: %q, want %q", got["moved"], "tools/new")
+	}
+	if got["away"] != newOutside {
+		t.Errorf("file: of away after the save: %q, want %q", got["away"], newOutside)
+	}
+	reloaded, err := LoadConfigFromPath(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mustFile(reloaded, "moved"); got != newInside {
+		t.Errorf("File of moved after a reload: %q, want %q", got, newInside)
+	}
+	if got := mustFile(reloaded, "away"); got != newOutside {
+		t.Errorf("File of away after a reload: %q, want %q", got, newOutside)
+	}
+}
+
 // TestSaveConfig_KeepsRelativeFilePaths_NewFile covers the clean-save path
 // (no pre-existing file), where the binaries are marshaled from scratch.
 func TestSaveConfig_KeepsRelativeFilePaths_NewFile(t *testing.T) {
@@ -233,4 +333,27 @@ func mustFile(s *State, name string) string {
 		return b.File
 	}
 	return ""
+}
+
+// writtenFiles parses the b.yaml at configPath and returns the `file:` of
+// each binary as the file holds it.
+func writtenFiles(t *testing.T, configPath string) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Binaries map[string]struct {
+			File string `yaml:"file"`
+		} `yaml:"binaries"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("parse b.yaml: %v\n%s", err, data)
+	}
+	files := make(map[string]string, len(doc.Binaries))
+	for name, b := range doc.Binaries {
+		files[name] = b.File
+	}
+	return files
 }
