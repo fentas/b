@@ -188,6 +188,8 @@ Set environment variables to authenticate with providers for higher rate limits 
 | `GITLAB_TOKEN` | GitLab |
 | `GITEA_TOKEN` | Gitea / Forgejo (Codeberg) |
 
+On a machine where SSH does not work, set `B_GIT_SSH_AS_HTTPS=1` to fetch a GitHub SSH ref (`git@github.com:org/repo`) over HTTPS. Refs for other hosts stay SSH. See [Authentication](https://binary.help/authentication).
+
 Downloads retry network errors, HTTP 429 and HTTP 5xx. A download that receives no data for 60 seconds is retried; set `B_DOWNLOAD_IDLE_TIMEOUT` (for example `5m`) to change that time. See [Troubleshooting](https://binary.help/troubleshooting).
 
 For `oci://` the daemonless client reuses your local registry auth from `~/.docker/config.json` (or the `DOCKER_CONFIG` override) — the same credentials `docker login` writes.

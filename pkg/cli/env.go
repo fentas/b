@@ -529,14 +529,14 @@ func (o *EnvMatchOptions) Run(args []string) error {
 
 	commit, err := gitcache.ResolveRef(url, version)
 	if err != nil {
-		return fmt.Errorf("resolving %s: %w", refArg, err)
+		return fmt.Errorf("resolving %s: %w", gitcache.RedactUserinfo(refArg), err)
 	}
 
 	cacheRoot := gitcache.DefaultCacheRoot()
 	if err := gitcache.EnsureClone(cacheRoot, ref, url); err != nil {
-		return fmt.Errorf("cloning %s: %w", url, err)
+		return fmt.Errorf("cloning %s: %w", gitcache.RedactUserinfo(url), err)
 	}
-	if err := gitcache.Fetch(cacheRoot, ref, commit); err != nil {
+	if err := gitcache.FetchURL(cacheRoot, ref, url, commit); err != nil {
 		return fmt.Errorf("fetching %s: %w", commit, err)
 	}
 
@@ -608,14 +608,14 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 
 	commit, err := gitcache.ResolveRef(url, version)
 	if err != nil {
-		return fmt.Errorf("resolving %s: %w", refArg, err)
+		return fmt.Errorf("resolving %s: %w", gitcache.RedactUserinfo(refArg), err)
 	}
 
 	cacheRoot := gitcache.DefaultCacheRoot()
 	if err := gitcache.EnsureClone(cacheRoot, ref, url); err != nil {
-		return fmt.Errorf("cloning %s: %w", url, err)
+		return fmt.Errorf("cloning %s: %w", gitcache.RedactUserinfo(url), err)
 	}
-	if err := gitcache.Fetch(cacheRoot, ref, commit); err != nil {
+	if err := gitcache.FetchURL(cacheRoot, ref, url, commit); err != nil {
 		return fmt.Errorf("fetching %s: %w", commit, err)
 	}
 
@@ -887,14 +887,14 @@ func (o *EnvAddOptions) fetchUpstream(ref, version, refArg string) (*state.State
 	url := gitcache.GitURL(refArg)
 	commit, err := gitcache.ResolveRef(url, version)
 	if err != nil {
-		return nil, fmt.Errorf("resolving %s: %w", refArg, err)
+		return nil, fmt.Errorf("resolving %s: %w", gitcache.RedactUserinfo(refArg), err)
 	}
 
 	cacheRoot := gitcache.DefaultCacheRoot()
 	if err := gitcache.EnsureClone(cacheRoot, ref, url); err != nil {
-		return nil, fmt.Errorf("cloning %s: %w", url, err)
+		return nil, fmt.Errorf("cloning %s: %w", gitcache.RedactUserinfo(url), err)
 	}
-	if err := gitcache.Fetch(cacheRoot, ref, commit); err != nil {
+	if err := gitcache.FetchURL(cacheRoot, ref, url, commit); err != nil {
 		return nil, fmt.Errorf("fetching %s: %w", commit, err)
 	}
 

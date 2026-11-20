@@ -29,7 +29,7 @@ var (
 	syncEnvFunc    = env.SyncEnv
 	resolveRefFunc = gitcache.ResolveRef
 	ensureCloneF   = gitcache.EnsureClone
-	fetchFunc      = gitcache.Fetch
+	fetchFunc      = gitcache.FetchURL
 	showFileFunc   = gitcache.ShowFile
 	diffNoIndexF   = gitcache.DiffNoIndex
 	isTTYFunc      = isTTY
@@ -1169,7 +1169,7 @@ func (o *UpdateOptions) showDiff(ref, sourcePath, destPath string, lk *lock.Lock
 		fmt.Fprintf(o.IO.ErrOut, "      Cannot clone upstream for diff: %v\n", err)
 		return
 	}
-	if err := fetchFunc(cacheRoot, baseRef, commit); err != nil {
+	if err := fetchFunc(cacheRoot, baseRef, url, commit); err != nil {
 		fmt.Fprintf(o.IO.ErrOut, "      Cannot fetch upstream for diff: %v\n", err)
 		return
 	}

@@ -11,6 +11,7 @@ import (
 // --- Comprehensive resolution table ---
 
 func TestResolveGitURL_AllVariants(t *testing.T) {
+	t.Setenv(SSHAsHTTPSEnv, "") // the SSH rows expect SSH URLs
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GITLAB_TOKEN", "")
 	t.Setenv("GITEA_TOKEN", "")
@@ -376,11 +377,11 @@ func TestResolveGitURL_GitlabRef(t *testing.T) {
 	}
 }
 
-// --- Auth token detection ---
+// --- Auth token detection (providerAuth takes a parsed host) ---
 
 func TestDetectAuth_GitHub(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_test123")
-	auth := detectAuth("github.com/org/repo")
+	auth := providerAuth("github.com")
 	if auth.token != "ghp_test123" {
 		t.Errorf("token = %q", auth.token)
 	}
@@ -391,7 +392,7 @@ func TestDetectAuth_GitHub(t *testing.T) {
 
 func TestDetectAuth_GitLab(t *testing.T) {
 	t.Setenv("GITLAB_TOKEN", "glpat-test")
-	auth := detectAuth("gitlab.com/org/repo")
+	auth := providerAuth("gitlab.com")
 	if auth.token != "glpat-test" {
 		t.Errorf("token = %q", auth.token)
 	}
@@ -402,7 +403,7 @@ func TestDetectAuth_GitLab(t *testing.T) {
 
 func TestDetectAuth_Gitea(t *testing.T) {
 	t.Setenv("GITEA_TOKEN", "giteatok")
-	auth := detectAuth("codeberg.org/org/repo")
+	auth := providerAuth("codeberg.org")
 	if auth.token != "giteatok" {
 		t.Errorf("token = %q", auth.token)
 	}
@@ -415,7 +416,7 @@ func TestDetectAuth_NoToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GITLAB_TOKEN", "")
 	t.Setenv("GITEA_TOKEN", "")
-	auth := detectAuth("github.com/org/repo")
+	auth := providerAuth("github.com")
 	if auth.token != "" {
 		t.Errorf("expected empty token, got %q", auth.token)
 	}
@@ -423,7 +424,7 @@ func TestDetectAuth_NoToken(t *testing.T) {
 
 func TestDetectAuth_UnknownHost(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_test")
-	auth := detectAuth("custom.host.com/org/repo")
+	auth := providerAuth("custom.host.com")
 	if auth.token != "" {
 		t.Errorf("expected empty token for unknown host, got %q", auth.token)
 	}
@@ -431,7 +432,7 @@ func TestDetectAuth_UnknownHost(t *testing.T) {
 
 func TestDetectAuth_SpoofedHost(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_secret")
-	auth := detectAuth("github.evil.example/org/repo")
+	auth := providerAuth("github.evil.example")
 	if auth.token != "" {
 		t.Errorf("spoofed host should not get token, got %q", auth.token)
 	}
@@ -439,7 +440,7 @@ func TestDetectAuth_SpoofedHost(t *testing.T) {
 
 func TestDetectAuth_Subdomain(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_enterprise")
-	auth := detectAuth("enterprise.github.com/org/repo")
+	auth := providerAuth("enterprise.github.com")
 	if auth.token != "ghp_enterprise" {
 		t.Errorf("subdomain should match, got %q", auth.token)
 	}
@@ -566,21 +567,23 @@ func TestResolveLocalRef_Integration(t *testing.T) {
 // --- authCmd ---
 
 func TestAuthCmd_NoToken(t *testing.T) {
-	ac := authCmd("", "ls-remote", "https://github.com/org/repo.git", "HEAD")
+	const u = "https://github.com/org/repo.git"
+	ac := authCmd(u, "", "ls-remote", u, "HEAD")
 	if ac.Args[0] != "git" {
 		t.Errorf("Args[0] = %q, want 'git'", ac.Args[0])
 	}
 	if ac.Args[1] != "ls-remote" {
 		t.Errorf("Args[1] = %q, want 'ls-remote'", ac.Args[1])
 	}
-	if len(ac.Env) != 0 {
-		t.Errorf("Env should be empty without token, got %v", ac.Env)
+	if len(ac.Env) != 1 || ac.Env[0] != "GIT_TERMINAL_PROMPT=0" {
+		t.Errorf("Env without token = %v, want only GIT_TERMINAL_PROMPT=0", ac.Env)
 	}
 }
 
 func TestAuthCmd_WithHeader(t *testing.T) {
 	header := "Authorization: Bearer ghp_secret"
-	ac := authCmd(header, "clone", "--bare", "https://github.com/org/repo.git")
+	const u = "https://github.com/org/repo.git"
+	ac := authCmd(u, header, "clone", "--bare", u)
 	if ac.Args[0] != "git" {
 		t.Errorf("Args[0] = %q", ac.Args[0])
 	}
@@ -606,7 +609,8 @@ func TestAuthCmd_WithHeader(t *testing.T) {
 }
 
 func TestAuthCmd_TokenNotInProcessArgs(t *testing.T) {
-	ac := authCmd("Authorization: Bearer ghp_supersecret", "ls-remote", "https://github.com/org/repo.git")
+	const u = "https://github.com/org/repo.git"
+	ac := authCmd(u, "Authorization: Bearer ghp_supersecret", "ls-remote", u)
 	// The whole point: token must not be in Args (visible in ps/top)
 	joined := strings.Join(ac.Args, " ")
 	if strings.Contains(joined, "ghp_supersecret") {

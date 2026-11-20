@@ -84,6 +84,17 @@ func TestParseGitRef(t *testing.T) {
 			wantRepo: "git@github.com:org/repo",
 			wantFile: "bin/app",
 		},
+		// SSH explicit: the @ after the path is a version
+		{
+			ref:      "ssh://git@github.com/org/repo:bin/app",
+			wantRepo: "ssh://git@github.com/org/repo",
+			wantFile: "bin/app",
+		},
+		{
+			ref:      "ssh://git@github.com/org/repo:bin/app@v1.0",
+			wantRepo: "ssh://git@github.com/org/repo",
+			wantFile: "bin/app",
+		},
 		// SSH implicit without filepath (error — needs filepath for binaries)
 		{
 			ref:     "git@github.com:org/repo",

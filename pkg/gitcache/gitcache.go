@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -35,6 +36,9 @@ func EnsureClone(root, ref, url string) error {
 
 // EnsureCloneAuth creates a shallow bare clone with optional auth token.
 func EnsureCloneAuth(root, ref, url, authHeader string) error {
+	if err := checkRemote(url); err != nil {
+		return err
+	}
 	dir := CacheDir(root, ref)
 	if _, err := os.Stat(dir); err == nil {
 		return nil // already cached
@@ -42,23 +46,66 @@ func EnsureCloneAuth(root, ref, url, authHeader string) error {
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return fmt.Errorf("creating cache root %s: %w", root, err)
 	}
-	ac := authCmd(authHeader, "clone", "--bare", "--depth", "1", url, dir)
-	if err := runAuth(ac); err != nil {
+	// "--" ends the options: git reads a URL that starts with "-" as the
+	// repository, not as an option.
+	ac := authCmd(url, authHeader, "clone", "--bare", "--depth", "1", "--", url, dir)
+	if err := runGit(ac); err != nil {
 		return redactWrap(err, authHeader)
 	}
 	return nil
 }
 
-// Fetch fetches a specific commit or tag into the cache.
+// Fetch fetches a specific commit or tag into the cache, from the URL that
+// the clone stored (remote.origin.url).
+//
+// Deprecated: use FetchURL with the URL that the ref resolves to now
+// (GitURL or ResolveGitURL). The stored URL can be the SSH URL of a cache
+// that was cloned before B_GIT_SSH_AS_HTTPS was on.
 func Fetch(root, ref, commitOrTag string) error {
 	return FetchAuth(root, ref, commitOrTag, "")
 }
 
-// FetchAuth fetches with optional auth token.
+// FetchAuth fetches with optional auth token, from the URL that the clone
+// stored (remote.origin.url). It sends the header only when b chooses the
+// same header for the host of that URL (providerAuth), scoped to that host.
+//
+// Deprecated: use FetchURLAuth with ResolvedRef.URL and
+// ResolvedRef.AuthHeader, for the reason given at Fetch.
 func FetchAuth(root, ref, commitOrTag, authHeader string) error {
 	dir := CacheDir(root, ref)
-	ac := authCmd(authHeader, "-C", dir, "fetch", "--depth", "1", "origin", commitOrTag)
-	if err := runAuth(ac); err != nil {
+	out, err := output("git", "-C", dir, "config", "--get", "remote.origin.url")
+	if err != nil {
+		return fmt.Errorf("reading the stored origin URL of %s: %w", dir, err)
+	}
+	origin := strings.TrimSpace(out)
+	if authHeader != "" {
+		if h, err := parseHTTPSHost(origin); err != nil || providerAuth(h.host).header != authHeader {
+			authHeader = "" // the header was not chosen for the host of the stored URL
+		}
+	}
+	return FetchURLAuth(root, ref, origin, commitOrTag, authHeader)
+}
+
+// FetchURL fetches a specific commit or tag into the cache for ref, from url.
+func FetchURL(root, ref, url, commitOrTag string) error {
+	return FetchURLAuth(root, ref, url, commitOrTag, "")
+}
+
+// FetchURLAuth fetches a specific commit or tag into the cache for ref, from
+// url, with an optional auth header. url is the URL that the ref resolves to
+// now (ResolvedRef.URL), not the URL that the clone stored: a cache cloned
+// over SSH then fetches over https when B_GIT_SSH_AS_HTTPS is on, and the
+// other way round. The fetch does not change the stored remote.
+func FetchURLAuth(root, ref, url, commitOrTag, authHeader string) error {
+	if err := checkRemote(url); err != nil {
+		return err
+	}
+	dir := CacheDir(root, ref)
+	// git fetch has no "--" in its synopsis, but its option parser ends the
+	// options at "--" (parse-options.c), as gitcli(7) says for commands that
+	// do not tell revisions from paths.
+	ac := authCmd(url, authHeader, "-C", dir, "fetch", "--depth", "1", "--", url, commitOrTag)
+	if err := runGit(ac); err != nil {
 		return redactWrap(err, authHeader)
 	}
 	return nil
@@ -73,12 +120,46 @@ func HasCommit(root, ref, commit string) bool {
 	return cmd.Run() == nil
 }
 
-// redactWrap wraps an error with a redacted message while preserving the error chain.
+// checkRemote refuses an https URL whose host parseHTTPSHost does not accept,
+// before the remote git command (clone, fetch, ls-remote) runs: b and git
+// could read another host from it. The error names the URL without its user
+// part (RedactUserinfo). An SSH URL or a local path passes; b gives git no
+// header for those.
+func checkRemote(remote string) error {
+	if len(remote) < len("https://") || !strings.EqualFold(remote[:len("https://")], "https://") {
+		return nil
+	}
+	if _, err := parseHTTPSHost(remote); err != nil {
+		return fmt.Errorf("refusing %s: %w", RedactUserinfo(remote), err)
+	}
+	return nil
+}
+
+// redactedError is the error of a git command that b ran with an auth
+// header. Error returns the text of the command error with the secret
+// replaced by "***", and nothing more. Unwrap returns the first error in
+// the chain whose text does not hold the secret (for example the
+// *exec.ExitError), so errors.Is and errors.As find it, and no error that
+// Unwrap returns prints the secret.
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
+
+// redactWrap returns err with the secret of authHeader removed from its
+// text (redactedError). It returns err as it is when authHeader is empty.
 func redactWrap(err error, authHeader string) error {
-	if authHeader == "" {
+	if err == nil || authHeader == "" {
 		return err
 	}
-	return fmt.Errorf("%s: %w", redactAuth(err.Error(), authHeader), err)
+	inner := err
+	for inner != nil && redactAuth(inner.Error(), authHeader) != inner.Error() {
+		inner = errors.Unwrap(inner)
+	}
+	return &redactedError{msg: redactAuth(err.Error(), authHeader), err: inner}
 }
 
 // ResolveLocalRef resolves a version to a commit SHA for a local repo.
@@ -106,13 +187,17 @@ func ResolveRef(url, version string) (string, error) {
 
 // ResolveRefAuth resolves with optional auth token.
 func ResolveRefAuth(url, version, authHeader string) (string, error) {
+	if err := checkRemote(url); err != nil {
+		return "", err
+	}
 	if version == "" {
 		version = "HEAD"
 	}
-	ac := authCmd(authHeader, "ls-remote", url, version)
-	out, err := outputAuth(ac)
+	// "--" ends the options, as at FetchURLAuth.
+	ac := authCmd(url, authHeader, "ls-remote", "--", url, version)
+	out, err := outputGit(ac)
 	if err != nil {
-		return "", fmt.Errorf("git ls-remote %s %s: %w", url, version, redactWrap(err, authHeader))
+		return "", fmt.Errorf("git ls-remote %s %s: %w", RedactUserinfo(url), version, redactWrap(err, authHeader))
 	}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	for _, line := range lines {
@@ -124,8 +209,8 @@ func ResolveRefAuth(url, version, authHeader string) (string, error) {
 	// If version is HEAD and ls-remote returned nothing useful, try refs/heads/main, master
 	if version == "HEAD" {
 		for _, branch := range []string{"refs/heads/main", "refs/heads/master"} {
-			fallbackAC := authCmd(authHeader, "ls-remote", url, branch)
-			out, err = outputAuth(fallbackAC)
+			fallbackAC := authCmd(url, authHeader, "ls-remote", "--", url, branch)
+			out, err = outputGit(fallbackAC)
 			if err == nil {
 				parts := strings.Fields(strings.TrimSpace(out))
 				if len(parts) >= 2 {
@@ -134,7 +219,7 @@ func ResolveRefAuth(url, version, authHeader string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("could not resolve %q for %s", version, url)
+	return "", fmt.Errorf("could not resolve %q for %s", version, RedactUserinfo(url))
 }
 
 // TreeEntry represents a single entry from git ls-tree with its file mode.
@@ -224,6 +309,14 @@ func BlobOID(content []byte, hexLen int) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// runGit and outputGit run the git commands that can reach a remote (clone,
+// fetch, ls-remote). Tests replace them to read the command line and env
+// without a network.
+var (
+	runGit    = runAuth
+	outputGit = outputAuth
+)
+
 // runAuth executes a git command with optional auth env vars.
 func runAuth(ac AuthCmd) error {
 	cmd := exec.Command(ac.Args[0], ac.Args[1:]...)
@@ -233,7 +326,7 @@ func runAuth(ac AuthCmd) error {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %w\n%s", strings.Join(ac.Args, " "), err, stderr.String())
+		return fmt.Errorf("%s: %w\n%s", argsText(ac.Args), err, stderr.String())
 	}
 	return nil
 }
@@ -253,9 +346,19 @@ func outputAuth(ac AuthCmd) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("%s: %w\n%s", strings.Join(ac.Args, " "), err, stderr.String())
+		return "", fmt.Errorf("%s: %w\n%s", argsText(ac.Args), err, stderr.String())
 	}
 	return stdout.String(), nil
+}
+
+// argsText is the command line of a git command for an error message, with
+// the user part of a URL replaced (RedactUserinfo).
+func argsText(args []string) string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = RedactUserinfo(a)
+	}
+	return strings.Join(out, " ")
 }
 
 // outputBytes executes a git command and returns stdout as bytes.

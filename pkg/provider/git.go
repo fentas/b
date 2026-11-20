@@ -90,7 +90,7 @@ func (g *Git) installFromRemote(repo, filePath, version, dest string) error {
 	resolved := gitcache.ResolveGitURL(repo, "")
 
 	if err := gitcache.EnsureCloneAuth(cacheRoot, repo, resolved.URL, resolved.AuthHeader); err != nil {
-		return fmt.Errorf("cloning %s: %w", resolved.URL, err)
+		return fmt.Errorf("cloning %s: %w", gitcache.RedactUserinfo(resolved.URL), err)
 	}
 
 	commit := version
@@ -103,7 +103,7 @@ func (g *Git) installFromRemote(repo, filePath, version, dest string) error {
 	}
 
 	// Fetch the specific ref if not already present
-	if err := gitcache.FetchAuth(cacheRoot, repo, commit, resolved.AuthHeader); err != nil {
+	if err := gitcache.FetchURLAuth(cacheRoot, repo, resolved.URL, commit, resolved.AuthHeader); err != nil {
 		// Ignore fetch errors if the commit is already cached
 		_ = err
 	}
