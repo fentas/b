@@ -11,16 +11,26 @@ import (
 	"github.com/fentas/b/pkg/gitcache"
 )
 
-// offlineGitHub makes git reach the https URL of github.com/org/repo in a
-// local bare repo, and refuse every network transport. No git command in
-// these tests leaves the machine.
-func offlineGitHub(t *testing.T, bare string) {
+// isolateGit makes the git commands of a test read no git config of the
+// user or the system, and refuse every network transport. No git command in
+// these tests leaves the machine. Call it before the test makes a repo.
+func isolateGit(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(home, ".gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_COUNT", "0")
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(home))
 	t.Setenv("GIT_ALLOW_PROTOCOL", "file")
+	t.Chdir(home)
+}
+
+// offlineGitHub makes git reach the https URL of github.com/org/repo in a
+// local bare repo. Call isolateGit first.
+func offlineGitHub(t *testing.T, bare string) {
+	t.Helper()
 	// No provider header: b's header env (GIT_CONFIG_COUNT=1) would
 	// replace the insteadOf entry below.
 	t.Setenv("GITHUB_TOKEN", "")
@@ -42,6 +52,7 @@ func TestSyncEnv_SSHAsHTTPS_FetchesOverHTTPS(t *testing.T) {
 			name = "cache cloned over SSH"
 		}
 		t.Run(name, func(t *testing.T) {
+			isolateGit(t)
 			bare, commit := setupLocalBareRepo(t)
 			offlineGitHub(t, bare)
 			t.Setenv(gitcache.SSHAsHTTPSEnv, "1")
@@ -90,6 +101,7 @@ func TestSyncEnv_SSHAsHTTPS_FetchesOverHTTPS(t *testing.T) {
 // With the knob off, the SSH ref stays SSH, and there is no fallback to
 // https when SSH fails: here the protocol fence refuses SSH.
 func TestSyncEnv_SSHAsHTTPS_OffHasNoFallback(t *testing.T) {
+	isolateGit(t)
 	bare, _ := setupLocalBareRepo(t)
 	offlineGitHub(t, bare)
 	t.Setenv(gitcache.SSHAsHTTPSEnv, "")
