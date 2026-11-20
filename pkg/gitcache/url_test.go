@@ -11,6 +11,7 @@ import (
 // --- Comprehensive resolution table ---
 
 func TestResolveGitURL_AllVariants(t *testing.T) {
+	t.Setenv(SSHAsHTTPSEnv, "") // the SSH rows expect SSH URLs
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GITLAB_TOKEN", "")
 	t.Setenv("GITEA_TOKEN", "")

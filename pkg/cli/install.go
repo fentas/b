@@ -1044,7 +1044,7 @@ func (o *InstallOptions) discoverUpstreamConfig(ref string) string {
 	if err := gitcache.EnsureClone(cacheRoot, baseRef, url); err != nil {
 		return ""
 	}
-	if err := gitcache.Fetch(cacheRoot, baseRef, commit); err != nil {
+	if err := gitcache.FetchURL(cacheRoot, baseRef, url, commit); err != nil {
 		return ""
 	}
 

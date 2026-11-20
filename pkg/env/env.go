@@ -153,7 +153,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		if err := gitcache.EnsureCloneAuth(cacheRoot, baseRef, resolved.URL, resolved.AuthHeader); err != nil {
 			return nil, fmt.Errorf("cloning %s: %w", resolved.URL, err)
 		}
-		if err := gitcache.FetchAuth(cacheRoot, baseRef, commit, resolved.AuthHeader); err != nil {
+		if err := gitcache.FetchURLAuth(cacheRoot, baseRef, resolved.URL, commit, resolved.AuthHeader); err != nil {
 			return nil, fmt.Errorf("fetching %s: %w", commit, err)
 		}
 		repoDir = gitcache.CacheDir(cacheRoot, baseRef)
@@ -183,7 +183,7 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 	if lockEntry != nil {
 		previousCommit = lockEntry.Commit
 		if strategy == StrategyMerge && previousCommit != "" && !resolved.IsLocal {
-			if err := gitcache.FetchAuth(cacheRoot, baseRef, previousCommit, resolved.AuthHeader); err != nil {
+			if err := gitcache.FetchURLAuth(cacheRoot, baseRef, resolved.URL, previousCommit, resolved.AuthHeader); err != nil {
 				// Non-fatal: if we can't fetch the old commit, fall back to replace
 				previousCommit = ""
 			}
@@ -893,7 +893,7 @@ func lockedStateInSync(cfg EnvConfig, resolved gitcache.ResolvedRef, projectRoot
 	} else if gitcache.HasCommit(cacheRoot, baseRef, commit) {
 		repoDir = gitcache.CacheDir(cacheRoot, baseRef)
 	} else if gitcache.EnsureCloneAuth(cacheRoot, baseRef, resolved.URL, resolved.AuthHeader) == nil &&
-		gitcache.FetchAuth(cacheRoot, baseRef, commit, resolved.AuthHeader) == nil {
+		gitcache.FetchURLAuth(cacheRoot, baseRef, resolved.URL, commit, resolved.AuthHeader) == nil {
 		// Commit not cached (fresh machine / evicted cache): fetch it so the
 		// fast path can verify against source. On failure, source verification
 		// degrades to the lock comparison for this run and the fetch is simply

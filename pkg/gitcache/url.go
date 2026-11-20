@@ -15,6 +15,42 @@ type ResolvedRef struct {
 	AuthHeader string // pre-formatted auth header (e.g. "Authorization: Bearer ...", "PRIVATE-TOKEN: ...")
 }
 
+// SSHAsHTTPSEnv names the environment variable that fetches an SSH ref for
+// github.com over https. Only the exact value "1" turns it on.
+const SSHAsHTTPSEnv = "B_GIT_SSH_AS_HTTPS"
+
+// sshAsHTTPS reports whether SSHAsHTTPSEnv is on.
+func sshAsHTTPS() bool {
+	return os.Getenv(SSHAsHTTPSEnv) == "1"
+}
+
+// githubSSHPath returns "org/repo" for an SSH ref to github.com with the user
+// git: "git@github.com:org/repo[.git]" or "ssh://git@github.com/org/repo[.git]".
+// It returns "" for every other ref, so another host, a port or another user
+// stays SSH.
+func githubSSHPath(cleanRef string) string {
+	var host, path string
+	switch {
+	case strings.HasPrefix(cleanRef, "ssh://git@"):
+		rest := strings.TrimPrefix(cleanRef, "ssh://git@")
+		slash := strings.Index(rest, "/")
+		if slash < 0 {
+			return ""
+		}
+		host, path = rest[:slash], rest[slash+1:]
+	case strings.HasPrefix(cleanRef, "git@") && isSSHImplicit(cleanRef):
+		rest := strings.TrimPrefix(cleanRef, "git@")
+		colon := strings.Index(rest, ":")
+		host, path = rest[:colon], rest[colon+1:]
+	default:
+		return ""
+	}
+	if !strings.EqualFold(host, "github.com") {
+		return ""
+	}
+	return strings.Trim(strings.TrimSuffix(strings.Trim(path, "/"), ".git"), "/")
+}
+
 // ResolveGitURL converts a ref to a clone-ready URL or local path.
 // Handles:
 //   - SSH refs: "git@github.com:org/repo" → passed through as-is (uses ssh-agent)
@@ -25,6 +61,11 @@ type ResolvedRef struct {
 //
 // SSH URLs use the system's SSH agent (SSH_AUTH_SOCK) for authentication.
 // HTTPS URLs use AuthToken injected via GIT_CONFIG_* environment variables.
+//
+// With B_GIT_SSH_AS_HTTPS=1, an SSH ref for github.com resolves as the https
+// ref "github.com/org/repo", with the same auth as that ref. SSH refs for
+// other hosts do not change. There is no fallback: with the variable off, an
+// SSH ref stays SSH, also when SSH fails.
 func ResolveGitURL(ref, configDir string) ResolvedRef {
 	// Detect absolute/relative local paths BEFORE stripping #/@ to avoid
 	// truncating paths containing those characters (e.g. /home/me/repo@work).
@@ -47,6 +88,13 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 	// Strip version (e.g. @v2.0) — careful not to strip git@ prefix
 	if i := strings.LastIndex(cleanRef, "@"); i > 0 && !IsSSHUserAt(cleanRef, i) {
 		cleanRef = cleanRef[:i]
+	}
+
+	// Opt-in: an SSH ref for github.com takes the https path below.
+	if sshAsHTTPS() {
+		if path := githubSSHPath(cleanRef); path != "" {
+			cleanRef = "github.com/" + path
+		}
 	}
 
 	// SSH implicit format: git@host:org/repo.git

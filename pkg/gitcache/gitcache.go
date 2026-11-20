@@ -43,22 +43,37 @@ func EnsureCloneAuth(root, ref, url, authHeader string) error {
 		return fmt.Errorf("creating cache root %s: %w", root, err)
 	}
 	ac := authCmd(authHeader, "clone", "--bare", "--depth", "1", url, dir)
-	if err := runAuth(ac); err != nil {
+	if err := runGit(ac); err != nil {
 		return redactWrap(err, authHeader)
 	}
 	return nil
 }
 
-// Fetch fetches a specific commit or tag into the cache.
+// Fetch fetches a specific commit or tag into the cache, from the remote
+// that the clone stored ("origin"). FetchURL fetches from a given URL.
 func Fetch(root, ref, commitOrTag string) error {
 	return FetchAuth(root, ref, commitOrTag, "")
 }
 
-// FetchAuth fetches with optional auth token.
+// FetchAuth fetches with optional auth token, from "origin".
 func FetchAuth(root, ref, commitOrTag, authHeader string) error {
+	return FetchURLAuth(root, ref, "origin", commitOrTag, authHeader)
+}
+
+// FetchURL fetches a specific commit or tag into the cache for ref, from url.
+func FetchURL(root, ref, url, commitOrTag string) error {
+	return FetchURLAuth(root, ref, url, commitOrTag, "")
+}
+
+// FetchURLAuth fetches a specific commit or tag into the cache for ref, from
+// url, with an optional auth header. url is the URL that the ref resolves to
+// now (ResolvedRef.URL), not the URL that the clone stored: a cache cloned
+// over SSH then fetches over https when B_GIT_SSH_AS_HTTPS is on, and the
+// other way round. The fetch does not change the stored remote.
+func FetchURLAuth(root, ref, url, commitOrTag, authHeader string) error {
 	dir := CacheDir(root, ref)
-	ac := authCmd(authHeader, "-C", dir, "fetch", "--depth", "1", "origin", commitOrTag)
-	if err := runAuth(ac); err != nil {
+	ac := authCmd(authHeader, "-C", dir, "fetch", "--depth", "1", url, commitOrTag)
+	if err := runGit(ac); err != nil {
 		return redactWrap(err, authHeader)
 	}
 	return nil
@@ -110,7 +125,7 @@ func ResolveRefAuth(url, version, authHeader string) (string, error) {
 		version = "HEAD"
 	}
 	ac := authCmd(authHeader, "ls-remote", url, version)
-	out, err := outputAuth(ac)
+	out, err := outputGit(ac)
 	if err != nil {
 		return "", fmt.Errorf("git ls-remote %s %s: %w", url, version, redactWrap(err, authHeader))
 	}
@@ -125,7 +140,7 @@ func ResolveRefAuth(url, version, authHeader string) (string, error) {
 	if version == "HEAD" {
 		for _, branch := range []string{"refs/heads/main", "refs/heads/master"} {
 			fallbackAC := authCmd(authHeader, "ls-remote", url, branch)
-			out, err = outputAuth(fallbackAC)
+			out, err = outputGit(fallbackAC)
 			if err == nil {
 				parts := strings.Fields(strings.TrimSpace(out))
 				if len(parts) >= 2 {
@@ -223,6 +238,14 @@ func BlobOID(content []byte, hexLen int) string {
 	h.Write(content)
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+// runGit and outputGit run the git commands that can reach a remote (clone,
+// fetch, ls-remote). Tests replace them to read the command line and env
+// without a network.
+var (
+	runGit    = runAuth
+	outputGit = outputAuth
+)
 
 // runAuth executes a git command with optional auth env vars.
 func runAuth(ac AuthCmd) error {

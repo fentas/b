@@ -536,7 +536,7 @@ func (o *EnvMatchOptions) Run(args []string) error {
 	if err := gitcache.EnsureClone(cacheRoot, ref, url); err != nil {
 		return fmt.Errorf("cloning %s: %w", url, err)
 	}
-	if err := gitcache.Fetch(cacheRoot, ref, commit); err != nil {
+	if err := gitcache.FetchURL(cacheRoot, ref, url, commit); err != nil {
 		return fmt.Errorf("fetching %s: %w", commit, err)
 	}
 
@@ -615,7 +615,7 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 	if err := gitcache.EnsureClone(cacheRoot, ref, url); err != nil {
 		return fmt.Errorf("cloning %s: %w", url, err)
 	}
-	if err := gitcache.Fetch(cacheRoot, ref, commit); err != nil {
+	if err := gitcache.FetchURL(cacheRoot, ref, url, commit); err != nil {
 		return fmt.Errorf("fetching %s: %w", commit, err)
 	}
 
@@ -894,7 +894,7 @@ func (o *EnvAddOptions) fetchUpstream(ref, version, refArg string) (*state.State
 	if err := gitcache.EnsureClone(cacheRoot, ref, url); err != nil {
 		return nil, fmt.Errorf("cloning %s: %w", url, err)
 	}
-	if err := gitcache.Fetch(cacheRoot, ref, commit); err != nil {
+	if err := gitcache.FetchURL(cacheRoot, ref, url, commit); err != nil {
 		return nil, fmt.Errorf("fetching %s: %w", commit, err)
 	}
 

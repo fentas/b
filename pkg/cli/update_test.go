@@ -1147,7 +1147,7 @@ func TestShowDiff_FetchError(t *testing.T) {
 	saveHooks(t)
 	resolveRefFunc = func(url, version string) (string, error) { return "abc123", nil }
 	ensureCloneF = func(cacheRoot, baseRef, url string) error { return nil }
-	fetchFunc = func(cacheRoot, baseRef, commit string) error {
+	fetchFunc = func(cacheRoot, baseRef, url, commit string) error {
 		return fmt.Errorf("fetch failed")
 	}
 
@@ -1172,7 +1172,7 @@ func TestShowDiff_ShowFileError(t *testing.T) {
 	saveHooks(t)
 	resolveRefFunc = func(url, version string) (string, error) { return "abc123", nil }
 	ensureCloneF = func(cacheRoot, baseRef, url string) error { return nil }
-	fetchFunc = func(cacheRoot, baseRef, commit string) error { return nil }
+	fetchFunc = func(cacheRoot, baseRef, url, commit string) error { return nil }
 	showFileFunc = func(cacheRoot, baseRef, commit, path string) ([]byte, error) {
 		return nil, fmt.Errorf("file not found in tree")
 	}
@@ -1198,7 +1198,7 @@ func TestShowDiff_DiffError(t *testing.T) {
 	saveHooks(t)
 	resolveRefFunc = func(url, version string) (string, error) { return "abc123", nil }
 	ensureCloneF = func(cacheRoot, baseRef, url string) error { return nil }
-	fetchFunc = func(cacheRoot, baseRef, commit string) error { return nil }
+	fetchFunc = func(cacheRoot, baseRef, url, commit string) error { return nil }
 	showFileFunc = func(cacheRoot, baseRef, commit, path string) ([]byte, error) {
 		return []byte("upstream"), nil
 	}
@@ -1227,7 +1227,7 @@ func TestShowDiff_NoDifferences(t *testing.T) {
 	saveHooks(t)
 	resolveRefFunc = func(url, version string) (string, error) { return "abc123", nil }
 	ensureCloneF = func(cacheRoot, baseRef, url string) error { return nil }
-	fetchFunc = func(cacheRoot, baseRef, commit string) error { return nil }
+	fetchFunc = func(cacheRoot, baseRef, url, commit string) error { return nil }
 	showFileFunc = func(cacheRoot, baseRef, commit, path string) ([]byte, error) {
 		return []byte("same"), nil
 	}
@@ -1256,7 +1256,7 @@ func TestShowDiff_WithDifferences(t *testing.T) {
 	saveHooks(t)
 	resolveRefFunc = func(url, version string) (string, error) { return "abc123", nil }
 	ensureCloneF = func(cacheRoot, baseRef, url string) error { return nil }
-	fetchFunc = func(cacheRoot, baseRef, commit string) error { return nil }
+	fetchFunc = func(cacheRoot, baseRef, url, commit string) error { return nil }
 	showFileFunc = func(cacheRoot, baseRef, commit, path string) ([]byte, error) {
 		return []byte("upstream"), nil
 	}

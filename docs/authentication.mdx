@@ -95,6 +95,33 @@ b update
 
 SSH is often simpler than tokens for local development — no environment variables needed if your key is already in ssh-agent.
 
+### GitHub SSH refs over HTTPS
+
+On some machines SSH does not work, for example in a CI container without a key or in a sandbox that blocks SSH. Set `B_GIT_SSH_AS_HTTPS=1` there, and `b` fetches a GitHub SSH ref over HTTPS:
+
+```bash
+export B_GIT_SSH_AS_HTTPS=1
+export GITHUB_TOKEN="ghp_..."   # for a private repo
+b update
+```
+
+- Only the value `1` turns it on. When the variable is unset or has another value, SSH refs stay SSH.
+- It applies to `git@github.com:org/repo` and `ssh://git@github.com/org/repo`, with or without `.git`. Such a ref then uses `https://github.com/org/repo.git`, the URL of the ref `github.com/org/repo`, with the same token rules: `b update` sends `GITHUB_TOKEN` to `github.com` in a header. The `b env add`, `b env match` and `b env profiles` commands send no token for an HTTPS ref, so git uses your credential helper there, if you have one.
+- Refs for other hosts stay SSH: GitLab, Gitea, a self-hosted server, and also a GitHub ref with another user, a port or another host name (`ssh.github.com`).
+- Your `b.yaml` and `b.lock` do not change: the key stays the SSH ref. The cache directory stays the same too. A cache that an SSH clone made is fetched over HTTPS while the variable is on.
+- There is no fallback. Without the variable, an SSH ref that fails is an error, as before.
+
+Before this variable, the workaround was git's own URL rewrite. It still works, and it is the option for another host:
+
+```bash
+GIT_CONFIG_COUNT=2 \
+GIT_CONFIG_KEY_0='url.https://github.com/.insteadOf' GIT_CONFIG_VALUE_0='git@github.com:' \
+GIT_CONFIG_KEY_1='credential.helper' GIT_CONFIG_VALUE_1='!gh auth git-credential' \
+b update
+```
+
+`b` sends no header for an SSH ref, so it keeps these variables. For an HTTPS ref with a token, `b` sets its own `GIT_CONFIG_COUNT`, and git then does not read these entries for that ref.
+
 ## CI/CD
 
 In CI/CD pipelines, use secrets or environment variables provided by your CI system:
