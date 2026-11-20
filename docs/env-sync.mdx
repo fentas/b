@@ -289,11 +289,11 @@ Overwrites local files with upstream content. The behavior depends on the **safe
       [r]eplace  [k]eep  [m]erge  [d]iff > _
   ```
 
-  This lets you make per-file decisions during apply. If the file's `select` has a filter or a nested path, the prompt does not offer `[m]erge`, because a merge takes only top-level selectors (see `merge` + `select` below):
+  This lets you make per-file decisions during apply. With no answer (the end of input, or a terminal that closed), the prompt keeps the local file and says so. If the file's `select` has a selector with a dot (`database.host`, a filter with a dot), the prompt does not offer `[m]erge`, because a merge takes only top-level selectors (see `merge` + `select` below):
 
   ```
     config/app.yaml has local changes.
-      [r]eplace  [k]eep  [d]iff (no merge: the select has a filter or a nested path) > _
+      [r]eplace  [k]eep  [d]iff (no merge: a selector with a dot) > _
   ```
 
 - **`safety: strict` / `safety: prompt`** (default): uses the **plan-based gate** instead of the legacy per-file resolver. You see the full plan up-front, then approve or reject the whole batch — there are no per-file prompts during apply, because the plan you approved IS the apply contract. If you need per-file granularity, switch the env to `safety: auto`.
@@ -357,7 +357,7 @@ participates in the merge.
 
 2. **On a JSON file, only a top-level selector keeps the rest of the file.** With a top-level selector (`binaries`), the JSON splice puts the in-scope keys back into the consumer's file and keeps the other keys. `b` writes the file again with `encoding/json`: the out-of-scope keys keep their order, and new in-scope keys come at the end. A selector with a dot (`database.host`, a filter with a dot) uses the legacy `select` write: the filtered content replaces the whole file. A complex JMESPath selector with no dot stops the sync with an error. A merge that leaves conflict markers in a JSON file also stops with an error, and `b` does not write the file.
 
-3. **A merge takes only top-level selectors.** The splice puts the merged scope back by top-level key. A selector with a filter or a nested path (`database.host`, a profile's `from_items(...)` filter) would replace the whole top-level node with the selected part, and drop its siblings. So `strategy: merge` stops with an error for such a selector, and the interactive prompt does not offer `[m]erge` for it. Use a top-level selector or `strategy: replace`.
+3. **A merge takes only top-level selectors.** The splice puts the merged scope back by top-level key. A selector with a dot (`database.host`, a profile's `from_items(...)` filter) would replace the whole top-level node with the selected part, and drop its siblings. So `strategy: merge` stops with an error for a selector with a dot, and the interactive prompt does not offer `[m]erge` for it. The check looks for a dot: it also stops a quoted key with a dot (`"my.key"`), and it lets a filter with no dot through. Use a top-level selector or `strategy: replace`.
 
 ---
 
