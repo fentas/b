@@ -106,10 +106,13 @@ b update
 ```
 
 - Only the value `1` turns it on. When the variable is unset or has another value, SSH refs stay SSH.
-- It applies to `git@github.com:org/repo` and `ssh://git@github.com/org/repo`, with or without `.git`. Such a ref then uses `https://github.com/org/repo.git`, the URL of the ref `github.com/org/repo`, with the same token rules: `b update` sends `GITHUB_TOKEN` to `github.com` in a header. The `b env add`, `b env match` and `b env profiles` commands send no token for an HTTPS ref, so git uses your credential helper there, if you have one.
+- It applies to `git@github.com:org/repo` and `ssh://git@github.com/org/repo`, with or without `.git`. Such a ref then uses `https://github.com/org/repo.git`, the URL of the ref `github.com/org/repo`, with the same token rules as that ref.
+- These commands send `GITHUB_TOKEN` to `github.com` in a header for such a ref: `b update` and `b install` when they sync an env, and `b install`, `b update` and `b version` for a binary from a git ref (`git@github.com:org/repo:path/to/file`).
+- These commands send no token, so git uses your credential helper, if you have one: `b env status`, `b env add`, `b env match`, `b env profiles`, the env list of `b version`, the `b.yaml` hint of `b install` for a repo with no release, and the `[d]iff` choice of `b update`.
 - Refs for other hosts stay SSH: GitLab, Gitea, a self-hosted server, and also a GitHub ref with another user, a port or another host name (`ssh.github.com`).
 - Your `b.yaml` and `b.lock` do not change: the key stays the SSH ref. The cache directory stays the same too. A cache that an SSH clone made is fetched over HTTPS while the variable is on.
 - There is no fallback. Without the variable, an SSH ref that fails is an error, as before.
+- Your own git URL rewrites still apply, also in the other direction. With `url.git@github.com:.insteadOf https://github.com/` in your git config, git fetches such a ref over SSH again, and the variable has no effect.
 
 Before this variable, the workaround was git's own URL rewrite. It still works, and it is the option for another host:
 
@@ -121,6 +124,12 @@ b update
 ```
 
 `b` sends no header for an SSH ref, so it keeps these variables. For an HTTPS ref with a token, `b` sets its own `GIT_CONFIG_COUNT`, and git then does not read these entries for that ref.
+
+### The token in git commands
+
+For a git clone, fetch or ls-remote over HTTPS, `b` gives the token to git as the header key `http.https://<host>/.extraHeader`. The key is in `GIT_CONFIG_*` environment variables, not on the command line. It has the host of the ref, so git sends the header to that host only. git compares the key with the URL after your own `url.<base>.insteadOf` rewrites: a rewrite to another host does not get the token.
+
+`b` also sets `GIT_TERMINAL_PROMPT=0` for these git commands. Thus git does not ask for a user name or a password on the terminal. A private repo with no token and no credential helper fails at once.
 
 ## CI/CD
 
