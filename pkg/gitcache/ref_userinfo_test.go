@@ -37,13 +37,16 @@ func formatsHold(err error, s string) bool {
 	return false
 }
 
+// refusedText is the fixed text of CheckRef (errUserinfoAt).
+const refusedText = "refusing a git ref with a password or more than one @ before its path: remove the user part"
+
 // A ref with more than one raw @ before its path is refused with a fixed
-// text, also with B_GIT_SSH_AS_HTTPS=1. The @ before the path are not a
-// version, so the URL keeps the host. The text shows no part of the
-// password, the ref gets no token, and no git command runs. An @ after the
-// path stays a version.
+// text, also with B_GIT_SSH_AS_HTTPS=1. The URL is refusedURL, which holds
+// no part of the ref. The text shows no part of the password, the ref gets
+// no token, and no git command runs. RefBase and RefVersion read an @ after
+// the path as a version.
 func TestResolveGitURL_MoreThanOneAtBeforePath(t *testing.T) {
-	const want = "refusing a git ref with more than one @ before its path: remove the user part"
+	const want = refusedText
 	user := "user:" + refPassword + "@" + refPassword + "@"
 	tests := []struct{ ref, base, version string }{
 		{user + "github.com/org/repo", user + "github.com/org/repo", ""},
@@ -60,9 +63,8 @@ func TestResolveGitURL_MoreThanOneAtBeforePath(t *testing.T) {
 			if r.AuthToken != "" || r.AuthHeader != "" {
 				t.Errorf("%s=%q: a token is chosen for a ref with a user part", SSHAsHTTPSEnv, knob)
 			}
-			// The ref minus its label and version, with the https prefix.
-			if wantURL := "https://" + tt.base + ".git"; r.URL != wantURL {
-				t.Errorf("%s=%q: the URL is not the ref minus its version", SSHAsHTTPSEnv, knob)
+			if r.URL != refusedURL {
+				t.Errorf("%s=%q: the URL is not refusedURL", SSHAsHTTPSEnv, knob)
 			}
 			if RefBase(tt.ref) != tt.base {
 				t.Errorf("RefBase cut the ref at an @ before its path")
@@ -131,14 +133,15 @@ func TestResolveGitURL_HTTPSRefAsBareRef(t *testing.T) {
 	}
 }
 
-// An https ref with a user part gets the same refusal as the ref without
-// the scheme. A ref with another scheme, also http, is refused with one
-// fixed text. Neither text shows a part of the password, the URL that the
-// callers print shows "***" in place of the user part, no token is chosen
-// and no git command runs.
+// An https ref with a user part is refused: with more than one @ with the
+// fixed text of CheckRef, else with the host error, which shows "***" in
+// place of the user part. A ref with another scheme, also http, is refused
+// with one fixed text. No text shows a part of the password, the URL that
+// the callers print shows "***" in place of the user part, no token is
+// chosen and no git command runs.
 func TestResolveGitURL_SchemeRefusals(t *testing.T) {
 	const scheme = "refusing a git ref with a scheme that b does not fetch: use https://, ssh://, git:// or no scheme"
-	const at = "refusing a git ref with more than one @ before its path: remove the user part"
+	const at = refusedText
 	user := "user:" + refPassword + "@"
 	tests := []struct{ ref, refusal string }{
 		{"https://" + user + "github.com/org/repo",

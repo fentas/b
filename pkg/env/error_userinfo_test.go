@@ -3,6 +3,7 @@ package env
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -57,7 +58,7 @@ func TestSyncEnv_RefusedRefShowsNoPassword(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", canaryToken)
 	calls := gitSpy(t)
 	const (
-		atText     = "refusing a git ref with more than one @ before its path: remove the user part"
+		atText     = "refusing a git ref with a password or more than one @ before its path: remove the user part"
 		schemeText = "refusing a git ref with a scheme that b does not fetch: use https://, ssh://, git:// or no scheme"
 		hostText   = "refusing https://***@github.com/org/repo.git: the host part is not a plain host name or IP address " +
 			"with an optional port (no user name, password, wildcard, percent sign or trailing dot); " +
@@ -98,7 +99,7 @@ func TestSyncEnv_RefusedRefShowsNoPassword(t *testing.T) {
 							gitcache.SSHAsHTTPSEnv, knob, force, verb)
 					}
 				}
-				if !strings.HasSuffix(err.Error(), ": "+tt.refusal) {
+				if err.Error() != tt.refusal && !strings.HasSuffix(err.Error(), ": "+tt.refusal) {
 					t.Errorf("%s=%q forced commit %q: error %q, want the fixed text %q",
 						gitcache.SSHAsHTTPSEnv, knob, force, strings.ReplaceAll(err.Error(), canaryPassword, "<password>"), tt.refusal)
 				}
@@ -114,11 +115,12 @@ func TestSyncEnv_RefusedRefShowsNoPassword(t *testing.T) {
 // the user part, in its own text and in the text of gitcache: at the
 // version resolve (env.go, "resolving") and, with a forced commit, at the
 // clone (env.go, "cloning"). b refuses the URL, so no remote git command
-// runs.
+// runs. The user part here has no password: CheckRef refuses a password
+// (TestSyncEnv_PasswordRefRefusedFirst).
 func TestSyncEnv_ErrorHidesTheUserPart(t *testing.T) {
 	isolateGit(t)
 	t.Setenv("GITHUB_TOKEN", "")
-	ref := "user:" + fakePassword + "@github.com/org/repo"
+	ref := fakePassword + "@github.com/org/repo"
 	for _, tt := range []struct {
 		force, prefix string
 	}{
@@ -142,5 +144,66 @@ func TestSyncEnv_ErrorHidesTheUserPart(t *testing.T) {
 		if !strings.HasPrefix(msg, tt.prefix) || !strings.Contains(msg, "refusing https://***@github.com/org/repo.git") {
 			t.Errorf("forced commit %q: error %q, want the prefix %q and the refused URL with ***@", tt.force, msg, tt.prefix)
 		}
+	}
+}
+
+// SyncEnv refuses a ref with a password or more than one @ in front of the
+// host before anything else: the error is the fixed text alone, the
+// pre-sync hook does not run, no token is chosen and no git command runs.
+// This holds with and without a path, a version, a forced commit and
+// B_GIT_SSH_AS_HTTPS=1.
+func TestSyncEnv_PasswordRefRefusedFirst(t *testing.T) {
+	isolateGit(t)
+	t.Setenv("GITHUB_TOKEN", canaryToken)
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh for the pre-sync hook")
+	}
+	calls := gitSpy(t)
+	t.Setenv("PATH", os.Getenv("PATH")+string(os.PathListSeparator)+filepath.Dir(sh))
+	const refusal = "refusing a git ref with a password or more than one @ before its path: remove the user part"
+	var refs []string
+	for _, user := range []string{"user:p@" + canaryPassword + "@", "user:" + canaryPassword + "@"} {
+		for _, path := range []string{"", "/org/repo"} {
+			for _, version := range []string{"", "@v1"} {
+				refs = append(refs, user+"github.com"+path+version)
+			}
+		}
+	}
+	refs = append(refs,
+		"git@"+canaryPassword+"@github.com:org/repo",
+		"ssh://git@"+canaryPassword+"@github.com/org/repo")
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	for _, knob := range []string{"", "1"} {
+		t.Setenv(gitcache.SSHAsHTTPSEnv, knob)
+		for i, ref := range refs {
+			for _, force := range []string{"", "c0ffee"} {
+				cfg := EnvConfig{
+					Ref:         ref,
+					Strategy:    StrategyReplace,
+					Files:       map[string]envmatch.GlobConfig{"cfg/a.yaml": {}},
+					ForceCommit: force,
+					OnPreSync:   "echo ran > '" + marker + "'",
+				}
+				_, err := SyncEnv(cfg, t.TempDir(), t.TempDir(), nil)
+				name := fmt.Sprintf("%s=%q ref %d forced commit %q", gitcache.SSHAsHTTPSEnv, knob, i, force)
+				if err == nil || err.Error() != refusal {
+					t.Errorf("%s: error %q, want the fixed text alone", name,
+						strings.ReplaceAll(fmt.Sprint(err), canaryPassword, "<password>"))
+				}
+				for _, verb := range []string{"%s", "%v", "%+v", "%q", "%#v"} {
+					text := fmt.Sprintf(verb, err)
+					if strings.Contains(text, canaryPassword) || strings.Contains(text, canaryToken) {
+						t.Errorf("%s: the %s text shows the password or the token", name, verb)
+					}
+				}
+			}
+		}
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the pre-sync hook ran for a refused ref")
+	}
+	if c := calls(); c != "" {
+		t.Errorf("git ran:\n%s", strings.ReplaceAll(c, canaryPassword, "<password>"))
 	}
 }

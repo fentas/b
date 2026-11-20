@@ -49,8 +49,9 @@ func gitSpy(t *testing.T) func() string {
 	}
 }
 
-// checkRefusal fails the test when err is nil, does not end in the fixed
-// text refusal, or shows the password or the token in a format verb.
+// checkRefusal fails the test when err is nil, is not or does not end in
+// the fixed text refusal, or shows the password or the token in a format
+// verb.
 func checkRefusal(t *testing.T, name string, err error, refusal string) {
 	t.Helper()
 	if err == nil {
@@ -63,7 +64,7 @@ func checkRefusal(t *testing.T, name string, err error, refusal string) {
 			t.Errorf("%s: the %s text shows the password or the token", name, verb)
 		}
 	}
-	if !strings.HasSuffix(err.Error(), ": "+refusal) {
+	if err.Error() != refusal && !strings.HasSuffix(err.Error(), ": "+refusal) {
 		t.Errorf("%s: error %q, want the fixed text %q", name, strings.ReplaceAll(err.Error(), canaryPassword, "<password>"), refusal)
 	}
 }
@@ -77,7 +78,7 @@ func TestEnvCommands_RefusedRefShowsNoPassword(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", canaryToken)
 	io, _, _ := bufIO()
 	const (
-		atText     = "refusing a git ref with more than one @ before its path: remove the user part"
+		atText     = "refusing a git ref with a password or more than one @ before its path: remove the user part"
 		schemeText = "refusing a git ref with a scheme that b does not fetch: use https://, ssh://, git:// or no scheme"
 		hostText   = "refusing https://***@github.com/org/repo.git: the host part is not a plain host name or IP address " +
 			"with an optional port (no user name, password, wildcard, percent sign or trailing dot); " +
@@ -112,10 +113,12 @@ func TestEnvCommands_RefusedRefShowsNoPassword(t *testing.T) {
 
 // For a ref with a user part, b env match, b env profiles and b env add
 // show "***@" in place of the user part in the resolve error (env.go,
-// "resolving"). b refuses the URL, so no remote git command runs.
+// "resolving"). b refuses the URL, so no remote git command runs. The user
+// part here has no password: CheckRef refuses a password
+// (TestEnvCommands_PasswordRefRefusedFirst).
 func TestEnvCommands_ResolveErrorHidesTheUserPart(t *testing.T) {
 	offlineUpstream(t)
-	ref := "user:" + fakePassword + "@github.com/org/repo"
+	ref := fakePassword + "@github.com/org/repo"
 	io, _, _ := bufIO()
 	for _, tt := range []struct {
 		name string
@@ -176,6 +179,73 @@ func TestEnvAdd_RefErrorsHideTheUserPart(t *testing.T) {
 			t.Errorf("interactive %v: error %q, want the prefix %q", tt.interactive,
 				strings.ReplaceAll(err.Error(), canaryPassword, "<password>"), tt.want)
 		}
+	}
+	if c := calls(); c != "" {
+		t.Errorf("git ran:\n%s", strings.ReplaceAll(c, canaryPassword, "<password>"))
+	}
+}
+
+// b env add, b env match and b env profiles refuse a ref with a password or
+// more than one @ in front of the host before anything else: the error is
+// the fixed text alone. This holds for b env add with no #label and for
+// b env add -i with no terminal, whose errors name the ref, with and
+// without a path and a version. No token is chosen and no git command runs.
+func TestEnvCommands_PasswordRefRefusedFirst(t *testing.T) {
+	saveHooks(t)
+	isTTYFunc = func() bool { return false }
+	calls := gitSpy(t)
+	t.Setenv("GITHUB_TOKEN", canaryToken)
+	io, out, errOut := bufIO()
+	const refusal = "refusing a git ref with a password or more than one @ before its path: remove the user part"
+	var refs []string
+	for _, user := range []string{"user:p@" + canaryPassword + "@", "user:" + canaryPassword + "@"} {
+		for _, path := range []string{"", "/org/repo"} {
+			for _, version := range []string{"", "@v1"} {
+				refs = append(refs, user+"github.com"+path+version)
+			}
+		}
+	}
+	refs = append(refs,
+		"git@"+canaryPassword+"@github.com:org/repo",
+		"ssh://git@"+canaryPassword+"@github.com/org/repo")
+	for _, knob := range []string{"", "1"} {
+		t.Setenv(gitcache.SSHAsHTTPSEnv, knob)
+		for i, ref := range refs {
+			if gitcache.ResolveGitURL(ref, "").AuthToken != "" {
+				t.Errorf("%s=%q ref %d: a token is chosen", gitcache.SSHAsHTTPSEnv, knob, i)
+			}
+			for _, tt := range []struct {
+				name string
+				run  func() error
+			}{
+				{"env add, no label", func() error {
+					return (&EnvAddOptions{SharedOptions: NewSharedOptions(io, nil)}).Run(ref)
+				}},
+				{"env add -i, no terminal", func() error {
+					return (&EnvAddOptions{SharedOptions: NewSharedOptions(io, nil), Interactive: true}).Run(ref)
+				}},
+				{"env add #base", func() error {
+					return (&EnvAddOptions{SharedOptions: NewSharedOptions(io, nil)}).Run(ref + "#base")
+				}},
+				{"env match", func() error {
+					return (&EnvMatchOptions{SharedOptions: NewSharedOptions(io, nil)}).Run([]string{ref, "manifests/*.yaml"})
+				}},
+				{"env profiles", func() error {
+					return (&EnvProfilesOptions{SharedOptions: NewSharedOptions(io, nil)}).Run(ref)
+				}},
+			} {
+				name := fmt.Sprintf("%s=%q ref %d %s", gitcache.SSHAsHTTPSEnv, knob, i, tt.name)
+				err := tt.run()
+				if err == nil || err.Error() != refusal {
+					t.Errorf("%s: error %q, want the fixed text alone", name,
+						strings.ReplaceAll(fmt.Sprint(err), canaryPassword, "<password>"))
+				}
+				checkRefusal(t, name, err, refusal)
+			}
+		}
+	}
+	if strings.Contains(out.String()+errOut.String(), canaryPassword) {
+		t.Error("the output shows the password")
 	}
 	if c := calls(); c != "" {
 		t.Errorf("git ran:\n%s", strings.ReplaceAll(c, canaryPassword, "<password>"))

@@ -120,6 +120,10 @@ func (g *Git) installFromRemote(repo, filePath, version, dest string) error {
 // For local repos: git:///absolute/path:.scripts/lo -> ("/absolute/path", ".scripts/lo")
 // For remote repos: git://github.com/org/repo:path/file -> ("github.com/org/repo", "path/file")
 func parseGitRef(ref string) (repo, filePath string, err error) {
+	// Before the version strip and every message that shows the ref.
+	if err := gitcache.CheckRef(ref); err != nil {
+		return "", "", err
+	}
 	raw := strings.TrimPrefix(ref, "git://")
 	if raw == "" {
 		return "", "", fmt.Errorf("empty git ref: %s", ref)

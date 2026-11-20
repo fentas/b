@@ -124,11 +124,15 @@ func HasCommit(root, ref, commit string) bool {
 // checkRemote refuses an https URL whose host parseHTTPSHost does not accept,
 // before the remote git command (clone, fetch, ls-remote) runs: b and git
 // could read another host from it. The error names the URL without its user
-// part (RedactUserinfo). Two forms get a fixed text that does not echo the
-// URL: a second scheme ("https://http://...", errScheme) and an authority
-// with more than one raw "@" (errUserinfoAt). An SSH URL or a local path
-// passes; b gives git no header for those.
+// part (RedactUserinfo). Three forms get a fixed text that does not echo the
+// URL: a second scheme ("https://http://...", errScheme), an authority with
+// more than one raw "@" (errUserinfoAt), and refusedURL, the URL of a ref
+// that CheckRef refuses (errUserinfoAt). An SSH URL or a local path passes;
+// b gives git no header for those.
 func checkRemote(remote string) error {
+	if remote == refusedURL {
+		return errUserinfoAt
+	}
 	if !hasHTTPSScheme(remote) {
 		return nil
 	}
@@ -136,7 +140,7 @@ func checkRemote(remote string) error {
 	if hasScheme(rest) {
 		return errScheme
 	}
-	if strings.Count(urlAuthority(rest), "@") > 1 {
+	if strings.Count(rest[:authorityEnd(rest)], "@") > 1 {
 		return errUserinfoAt
 	}
 	if _, err := parseHTTPSHost(remote); err != nil {

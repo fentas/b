@@ -514,6 +514,9 @@ func NewEnvMatchCmd(shared *SharedOptions) *cobra.Command {
 // Run executes the env match command.
 func (o *EnvMatchOptions) Run(args []string) error {
 	refArg := args[0]
+	if err := gitcache.CheckRef(refArg); err != nil {
+		return err
+	}
 	glob := args[1]
 	dest := ""
 	if len(args) >= 3 {
@@ -599,6 +602,9 @@ If no b.yaml is found, shows the directory structure as suggested profiles.`,
 
 // Run executes the env profiles command.
 func (o *EnvProfilesOptions) Run(refArg string) error {
+	if err := gitcache.CheckRef(refArg); err != nil {
+		return err
+	}
 	ref := gitcache.RefBase(refArg)
 	version := gitcache.RefVersion(refArg)
 	if idx := strings.Index(version, "#"); idx != -1 {
@@ -770,6 +776,10 @@ Use -i for interactive selection.`,
 
 // Run executes the env add command.
 func (o *EnvAddOptions) Run(refArg string) error {
+	// Before RefBase and every message that shows the ref.
+	if err := gitcache.CheckRef(refArg); err != nil {
+		return err
+	}
 	ref := gitcache.RefBase(refArg)
 	label := gitcache.RefLabel(refArg)
 	version := gitcache.RefVersion(refArg)
