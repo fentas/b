@@ -294,7 +294,7 @@ func TestSyncEnv_NestedSelector_MergeErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for nested selector with strategy: merge")
 	}
-	if !strings.Contains(err.Error(), "a selector with a filter or a nested path") {
+	if !strings.Contains(err.Error(), "a selector with a dot on ") {
 		t.Errorf("error should name the selector class, got: %v", err)
 	}
 }

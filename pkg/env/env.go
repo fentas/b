@@ -30,7 +30,8 @@ const (
 // again before it returns.
 // mergeOK is false when the file's selectors cannot take a merge (see
 // mergeRefusal): do not offer merge then. If merge comes back anyway,
-// SyncEnv returns the merge-gate error and does not write the file.
+// SyncEnv returns the merge-gate error, wrapped with that cause, and does
+// not write the file.
 type ConflictFunc func(sourcePath, destPath string, mergeOK bool) string
 
 // EnvConfig is the parsed configuration for a single env entry from b.yaml.
@@ -422,9 +423,12 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			// The resolver can return merge although it was told not to
 			// offer it. The merge splice below would then replace whole
 			// top-level nodes, so stop with the merge-gate error before
-			// anything is written.
+			// anything is written. The gate's text says "strategy:
+			// merge", but this env can use replace: the wrap names the
+			// prompt as the cause, and errors.Is still finds the gate's
+			// error.
 			if fileStrategy == StrategyMerge && mergeBlocked != nil {
-				return nil, mergeBlocked
+				return nil, fmt.Errorf("the conflict prompt chose merge: %w", mergeBlocked)
 			}
 		}
 

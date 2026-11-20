@@ -2,6 +2,7 @@ package env
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,7 +27,7 @@ func (s *mergeStub) resolve(_, _ string, mergeOK bool) string {
 // TestSyncEnv_ResolverMergeRefusedForDottedSelector: under strategy
 // replace, the conflict resolver (the TTY prompt) can return merge. For a
 // selector that the merge gate refuses, SyncEnv must stop with the gate's
-// error and leave the file as it was. Before the fix, the merge ran and
+// error, wrapped with the cause, and leave the file as it was. Before the fix, the merge ran and
 // the splice replaced the whole top-level node with the truncated
 // selected view, so `database.port` and the other siblings were lost.
 func TestSyncEnv_ResolverMergeRefusedForDottedSelector(t *testing.T) {
@@ -105,8 +106,15 @@ func TestSyncEnv_ResolverMergeRefusedForDottedSelector(t *testing.T) {
 			if err == nil {
 				t.Fatalf("SyncEnv accepted a merge for %q, result files: %+v", tc.sel, res.Files)
 			}
-			if err.Error() != gateErr.Error() {
-				t.Errorf("error = %q, want the strategy gate's error %q", err, gateErr)
+			// The env uses replace, so the error names the prompt as the
+			// cause and wraps the strategy gate's error (%w: errors.Is
+			// and errors.Unwrap reach it).
+			const cause = "the conflict prompt chose merge: "
+			if !strings.HasPrefix(err.Error(), cause) {
+				t.Errorf("error = %q, want the prefix %q", err, cause)
+			}
+			if inner := errors.Unwrap(err); inner == nil || inner.Error() != gateErr.Error() {
+				t.Errorf("errors.Unwrap(error) = %v, want the strategy gate's error %q", inner, gateErr)
 			}
 		})
 	}
