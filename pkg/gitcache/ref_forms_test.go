@@ -2,6 +2,7 @@ package gitcache
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -55,6 +56,32 @@ func TestResolveGitURL_KeptForms(t *testing.T) {
 			if got := RefVersion(tt.ref); got != tt.version {
 				t.Errorf("RefVersion(%q) = %q, want %q", tt.ref, got, tt.version)
 			}
+		}
+	}
+}
+
+// An https ref and a remote ref without a scheme that end in ".git" get the
+// URL, the token and the header of the ref without ".git": the URL ends in
+// ".git" once. Only one ".git" goes, so "repo.git.git" keeps its name.
+func TestResolveGitURL_OneGitSuffix(t *testing.T) {
+	setProviderEnv(t, "")
+	for _, tt := range []struct{ ref, plain string }{
+		{"github.com/org/repo.git", "github.com/org/repo"},
+		{"https://github.com/org/repo.git", "https://github.com/org/repo"},
+		{"HTTPS://github.com/org/repo.git@v1", "HTTPS://github.com/org/repo@v1"},
+		{"gitlab.com/group/project.git#lbl", "gitlab.com/group/project#lbl"},
+		{"git://github.com/org/repo.git:tool.sh", "git://github.com/org/repo:tool.sh"},
+		{"host.example/org/repo.git", "host.example/org/repo"},
+	} {
+		got, plain := ResolveGitURL(tt.ref, ""), ResolveGitURL(tt.plain, "")
+		if got != plain || strings.HasSuffix(got.URL, ".git.git") {
+			t.Errorf("ResolveGitURL(%q) = URL %q, token set %v; want the result of %q: URL %q, token set %v",
+				tt.ref, got.URL, got.AuthToken != "", tt.plain, plain.URL, plain.AuthToken != "")
+		}
+	}
+	for _, ref := range []string{"github.com/org/repo.git.git", "https://github.com/org/repo.git.git"} {
+		if got := ResolveGitURL(ref, ""); got.URL != "https://github.com/org/repo.git.git" || got.AuthToken != fakeGH {
+			t.Errorf("ResolveGitURL(%q) = URL %q, token set %v; want repo.git.git and the token", ref, got.URL, got.AuthToken != "")
 		}
 	}
 }

@@ -183,8 +183,12 @@ func hasScheme(s string) bool {
 // same parse that scopes the header key (headerKey). A URL whose host the
 // parse does not accept gets no token, and the remote git commands refuse it
 // (checkRemote).
+//
+// A ref that ends in ".git" ("github.com/org/repo.git") gets the URL of the
+// ref without it, so the URL ends in ".git" once. Only one ".git" goes:
+// "repo.git.git" keeps its name.
 func remoteHTTPS(ref string) ResolvedRef {
-	u := "https://" + ref + ".git"
+	u := "https://" + strings.TrimSuffix(ref, ".git") + ".git"
 	h, err := parseHTTPSHost(u)
 	if err != nil {
 		return ResolvedRef{URL: u}
