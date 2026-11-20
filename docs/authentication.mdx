@@ -127,7 +127,17 @@ b update
 
 ### The token in git commands
 
-For a git clone, fetch or ls-remote over HTTPS, `b` gives the token to git as the header key `http.https://<host>/.extraHeader`. The key is in `GIT_CONFIG_*` environment variables, not on the command line. It has the host of the ref, so git sends the header to that host only. git compares the key with the URL after your own `url.<base>.insteadOf` rewrites: a rewrite to another host does not get the token.
+For a git clone, fetch or ls-remote over HTTPS, `b` gives the token to git as the header key `http.https://<host>/.extraHeader`. The key is in `GIT_CONFIG_*` environment variables, not on the command line.
+
+- `b` reads the host and the port from the HTTPS URL of the ref one time. That host selects the token. That host and port go into the key. For a port that is not the default, the key is `http.https://<host>:<port>/.extraHeader`.
+- The token of a provider goes to its host and to the subdomains of that host, on all ports. For example, `GITHUB_TOKEN` goes to `github.com` and to `api.github.com`. Upper case and lower case are the same. A host with a trailing dot (`github.com.`) gets no token.
+- `b` refuses some refs. A refused ref gets no token, and `b` runs no git command for it. `b` refuses a ref with one of these in the host part:
+  - a user name or a password (`user@`, `user:password@`)
+  - no host
+  - a port that is not a number from 1 to 65535
+  - a host character that is not a letter, a digit, a hyphen or a dot, for example `*`, `%` or `_`. `b` accepts an IPv6 address in brackets.
+- The key protects the token against a rewrite of the initial URL. git compares the key with the URL after your own `url.<base>.insteadOf` rewrites. Thus a rewrite to another host does not get the token.
+- The key does not protect the token after a redirect. git does not compare the key with the URL of a redirect. What git and libcurl do with the header after a redirect to another host is their behavior. It is not a check that `b` does.
 
 `b` also sets `GIT_TERMINAL_PROMPT=0` for these git commands. Thus git does not ask for a user name or a password on the terminal. A private repo with no token and no credential helper fails at once.
 
