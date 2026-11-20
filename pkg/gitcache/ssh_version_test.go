@@ -65,6 +65,7 @@ func TestIsSSHUserAt_Forms(t *testing.T) {
 		{"github.com/org/repo@v2.0", false},
 		{"git@github.com:org/repo@v1", false},
 		{"git@github.com:repo@v1", false},
+		{"deploy@host:repo@release/1.0", false}, // an @ in an scp-style path
 		{"ssh://git@github.com/org/repo@v1", false},
 		{"https://github.com/org/repo@v1", false},
 		{"kubectl@v1.30", false},
