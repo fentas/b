@@ -233,13 +233,30 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 		// (legacy `select` semantics: extract a subset, overwrite the
 		// destination — out-of-scope content is intentionally
 		// dropped because the user opted into it via `select`).
+		//
+		// A dot inside a COMPLEX selector is not a nested path: a profile's
+		// `{binaries: from_items(items(binaries)[?[1].groups && …])}` has
+		// dots in its filter, but its result is whole top-level keys, and
+		// the YAML splice reads its scope from the keys that the filter
+		// emits. So on the non-merge strategies a YAML file with such a
+		// selector is spliced too. Without that, the sync wrote the filtered
+		// content over the whole file, and the header comments and every
+		// out-of-scope key were lost (#185). Only a simple dot-path below
+		// the top level (`database.host`), or a JSON file (its splice takes
+		// simple dot-paths only), keeps the legacy write. The merge gate
+		// below does not change.
 		allTopLevelSelectors := true
+		legacyWrite := false
 		if len(m.Select) > 0 {
+			ext := strings.ToLower(filepath.Ext(m.SourcePath))
+			yamlFile := ext == ".yaml" || ext == ".yml"
 			for _, sel := range m.Select {
 				key := strings.TrimPrefix(sel, ".")
 				if strings.Contains(key, ".") {
 					allTopLevelSelectors = false
-					break
+					if isSimpleDotPath(sel) || !yamlFile {
+						legacyWrite = true
+					}
 				}
 			}
 			if !allTopLevelSelectors && strategy == StrategyMerge {
@@ -293,12 +310,13 @@ func SyncEnv(cfg EnvConfig, projectRoot, cacheRoot string, lockEntry *lock.EnvEn
 			if filterFn == nil {
 				return content, nil
 			}
-			// Nested selectors with non-merge strategies skip the
-			// splice entirely and write the filtered content
-			// directly. This preserves the legacy `select` semantics
-			// (extract a subset, overwrite the destination) for
-			// callers that explicitly opted into per-key extraction.
-			if !allTopLevelSelectors {
+			// Nested dot-path selectors (and complex selectors on a
+			// JSON file) with non-merge strategies skip the splice
+			// entirely and write the filtered content directly. This
+			// preserves the legacy `select` semantics (extract a
+			// subset, overwrite the destination) for callers that
+			// explicitly opted into per-key extraction.
+			if legacyWrite {
 				return content, nil
 			}
 			localFull, readErr := os.ReadFile(destPath)
