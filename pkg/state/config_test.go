@@ -221,6 +221,46 @@ func TestSaveConfig_FileRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSaveConfig_FileRoundTrip_RelativeConfigPath: the same round trip with
+// a relative configPath (the .bin/b.yaml fallback, or --config ./b.yaml).
+// The load then joins `file:` into a path that is still relative, so the
+// save must keep the value as written without a filepath.IsAbs gate.
+func TestSaveConfig_FileRoundTrip_RelativeConfigPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tmpDir)
+	relConfigPath := filepath.Join(".bin", "b.yaml")
+	initial := "binaries:\n" +
+		"  shared:\n    file: ../shared/tool\n" +
+		"  inside:\n    file: tools/x\n" +
+		"  untidy:\n    file: ./tools/y\n"
+	if err := os.WriteFile(relConfigPath, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadConfigFromPath(relConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Binaries = append(config.Binaries, &binary.LocalBinary{Name: "yq"})
+	if err := SaveConfig(config, relConfigPath); err != nil {
+		t.Fatal(err)
+	}
+
+	got := writtenFiles(t, relConfigPath)
+	want := map[string]string{
+		"shared": "../shared/tool",
+		"inside": "tools/x",
+		"untidy": "./tools/y",
+	}
+	for name, w := range want {
+		if got[name] != w {
+			t.Errorf("file: of %s after the save: %q, want %q", name, got[name], w)
+		}
+	}
+}
+
 // TestSaveConfig_ChangedFileWritesTheNewValue: when a caller changes the
 // File of an entry after the load, the save writes the new file and not the
 // old `file:` of b.yaml. A new file inside the config dir is written
