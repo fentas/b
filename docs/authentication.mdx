@@ -130,6 +130,7 @@ b update
 For a git clone, fetch or ls-remote over HTTPS, `b` gives the token to git as the header key `http.https://<host>/.extraHeader`. The key is in `GIT_CONFIG_*` environment variables, not on the command line.
 
 - `b` reads the host and the port from the HTTPS URL of the ref one time. That host selects the token. That host and port go into the key. For a port that is not the default, the key is `http.https://<host>:<port>/.extraHeader`.
+- A ref with the scheme `https://` (in upper case or lower case) is the same as the ref without the scheme. For example, `https://github.com/org/repo` gets the URL `https://github.com/org/repo.git` and the same token as `github.com/org/repo`, for the same host. A ref with another scheme, for example `http://` or `file://`, is refused (see below). `ssh://` and `git://` refs do not change.
 - The token of a provider goes to its host and to the subdomains of that host, on all ports. For example, `GITHUB_TOKEN` goes to `github.com` and to `api.github.com`. Upper case and lower case are the same. A host with a trailing dot (`github.com.`) gets no token.
 - `b` refuses some refs. A refused ref gets no token, and `b` runs no remote git command (clone, fetch or ls-remote) for it. `b` refuses a ref with one of these in the host part:
   - a user name or a password (`user@`, `user:password@`)
@@ -141,7 +142,17 @@ For a git clone, fetch or ls-remote over HTTPS, `b` gives the token to git as th
 
 `b` also sets `GIT_TERMINAL_PROMPT=0` for these git commands. Thus git does not ask for a user name or a password on the terminal. A private repo with no token and no credential helper fails at once.
 
-`b` shows `***` in place of the token in the error message of these git commands. In a URL that `b` writes in a message, `b` shows `***` in place of the user part (`user:password@`).
+What an error message shows:
+
+- The token never shows. In the error message of these git commands, `b` shows `***` in place of the token.
+- In a ref or a URL that `b` writes in a message, `b` shows `***` in place of the user part (`user:password@`).
+- `b` refuses two forms of a ref with a fixed text that does not show the ref. The ref gets no token, and no git command runs:
+  - a ref with more than one `@` before its path, for example `user:p@ss@host/org/repo`:
+    `refusing a git ref with more than one @ before its path: remove the user part`
+  - a ref with a scheme that `b` does not fetch, for example `http://` or `file://`:
+    `refusing a git ref with a scheme that b does not fetch: use https://, ssh://, git:// or no scheme`
+
+Do not put a password in a ref. `b` finds the user part only in front of the host. A raw `/`, `?` or `#` in a password ends the host part early, so `b` does not see a user part, and the message can show a part of the password. An SSH ref has no password field: `b` shows its user name as it is.
 
 ## CI/CD
 
