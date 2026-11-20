@@ -150,13 +150,14 @@ What an error message shows:
   - a ref without a scheme with a password in front of its host (`user:password@host`), a ref with more than one `@` in front of its host (`user:p@ss@host/org/repo`, `git@x@github.com:org/repo`, `ssh://git@x@github.com/org/repo`), and a ref with an `@` after a second `://` (`https://a?b://user:password@host/x`):
     `refusing a git ref with a password or more than one @ before its path: remove the user part`
   - An `https://` ref with one `@` (`https://user:password@host/org/repo`) gets the host error, with `***` in place of the user part.
+  - `b install` refuses an argument with a scheme and a password in front of its host (`https://user:password@host/org/repo:/glob`, `ssh://user:password@host/org/repo:/glob`) with the first fixed text, before it reads the glob. A `:` after the `@` is a port, not a password.
 - `b` checks the transport of each URL before a clone, fetch or ls-remote. This includes the URL that a clone stored in its cache. These forms pass: `https://` (in upper case or lower case, with the host check above), `ssh://` (lower case only), an scp-like URL (`git@host:org/repo`) and a local path. `b` refuses the other forms with a fixed text, and git does not run:
   - another scheme (`http://`, `file://`, `ftp://`, `SSH://`, a `git://` URL), a second `://`, or a git remote helper (`<transport>::<address>`):
     `refusing a git ref with a scheme that b does not fetch: use https://, ssh://, git:// or no scheme`
   - more than one `@` in the host part of an `https://`, `ssh://` or scp-like URL: the first fixed text above.
   - A `git://` ref is the `b` form for a repo and a file in it. `b` changes it to a local path or an `https://` URL before git runs, so a `git://` URL does not get to git.
 
-Do not put a password in a ref. `b` finds the user part only in front of the host. A raw `/`, `?` or `#` in a password ends the host part early, so `b` does not see a user part, and the message can show a part of the password. An `ssh://` ref with a password (`ssh://user:password@host/org/repo`) goes to git as it is: git or ssh can show the password in their own error output. Your `b.yaml` and `b.lock` keep the ref as you wrote it.
+Do not put a password in a ref. `b` finds the user part only in front of the host. A raw `/`, `?` or `#` in a password ends the host part early, so `b` does not see a user part, and the message can show a part of the password. An `ssh://` ref with a password (`ssh://user:password@host/org/repo`) goes to git as it is, except as an argument of `b install`: git or ssh can show the password in their own error output. Your `b.yaml` and `b.lock` keep the ref as you wrote it.
 
 ## CI/CD
 

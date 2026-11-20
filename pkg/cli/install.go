@@ -795,7 +795,8 @@ func parseBinaryArg(arg string) (name, version string) {
 //
 // Returns the parsed envInstall, how many additional args were consumed, and whether it matched.
 // It returns the error of gitcache.CheckRef for an argument with a password
-// or more than one @ in front of its host, before any message shows it.
+// or more than one @ in front of its host, also after a scheme, before any
+// message shows it.
 func parseSCPArg(arg string, remaining []string) (envInstall, int, bool, error) {
 	// docker:// and oci:// are always binary installs (never env SCP), even
 	// though they may contain ":/path" for in-container binary location.
@@ -808,6 +809,26 @@ func parseSCPArg(arg string, remaining []string) (envInstall, int, bool, error) 
 	// org/repo:/glob" gives the ref "user.name").
 	if err := gitcache.CheckRef(arg); err != nil {
 		return envInstall{}, 0, false, err
+	}
+	// CheckRef lets a password after a scheme pass, but the colon scan takes
+	// its ":" too: "https://token:x@host/org/repo:/glob" gives the ref
+	// "https://token". The authority after each scheme (up to the first "/",
+	// "?" or "#", also after a second scheme as in "git://https://...") is
+	// checked as a ref without a scheme: CheckRef refuses a ":" in front of
+	// its "@". A ":" after the "@" (a port) passes.
+	for s := arg; ; {
+		i := strings.Index(s, "://")
+		if i <= 0 || strings.ContainsAny(s[:i], "/?#@") {
+			break
+		}
+		s = s[i+len("://"):]
+		authority := s
+		if end := strings.IndexAny(s, "/?#"); end >= 0 {
+			authority = s[:end]
+		}
+		if err := gitcache.CheckRef(authority); err != nil {
+			return envInstall{}, 0, false, err
+		}
 	}
 
 	// Look for colon that signals SCP syntax — must come after a ref (contains /)

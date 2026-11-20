@@ -70,8 +70,14 @@ func checkRefusal(t *testing.T, name string, err error, refusal string) {
 		}
 	}
 	if err.Error() != refusal && !strings.HasSuffix(err.Error(), ": "+refusal) {
-		t.Errorf("%s: error %q, want the fixed text %q", name, strings.ReplaceAll(err.Error(), canaryPassword, "<password>"), refusal)
+		t.Errorf("%s: error %q, want the fixed text %q", name, hideCanaries(err.Error()), refusal)
 	}
+}
+
+// hideCanaries returns s with "<password>" and "<token>" in place of the
+// canary password and token, for a failure message.
+func hideCanaries(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, canaryPassword, "<password>"), canaryToken, "<token>")
 }
 
 // b env add, b env match and b env profiles refuse a ref whose user part b
@@ -793,9 +799,6 @@ func TestInstall_RefusedKeyRefusedFirst(t *testing.T) {
 // the token are in no output, in no format verb of the error and not in
 // b.yaml or b.lock, and no git command runs.
 func TestInstall_RefusedArgumentRefusedFirst(t *testing.T) {
-	calls := gitSpy(t)
-	t.Setenv("GITHUB_TOKEN", canaryToken)
-	const refusal = "refusing a git ref with a password or more than one @ before its path: remove the user part"
 	var refs []string
 	for _, user := range []string{"user:" + canaryPassword + "@", "user.name:" + canaryPassword + "@", "user:p@" + canaryPassword + "@"} {
 		for _, version := range []string{"", "@v1"} {
@@ -805,6 +808,41 @@ func TestInstall_RefusedArgumentRefusedFirst(t *testing.T) {
 	refs = append(refs,
 		"git@"+canaryPassword+"@github.com:org/repo",
 		"https://a?b://user:"+canaryPassword+"@host.example/x")
+	checkArgumentsRefused(t, refs)
+}
+
+// b install refuses an argument with a scheme and a password in front of
+// its host before the colon scan, with the fixed text alone. Before, the
+// scan took the ":" of the password: "https://token:x-oauth-basic@host/org/
+// repo:/glob" gave the ref "https://token", so git got the token as the
+// host name and the error showed it. This holds for https://, ssh:// and a
+// second scheme after git://, with the token or the password in the user
+// part, with and without a version, a dest, --add and a glob.
+func TestInstall_PasswordAfterSchemeRefusedFirst(t *testing.T) {
+	var refs []string
+	for _, user := range []string{
+		"https://" + canaryToken + ":x-oauth-basic@",
+		"https://user:" + canaryToken + "@",
+		"ssh://user:" + canaryPassword + "@",
+		"git://https://" + canaryToken + ":x-oauth-basic@",
+	} {
+		for _, version := range []string{"", "@v1"} {
+			refs = append(refs, user+"github.com/org/repo"+version)
+		}
+	}
+	checkArgumentsRefused(t, refs)
+}
+
+// checkArgumentsRefused runs b install with each ref of refs with a glob,
+// with a glob and a dest, with --add and with no glob, with and without
+// B_GIT_SSH_AS_HTTPS=1. Each run stops with the fixed text alone. The
+// password and the token are in no output, in no format verb of the error
+// and not in b.yaml or b.lock, and no git command runs.
+func checkArgumentsRefused(t *testing.T, refs []string) {
+	t.Helper()
+	calls := gitSpy(t)
+	t.Setenv("GITHUB_TOKEN", canaryToken)
+	const refusal = "refusing a git ref with a password or more than one @ before its path: remove the user part"
 	for _, knob := range []string{"", "1"} {
 		t.Setenv(gitcache.SSHAsHTTPSEnv, knob)
 		for i, ref := range refs {
@@ -823,8 +861,7 @@ func TestInstall_RefusedArgumentRefusedFirst(t *testing.T) {
 				cmd.SetArgs(args)
 				err := cmd.Execute()
 				if err == nil || err.Error() != refusal {
-					t.Errorf("%s: error %q, want the fixed text alone", name,
-						strings.ReplaceAll(fmt.Sprint(err), canaryPassword, "<password>"))
+					t.Errorf("%s: error %q, want the fixed text alone", name, hideCanaries(fmt.Sprint(err)))
 				}
 				checkRefusal(t, name, err, refusal)
 				if all := out.String() + errOut.String(); strings.Contains(all, canaryPassword) || strings.Contains(all, canaryToken) {
@@ -835,7 +872,7 @@ func TestInstall_RefusedArgumentRefusedFirst(t *testing.T) {
 		}
 	}
 	if c := calls(); c != "" {
-		t.Errorf("git ran:\n%s", strings.ReplaceAll(c, canaryPassword, "<password>"))
+		t.Errorf("git ran:\n%s", hideCanaries(c))
 	}
 }
 
@@ -952,5 +989,49 @@ func TestInstall_UserNameArgumentKeepsItsHost(t *testing.T) {
 	}
 	if c := calls(); c != "" {
 		t.Errorf("git ran:\n%s", strings.ReplaceAll(c, canaryToken, "<token>"))
+	}
+}
+
+// The password rule of b install does not take a port for a password: in
+// "https://token@github.com:443/org/repo:/glob" the ":" is after the "@".
+// The colon scan then ends the ref at that ":", as it does for a port with
+// no user part: the ref is "https://token@github.com" and the glob is
+// "443/org/repo:/glob". The sync refuses the https URL with a user part
+// before git runs. The token is in no output, in no format verb of the
+// error and not in b.yaml or b.lock, and no git command runs.
+func TestInstall_PortWithUserNameIsNotAPassword(t *testing.T) {
+	calls := gitSpy(t)
+	t.Setenv("GITHUB_TOKEN", canaryToken)
+	ref := "https://" + canaryToken + "@github.com"
+	arg := ref + ":443/org/repo:/glob"
+	ei, consumed, ok, err := parseSCPArg(arg, nil)
+	if err != nil || !ok || consumed != 0 || ei.ref != ref || ei.version != "" || ei.label != "" || ei.glob != "443/org/repo:/glob" {
+		t.Errorf("parse: ok %v, consumed %d, error %v, ref %q, version %q, label %q, glob %q; want ok, 0, none, the ref up to the host, no version, the glob 443/org/repo:/glob",
+			ok, consumed, err != nil, hideCanaries(ei.ref), hideCanaries(ei.version), ei.label, hideCanaries(ei.glob))
+	}
+	const want = "syncing https://***@github.com: resolving https://***@github.com@: refusing https://***@github.com.git: "
+	for _, knob := range []string{"", "1"} {
+		t.Setenv(gitcache.SSHAsHTTPSEnv, knob)
+		for _, args := range [][]string{{arg}, {arg, "out"}, {"--add", arg, "out"}} {
+			name := fmt.Sprintf("%s=%q with %d argument(s)", gitcache.SSHAsHTTPSEnv, knob, len(args))
+			configPath := installDir(t)
+			io, out, errOut := bufIO()
+			cmd := NewInstallCmd(&SharedOptions{IO: io, ConfigPath: configPath, loadedConfigPath: configPath})
+			cmd.SetOut(out)
+			cmd.SetErr(errOut)
+			cmd.SetArgs(args)
+			err := cmd.Execute()
+			if err == nil || !strings.HasPrefix(err.Error(), want) {
+				t.Errorf("%s: error %q, want it to start with %q", name, hideCanaries(fmt.Sprint(err)), want)
+			}
+			checkRefusalFormats(t, name, err)
+			if all := out.String() + errOut.String(); strings.Contains(all, canaryToken) {
+				t.Errorf("%s: the output shows the token", name)
+			}
+			checkInstallFiles(t, name, configPath)
+		}
+	}
+	if c := calls(); c != "" {
+		t.Errorf("git ran:\n%s", hideCanaries(c))
 	}
 }
