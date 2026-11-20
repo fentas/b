@@ -10,6 +10,7 @@ import (
 
 	"github.com/fentas/b/pkg/envmatch"
 	"github.com/fentas/b/pkg/gitcache"
+	"github.com/fentas/b/pkg/lock"
 	"github.com/fentas/b/pkg/state"
 )
 
@@ -344,5 +345,105 @@ func TestEnvCommands_ProfileListsHideThePassword(t *testing.T) {
 	}
 	if strings.Contains(out.String()+errOut.String(), canaryPassword) {
 		t.Error("env add -i: the output shows the password")
+	}
+}
+
+// b update refuses an env key of b.yaml with a password or more than one @
+// in front of its host, or with an @ after another "://", before it splits
+// the key (RefLabel, RefBase). Each such key gets one ✗ line with the fixed
+// text and "<refused env key>" in place of the key, and the failure summary
+// names the same text. There is no "resolving" line, no token is chosen, no
+// git command runs, and b.lock does not get the key. This holds for b update
+// with no argument and with the key as its argument, with and without
+// B_GIT_SSH_AS_HTTPS=1. RedactUserinfo does not hide the first and the last
+// key, so the key column shows the fixed text.
+func TestUpdateEnvs_RefusedKeyRefusedFirst(t *testing.T) {
+	saveHooks(t)
+	calls := gitSpy(t)
+	t.Setenv("GITHUB_TOKEN", canaryToken)
+	const refusal = "refusing a git ref with a password or more than one @ before its path: remove the user part"
+	keys := []string{
+		"https://a?b://user:" + canaryPassword + "@host.example/x",
+		"user:p@" + canaryPassword + "@github.com/org/repo#lbl",
+		"ssh://git@" + canaryPassword + "@github.com/org/repo",
+	}
+	for i, key := range keys {
+		if gitcache.ResolveGitURL(key, "").AuthToken != "" {
+			t.Errorf("a token is chosen for key %d", i)
+		}
+	}
+	for _, knob := range []string{"", "1"} {
+		t.Setenv(gitcache.SSHAsHTTPSEnv, knob)
+		for _, run := range []struct {
+			name string
+			refs [][]string // nil: b update with no argument
+		}{
+			{"no argument", [][]string{nil}},
+			{"the key as the argument", [][]string{{keys[0]}, {keys[1]}, {keys[2]}}},
+		} {
+			for i, refs := range run.refs {
+				dir := t.TempDir()
+				t.Setenv("PATH_BASE", dir)
+				configPath := filepath.Join(dir, "b.yaml")
+				if err := os.WriteFile(configPath, []byte("binaries: {}\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := lock.WriteLock(dir, &lock.Lock{Version: 1}, "test"); err != nil {
+					t.Fatal(err)
+				}
+				io, out, errOut := bufIO()
+				envs := state.EnvList{}
+				for _, key := range keys {
+					envs = append(envs, &state.EnvEntry{Key: key, Files: map[string]envmatch.GlobConfig{"a/**": {}}})
+				}
+				o := &UpdateOptions{SharedOptions: &SharedOptions{
+					IO:               io,
+					ConfigPath:       configPath,
+					loadedConfigPath: configPath,
+					Config:           &state.State{Envs: envs},
+				}}
+				name := fmt.Sprintf("%s=%q %s %d", gitcache.SSHAsHTTPSEnv, knob, run.name, i)
+				want := len(keys)
+				if refs != nil {
+					o.specifiedEnvRefs = refs
+					want = len(refs)
+				}
+				err := o.Run()
+				if err == nil || !strings.HasSuffix(err.Error(), "env(s) failed: "+strings.TrimSuffix(strings.Repeat(refusedEnvKey+", ", want), ", ")) {
+					t.Errorf("%s: error %q, want the failure summary with the fixed key text", name,
+						strings.ReplaceAll(fmt.Sprint(err), canaryPassword, "<password>"))
+				}
+				checkRefusalFormats(t, name, err)
+				line := "  " + fmt.Sprintf("%-40s", refusedEnvKey) + " ✗ " + refusal + "\n"
+				if got := strings.Count(errOut.String(), line); got != want {
+					t.Errorf("%s: %d refusal lines, want %d; error output %q", name, got, want,
+						strings.ReplaceAll(errOut.String(), canaryPassword, "<password>"))
+				}
+				all := out.String() + errOut.String()
+				if strings.Contains(all, canaryPassword) || strings.Contains(all, canaryToken) {
+					t.Errorf("%s: the output shows the password or the token", name)
+				}
+				if strings.Contains(all, "resolving") {
+					t.Errorf("%s: the output has a resolving line", name)
+				}
+				if b, err := os.ReadFile(filepath.Join(dir, "b.lock")); err != nil || strings.Contains(string(b), canaryPassword) {
+					t.Errorf("%s: b.lock cannot be read or holds the password (read error: %v)", name, err != nil)
+				}
+			}
+		}
+	}
+	if c := calls(); c != "" {
+		t.Errorf("git ran:\n%s", strings.ReplaceAll(c, canaryPassword, "<password>"))
+	}
+}
+
+// checkRefusalFormats fails the test when err shows the password or the
+// token in a format verb.
+func checkRefusalFormats(t *testing.T, name string, err error) {
+	t.Helper()
+	for _, verb := range []string{"%s", "%v", "%+v", "%q", "%#v"} {
+		if text := fmt.Sprintf(verb, err); strings.Contains(text, canaryPassword) || strings.Contains(text, canaryToken) {
+			t.Errorf("%s: the %s text shows the password or the token", name, verb)
+		}
 	}
 }

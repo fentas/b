@@ -602,6 +602,11 @@ func (o *UpdateOptions) callUpdateBinaries(binaries []*binary.Binary) error {
 	return o.updateBinaries(binaries)
 }
 
+// refusedEnvKey is the text that b update shows in place of an env key that
+// gitcache.CheckRef refuses, in its ✗ line and in the failure summary. The
+// key can hold a password.
+const refusedEnvKey = "<refused env key>"
+
 // updateEnvs updates env entries from config. If refs is nil, updates all.
 func (o *UpdateOptions) updateEnvs(refs []string) error {
 	if o.Config == nil {
@@ -655,6 +660,16 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 
 		// Filter by group if specified
 		if o.Group != "" && entry.Group != o.Group {
+			continue
+		}
+
+		// Before RefLabel, RefBase and every message that shows the key: a
+		// key with a password or more than one @ in front of its host.
+		// RedactUserinfo does not hide each such key, so the line and the
+		// summary show refusedEnvKey in place of the key.
+		if err := gitcache.CheckRef(entry.Key); err != nil {
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", refusedEnvKey, err)
+			failedEnvs = append(failedEnvs, refusedEnvKey)
 			continue
 		}
 
