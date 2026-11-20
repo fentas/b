@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -1094,6 +1095,14 @@ func (o *UpdateOptions) printFileStatus(f lock.LockFile) {
 // interactiveConflictResolver returns a ConflictFunc that prompts the user per-file.
 // When the file's selectors cannot take a merge (mergeOK false), the
 // prompt does not offer [m]erge and refuses an "m".
+//
+// With no answer, the prompt keeps the local file: at the end of input
+// (EOF, Ctrl-D) with no answer, and on a read error (a closed terminal).
+// Replace would overwrite the local changes, and no one chose it. A last
+// answer with no newline ("k" and then EOF, as from `printf k`) is still
+// an answer: bufio returns the text with io.EOF, and the user typed it.
+// An answer that is not valid there, or a [d]iff, asks again, and that
+// read then ends with no answer.
 func (o *UpdateOptions) interactiveConflictResolver(ref string, lk *lock.Lock) env.ConflictFunc {
 	r := o.stdinReader
 	if r == nil {
@@ -1106,12 +1115,22 @@ func (o *UpdateOptions) interactiveConflictResolver(ref string, lk *lock.Lock) e
 			if mergeOK {
 				fmt.Fprintf(o.IO.ErrOut, "      [r]eplace  [k]eep  [m]erge  [d]iff > ")
 			} else {
-				fmt.Fprintf(o.IO.ErrOut, "      [r]eplace  [k]eep  [d]iff (no merge: the select has a filter or a nested path) > ")
+				fmt.Fprintf(o.IO.ErrOut, "      [r]eplace  [k]eep  [d]iff (no merge: a selector with a dot) > ")
 			}
 
 			input, err := reader.ReadString('\n')
 			if err != nil {
-				return env.StrategyReplace // default on read error
+				if !errors.Is(err, io.EOF) || strings.TrimSpace(input) == "" {
+					// The prompt line has no newline: end it first.
+					if errors.Is(err, io.EOF) {
+						fmt.Fprintf(o.IO.ErrOut, "\n      no answer (end of input): keeping the local file %s\n", destPath)
+					} else {
+						fmt.Fprintf(o.IO.ErrOut, "\n      no answer (read error: %v): keeping the local file %s\n", err, destPath)
+					}
+					return env.StrategyClient
+				}
+				// A last answer with no newline: end the prompt line.
+				fmt.Fprintln(o.IO.ErrOut)
 			}
 			input = strings.TrimSpace(strings.ToLower(input))
 

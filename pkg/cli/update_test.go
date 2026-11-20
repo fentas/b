@@ -1040,8 +1040,8 @@ func TestInteractiveResolver_MergeOffered(t *testing.T) {
 }
 
 // TestInteractiveResolver_MergeNotOffered: when the merge gate refuses the
-// selectors (a filter or a nested path), the prompt does not offer
-// [m]erge, says why, and an "m" does not return merge.
+// selectors (a selector with a dot), the prompt does not offer [m]erge,
+// says why, and an "m" does not return merge.
 func TestInteractiveResolver_MergeNotOffered(t *testing.T) {
 	var errBuf bytes.Buffer
 	o := &UpdateOptions{
@@ -1059,7 +1059,7 @@ func TestInteractiveResolver_MergeNotOffered(t *testing.T) {
 	if strings.Contains(out, "[m]erge") {
 		t.Errorf("prompt offers merge:\n%s", out)
 	}
-	if want := "[r]eplace  [k]eep  [d]iff (no merge: the select has a filter or a nested path) > "; strings.Count(out, want) != 4 {
+	if want := "[r]eplace  [k]eep  [d]iff (no merge: a selector with a dot) > "; strings.Count(out, want) != 4 {
 		t.Errorf("want the prompt %q 4 times, got:\n%s", want, out)
 	}
 	if want := "Merge is not offered for this file. Try r, k, or d."; strings.Count(out, want) != 2 {
@@ -1089,18 +1089,24 @@ func TestInteractiveResolver_InvalidThenReplace(t *testing.T) {
 	}
 }
 
+// TestInteractiveResolver_EOF: no answer keeps the local file (it used to
+// replace it). More cases: update_conflict_prompt_test.go.
 func TestInteractiveResolver_EOF(t *testing.T) {
+	var errBuf bytes.Buffer
 	o := &UpdateOptions{
 		SharedOptions: &SharedOptions{
-			IO: &streams.IO{Out: &bytes.Buffer{}, ErrOut: &bytes.Buffer{}},
+			IO: &streams.IO{Out: &bytes.Buffer{}, ErrOut: &errBuf},
 		},
 		stdinReader: strings.NewReader(""), // immediate EOF
 	}
 
 	resolver := o.interactiveConflictResolver("ref", &lock.Lock{})
 	result := resolver("s", "d", true)
-	if result != env.StrategyReplace {
-		t.Errorf("got %q, want %q (default on EOF)", result, env.StrategyReplace)
+	if result != env.StrategyClient {
+		t.Errorf("got %q, want %q (no answer keeps the local file)", result, env.StrategyClient)
+	}
+	if want := "no answer (end of input): keeping the local file d"; !strings.Contains(errBuf.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, errBuf.String())
 	}
 }
 
