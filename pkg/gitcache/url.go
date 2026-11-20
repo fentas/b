@@ -271,26 +271,36 @@ func isSSHImplicit(ref string) bool {
 	return at >= 0 && colon > at
 }
 
-// IsSSHUserAt checks if the @ at position i is an SSH user separator
-// (e.g. "git@host:..." or "ssh://user@host/...") rather than a version separator.
-// Used by both ResolveGitURL and RefBase/RefVersion.
+// IsSSHUserAt reports whether the @ at atIdx separates a user part from the
+// host ("git@host:org/repo", "ssh://git@host/org/repo",
+// "user:password@host/org/repo"), rather than a version
+// ("github.com/org/repo@v2.0", "ssh://git@host/org/repo@v2.0"). It is also
+// true for an @ in an SSH path that a ":" follows ("git@host:x@y:z"): a git
+// ref name has no ":", so that @ is not a version. ResolveGitURL, RefBase,
+// RefVersion and the git provider use it.
 func IsSSHUserAt(ref string, atIdx int) bool {
 	prefix := ref[:atIdx]
 	rest := ref[atIdx+1:]
 
-	// Explicit ssh:// with any user
-	if strings.HasPrefix(prefix, "ssh://") {
+	// With a scheme, the user part is in the authority: no "/" follows the
+	// scheme before the @.
+	if i := strings.Index(prefix, "://"); i > 0 && !strings.ContainsAny(prefix[:i], "/@") {
+		if !strings.Contains(prefix[i+len("://"):], "/") {
+			return true
+		}
+		return strings.HasPrefix(prefix, "ssh://") && strings.Contains(rest, ":")
+	}
+	// Without a scheme, an @ after a "/" is a version (github.com/org/repo@v2.0).
+	if strings.Contains(prefix, "/") {
+		return false
+	}
+	// scp-style: user@host:path. The part after the @ has a ":"; a version
+	// (repo@v2.0) has none.
+	if strings.Contains(rest, ":") {
 		return true
 	}
-
-	// scp-style: user@host:path — the part after @ must contain a ':'
-	// indicating host:path format. Version separators (repo@v2.0) don't.
-	// Username must not contain slashes (paths like github.com/org/repo@v2.0).
-	if strings.Contains(rest, ":") && !strings.Contains(prefix, "/") {
-		return true
-	}
-
-	return false
+	// A user part in front of a host and a path: "user:password@host/path".
+	return !strings.Contains(prefix, "@") && strings.Contains(rest, "/")
 }
 
 // IsSSHURL returns true if a URL uses SSH transport.
