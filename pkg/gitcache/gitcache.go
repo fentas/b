@@ -4,6 +4,7 @@ package gitcache
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
@@ -68,6 +69,8 @@ func Fetch(root, ref, commitOrTag string) error {
 // FetchAuth fetches with optional auth token, from the URL that the clone
 // stored (remote.origin.url). It sends the header only when b chooses the
 // same header for the host of that URL (providerAuth), scoped to that host.
+// The stored URL gets the transport check of FetchURLAuth (checkRemote)
+// before git fetches from it.
 //
 // Deprecated: use FetchURLAuth with ResolvedRef.URL and
 // ResolvedRef.AuthHeader, for the reason given at Fetch.
@@ -120,27 +123,80 @@ func HasCommit(root, ref, commit string) bool {
 	return cmd.Run() == nil
 }
 
-// checkRemote refuses an https URL whose host parseHTTPSHost does not accept,
-// before the remote git command (clone, fetch, ls-remote) runs: b and git
-// could read another host from it. The error names the URL without its user
-// part (RedactUserinfo). An SSH URL or a local path passes; b gives git no
-// header for those.
+// checkRemote is the transport check for each URL that b gives to a remote
+// git command (clone, fetch, ls-remote), also the URL that a clone stored
+// (FetchAuth). It runs before the command. These forms pass:
+//   - an https URL ("https://", in any case) whose host parseHTTPSHost
+//     accepts. b and git could read another host from the other https URLs.
+//     That error names the URL without its user part (RedactUserinfo);
+//   - an ssh:// URL ("ssh://", lower case);
+//   - an scp-like URL ("git@host:org/repo");
+//   - a local path: a URL with no ":", or with a "/" before its first ":".
+//
+// These forms get a fixed text that does not echo the URL:
+//   - another scheme ("http://", "file://", "git://", "SSH://"), a second
+//     "://" (also after the authority: "https://a?b://user:pw@host/x"),
+//     and a remote helper ("<transport>::<address>"): errScheme;
+//   - more than one raw "@" in the authority, which ends at the first "/",
+//     "?" or "#", or in an scp-like URL at the first ":": errUserinfoAt;
+//   - refusedURL, the URL of a ref that CheckRef refuses: errUserinfoAt.
 func checkRemote(remote string) error {
-	if len(remote) < len("https://") || !strings.EqualFold(remote[:len("https://")], "https://") {
+	if remote == refusedURL {
+		return errUserinfoAt
+	}
+	if remoteHelper(remote) {
+		return errScheme
+	}
+	if !hasScheme(remote) {
+		colon := strings.Index(remote, ":")
+		if colon < 0 || strings.Contains(remote[:colon], "/") {
+			return nil // a local path
+		}
+		if strings.Count(remote[:colon], "@") > 1 {
+			return errUserinfoAt // an scp-like URL
+		}
 		return nil
 	}
-	if _, err := parseHTTPSHost(remote); err != nil {
-		return fmt.Errorf("refusing %s: %w", RedactUserinfo(remote), err)
+	i := strings.Index(remote, "://")
+	scheme, rest := remote[:i], remote[i+len("://"):]
+	if strings.Contains(rest, "://") {
+		return errScheme // also after the authority: "https://a?b://user:pw@host/x"
+	}
+	if strings.Count(rest[:authorityEnd(rest)], "@") > 1 {
+		return errUserinfoAt
+	}
+	switch {
+	case strings.EqualFold(scheme, "https"):
+		if _, err := parseHTTPSHost(remote); err != nil {
+			return fmt.Errorf("refusing %s: %w", RedactUserinfo(remote), err)
+		}
+	case scheme == "ssh":
+	default:
+		return errScheme
 	}
 	return nil
 }
 
+// remoteHelper reports whether git reads remote as "<transport>::<address>",
+// a remote helper (gitremote-helpers(7)): a letter or digit, then letters,
+// digits, "+", "-" or ".", then "::".
+func remoteHelper(remote string) bool {
+	i := 0
+	for i < len(remote) {
+		c := remote[i]
+		alnum := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+		if !alnum && (i == 0 || c != '+' && c != '-' && c != '.') {
+			break
+		}
+		i++
+	}
+	return i > 0 && strings.HasPrefix(remote[i:], "::")
+}
+
 // redactedError is the error of a git command that b ran with an auth
-// header. Error returns the text of the command error with the secret
-// replaced by "***", and nothing more. Unwrap returns the first error in
-// the chain whose text does not hold the secret (for example the
-// *exec.ExitError), so errors.Is and errors.As find it, and no error that
-// Unwrap returns prints the secret.
+// header (redactWrap). Error returns the text of the command error with the
+// secret replaced by "***", and nothing more. Unwrap returns the cause that
+// redactWrap kept, or nil.
 type redactedError struct {
 	msg string
 	err error
@@ -151,15 +207,50 @@ func (e *redactedError) Unwrap() error { return e.err }
 
 // redactWrap returns err with the secret of authHeader removed from its
 // text (redactedError). It returns err as it is when authHeader is empty.
+//
+// redactWrap is only for the errors of b's own git runners (runAuth,
+// outputAuth). Their text holds the git command line and the stderr of git.
+// They do not return a context error today. The result keeps one of these
+// causes, so that errors.Is and errors.As find it:
+//   - the *exec.ExitError that errors.As finds in err;
+//   - context.Canceled or context.DeadlineExceeded, when errors.Is matches it;
+//   - exec.ErrNotFound, when errors.Is matches it (git is not on the PATH).
+//
+// It keeps the cause only when its text holds no secret (for an
+// *exec.ExitError, also its Stderr). It never keeps an error that wraps the
+// cause: a wrapper can hold the secret in its text, in a field or in the
+// errors that it wraps. For every other error, Unwrap gives nil.
 func redactWrap(err error, authHeader string) error {
 	if err == nil || authHeader == "" {
 		return err
 	}
-	inner := err
-	for inner != nil && redactAuth(inner.Error(), authHeader) != inner.Error() {
-		inner = errors.Unwrap(inner)
+	return &redactedError{msg: redactAuth(err.Error(), authHeader), err: keptCause(err, authHeader)}
+}
+
+// keptCause returns the cause of err that redactWrap keeps, or nil.
+func keptCause(err error, authHeader string) error {
+	holdsSecret := func(s string) bool { return redactAuth(s, authHeader) != s }
+	var cause error
+	var exit *exec.ExitError
+	switch {
+	case errors.As(err, &exit):
+		if exit == nil || holdsSecret(string(exit.Stderr)) {
+			return nil
+		}
+		cause = exit
+	case errors.Is(err, context.Canceled):
+		cause = context.Canceled
+	case errors.Is(err, context.DeadlineExceeded):
+		cause = context.DeadlineExceeded
+	case errors.Is(err, exec.ErrNotFound):
+		cause = exec.ErrNotFound
+	default:
+		return nil
 	}
-	return &redactedError{msg: redactAuth(err.Error(), authHeader), err: inner}
+	if holdsSecret(cause.Error()) {
+		return nil
+	}
+	return cause
 }
 
 // ResolveLocalRef resolves a version to a commit SHA for a local repo.

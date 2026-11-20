@@ -106,12 +106,14 @@ func TestResolveGitURL_TokenFromParsedHost(t *testing.T) {
 		wantHdr string
 		wantKey string // headerKey of the URL; "" when the parse refuses it
 	}{
-		{"github.com:pw@evil.example:443/org/repo", "https://github.com:pw@evil.example:443/org/repo.git", "", ""},
+		// A password in front of the host: CheckRef refuses the ref, so its
+		// URL is refusedURL.
+		{"github.com:pw@evil.example:443/org/repo", refusedURL, "", ""},
+		{"github.com:443@evil.example/x", refusedURL, "", ""},
+		{"user:pw@github.com:443/org/repo", refusedURL, "", ""},
+		{"gitlab.com:pw@evil.example/group/project", refusedURL, "", ""},
+		{"user:pw@github.com/org/repo", refusedURL, "", ""},
 		{"github.com@evil.example/org/repo", "https://github.com@evil.example/org/repo.git", "", ""},
-		{"github.com:443@evil.example/x", "https://github.com:443@evil.example/x.git", "", ""},
-		{"user:pw@github.com:443/org/repo", "https://user:pw@github.com:443/org/repo.git", "", ""},
-		{"gitlab.com:pw@evil.example/group/project", "https://gitlab.com:pw@evil.example/group/project.git", "", ""},
-		{"user:pw@github.com/org/repo", "https://user:pw@github.com/org/repo.git", "", ""},
 		{"tok@github.com/org/repo", "https://tok@github.com/org/repo.git", "", ""},
 		{"GitHub.com./org/repo", "https://GitHub.com./org/repo.git", "", ""},
 		{"*.github.com/org/repo", "https://*.github.com/org/repo.git", "", ""},

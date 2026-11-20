@@ -63,8 +63,15 @@ func githubSSHPath(cleanRef string) string {
 //   - SSH refs: "git@github.com:org/repo" → passed through as-is (uses ssh-agent)
 //   - SSH protocol: "ssh://git@host/org/repo" → passed through as-is
 //   - Remote refs: "github.com/org/repo" → "https://github.com/org/repo.git"
+//   - HTTPS refs: "https://github.com/org/repo" (the scheme in any case) →
+//     "https://github.com/org/repo.git", as the remote ref without the scheme
 //   - git:// protocol: "git://../../repo" → resolved local path or remote URL
 //   - Local paths: "/abs/path" or "../../rel" → resolved to absolute
+//
+// A ref with another scheme ("http://", "file://", "SSH://") resolves to a
+// URL that the remote git commands refuse with a fixed text (checkRemote).
+// A ref that CheckRef refuses resolves to refusedURL, with no token: the
+// remote git commands refuse it with the text of CheckRef.
 //
 // SSH URLs use the system's SSH agent (SSH_AUTH_SOCK) for authentication.
 // HTTPS URLs use AuthToken injected via GIT_CONFIG_* environment variables.
@@ -85,6 +92,13 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 			return ResolvedRef{URL: filepath.Clean(filepath.Join(configDir, ref)), IsLocal: true}
 		}
 		return ResolvedRef{URL: abs, IsLocal: true}
+	}
+
+	// A password or more than one @ in front of the host: b cannot tell the
+	// user part from the host or the version, so the URL holds no part of
+	// the ref.
+	if CheckRef(ref) != nil {
+		return ResolvedRef{URL: refusedURL}
 	}
 
 	// Strip fragment label (e.g. #monitoring)
@@ -138,8 +152,29 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 		return resolveRepo(raw, configDir)
 	}
 
-	// Remote ref: "github.com/org/repo" → "https://github.com/org/repo.git"
+	// An explicit https scheme, in any case ("https://", "HTTPS://"): the ref
+	// is that URL. It resolves as the ref without the scheme, so it gets the
+	// same URL and the same token.
+	if hasHTTPSScheme(cleanRef) {
+		return remoteHTTPS(cleanRef[len("https://"):])
+	}
+
+	// Remote ref: "github.com/org/repo" → "https://github.com/org/repo.git".
+	// A ref with another scheme ("http://", "file://") gets the URL
+	// "https://<scheme>://...", which checkRemote refuses (errScheme).
 	return remoteHTTPS(cleanRef)
+}
+
+// hasHTTPSScheme reports whether s starts with "https://", in any case.
+func hasHTTPSScheme(s string) bool {
+	return len(s) >= len("https://") && strings.EqualFold(s[:len("https://")], "https://")
+}
+
+// hasScheme reports whether s starts with a scheme and "://": the text in
+// front of the first "://" is not empty and has no "/", "?", "#" or "@".
+func hasScheme(s string) bool {
+	i := strings.Index(s, "://")
+	return i > 0 && !strings.ContainsAny(s[:i], "/?#@")
 }
 
 // remoteHTTPS resolves a remote ref without a scheme ("github.com/org/repo")
@@ -148,8 +183,12 @@ func ResolveGitURL(ref, configDir string) ResolvedRef {
 // same parse that scopes the header key (headerKey). A URL whose host the
 // parse does not accept gets no token, and the remote git commands refuse it
 // (checkRemote).
+//
+// A ref that ends in ".git" ("github.com/org/repo.git") gets the URL of the
+// ref without it, so the URL ends in ".git" once. Only one ".git" goes:
+// "repo.git.git" keeps its name.
 func remoteHTTPS(ref string) ResolvedRef {
-	u := "https://" + ref + ".git"
+	u := "https://" + strings.TrimSuffix(ref, ".git") + ".git"
 	h, err := parseHTTPSHost(u)
 	if err != nil {
 		return ResolvedRef{URL: u}
@@ -162,6 +201,106 @@ func remoteHTTPS(ref string) ResolvedRef {
 // does not accept.
 var errRemoteHost = errors.New("the host part is not a plain host name or IP address with an optional port " +
 	"(no user name, password, wildcard, percent sign or trailing dot); b does not run a remote git command for it")
+
+// errUserinfoAt is the error for a ref that CheckRef refuses, and for a URL
+// with more than one raw "@" in its authority (checkRemote). The text does
+// not echo the ref: a part of the password can look like the host.
+var errUserinfoAt = errors.New("refusing a git ref with a password or more than one @ before its path: remove the user part")
+
+// errScheme is the error for a URL with a scheme that b does not fetch or a
+// remote helper, also the URL "https://<scheme>://..." that ResolveGitURL
+// builds for a ref with such a scheme (checkRemote). The text does not echo
+// the URL.
+var errScheme = errors.New("refusing a git ref with a scheme that b does not fetch: use https://, ssh://, git:// or no scheme")
+
+// refusedURL is the URL of a ref that CheckRef refuses (ResolveGitURL). It
+// holds no part of the ref. The remote git commands refuse it with
+// errUserinfoAt (checkRemote).
+const refusedURL = "https://***@***/"
+
+// authorityEnd returns the end of the authority of s, the text after
+// "<scheme>://" or a ref without a scheme: the index of the first "/", "?"
+// or "#", or len(s), as git and curl read an https URL. It is the one rule
+// of checkRemote, CheckRef, RedactUserinfo and IsSSHUserAt (for a ref with
+// a scheme).
+func authorityEnd(s string) int {
+	if end := strings.IndexAny(s, "/?#"); end >= 0 {
+		return end
+	}
+	return len(s)
+}
+
+// CheckRef refuses a ref whose user part b cannot tell from the host or
+// the version. It returns an error with a fixed text that does not echo
+// the ref (errUserinfoAt) for:
+//   - a ref without a scheme, also the ref after "git://", whose first part
+//     (the text before its first "/") has a ":" before its first "@"
+//     ("user:password@host"), or more than one "@" in front of the host
+//     (refusedBare);
+//   - a ref with a scheme ("https://", "ssh://") with more than one "@" in
+//     its authority;
+//   - a ref with another "://" after its authority and an "@" in the
+//     authority that follows it ("https://a?b://user:pw@host/x").
+//
+// A local path passes. Call CheckRef with the ref as the user wrote it,
+// before RefBase, RefVersion or any message that shows the ref. The remote
+// git commands refuse the other forms that b does not fetch (checkRemote).
+func CheckRef(ref string) error {
+	s, local := ref, isLocalPath(ref) || ref == "." || ref == ".."
+	if rest, ok := strings.CutPrefix(ref, "git://"); ok {
+		// b's own protocol: the rest is a ref, a local path when it starts
+		// with "/" or "." (resolveRepo).
+		s, local = rest, strings.HasPrefix(rest, "/") || strings.HasPrefix(rest, ".")
+	}
+	if local {
+		return nil
+	}
+	start := 0 // the start of the authority
+	for hasScheme(s[start:]) {
+		start += strings.Index(s[start:], "://") + len("://")
+	}
+	if start == 0 && refusedBare(s) ||
+		start > 0 && strings.Count(s[start:start+authorityEnd(s[start:])], "@") > 1 {
+		return errUserinfoAt
+	}
+	// Another "://" after the authority: git and curl read the text after
+	// it as a path, a query or a fragment, but it can hold a user part.
+	for rest := s[start:]; ; {
+		i := strings.Index(rest, "://")
+		if i < 0 {
+			return nil
+		}
+		rest = rest[i+len("://"):]
+		if strings.Contains(rest[:authorityEnd(rest)], "@") {
+			return errUserinfoAt
+		}
+	}
+}
+
+// refusedBare reports whether a ref without a scheme has a user part that b
+// cannot tell from the host: its first part, the text before its first "/"
+// (the whole ref when it has no "/"), has a ":" before its first "@" (a
+// password), or more than one "@" in front of the host. In an scp-like ref
+// ("user@host:path") the host ends at the first ":" after the "@", so an @
+// after that ":" is in the path ("git@host:org/repo@v1").
+func refusedBare(ref string) bool {
+	first := ref
+	if i := strings.Index(ref, "/"); i >= 0 {
+		first = ref[:i]
+	}
+	at := strings.Index(first, "@")
+	if at < 0 {
+		return false
+	}
+	colon := strings.Index(first, ":")
+	if colon >= 0 && colon < at {
+		return true // "user:password@host"
+	}
+	if colon > at {
+		first = first[:colon] // scp-like "user@host:path"
+	}
+	return strings.Count(first, "@") > 1
+}
 
 // remoteHost is the host and port of an https URL, as parseHTTPSHost
 // parses them.
@@ -278,14 +417,33 @@ func isSSHImplicit(ref string) bool {
 // true for an @ in an SSH path that a ":" follows ("git@host:x@y:z"): a git
 // ref name has no ":", so that @ is not a version. ResolveGitURL, RefBase,
 // RefVersion and the git provider use it.
+//
+// The authority of a ref with a scheme ends at its first "/", "?" or "#"
+// (authorityEnd), as git and curl read an https URL: an @ after it is a
+// version ("https://github.com#lbl@v1"). The first part of a ref without a
+// scheme ends at its first "/". An @ before that "/" is never a version,
+// also when the user part has an @ of its own ("user:p@ss@host/path"): the
+// version comes after the path. In an scp-style ref the authority ends at
+// the ":", so an @ after the ":" is in the path ("git@host:repo@release/1.0"
+// has the version "release/1.0").
+//
+// In the first part of a ref without a scheme that CheckRef refuses (a
+// password, or more than one @ in front of the host), no @ is a version:
+// RefBase and RefVersion then do not cut the ref inside its user part.
 func IsSSHUserAt(ref string, atIdx int) bool {
 	prefix := ref[:atIdx]
 	rest := ref[atIdx+1:]
 
-	// With a scheme, the user part is in the authority: no "/" follows the
-	// scheme before the @.
+	// With a scheme, the user part is in the authority: no "/", "?" or "#"
+	// follows the scheme before the @ (authorityEnd).
 	if i := strings.Index(prefix, "://"); i > 0 && !strings.ContainsAny(prefix[:i], "/@") {
-		if !strings.Contains(prefix[i+len("://"):], "/") {
+		// A URL in the ref ("git://http://user:pw@host/path"): the user part
+		// is in the authority of the inner URL.
+		inner := i + len("://")
+		if hasScheme(prefix[inner:]) {
+			return IsSSHUserAt(ref[inner:], atIdx-inner)
+		}
+		if authorityEnd(prefix[inner:]) == len(prefix)-inner {
 			return true
 		}
 		return strings.HasPrefix(prefix, "ssh://") && strings.Contains(rest, ":")
@@ -294,33 +452,40 @@ func IsSSHUserAt(ref string, atIdx int) bool {
 	if strings.Contains(prefix, "/") {
 		return false
 	}
+	if refusedBare(ref) {
+		return true // in the user part of a refused first part
+	}
 	// scp-style: user@host:path. The part after the @ has a ":"; a version
 	// (repo@v2.0) has none.
 	if strings.Contains(rest, ":") {
 		return true
 	}
-	// A user part in front of a host and a path: "user:password@host/path".
-	return !strings.Contains(prefix, "@") && strings.Contains(rest, "/")
+	// A user part in front of a host and a path: "user:password@host/path",
+	// also "user:p@ss@host/path". When the prefix is an scp-style
+	// "user@host:path", this @ is in that path.
+	return strings.Contains(rest, "/") && !isSSHImplicit(prefix)
 }
 
 // RedactUserinfo returns the ref or URL s with the user part of its
-// authority (the text before the last @ of the authority) replaced by
-// "***", for a message. It keeps the user name of an SSH ref
+// authority (the text before the last @ of the authority, which ends at the
+// first "/", "?" or "#": authorityEnd) replaced by "***", for a message. It keeps the user name of an SSH ref
 // ("git@github.com:org/repo", "ssh://git@host/org/repo") that has no
 // password: that is not a secret. Text with no user part does not change.
 func RedactUserinfo(s string) string {
 	start, scheme := 0, ""
 	if i := strings.Index(s, "://"); i > 0 && !strings.ContainsAny(s[:i], "/@") {
 		start, scheme = i+len("://"), strings.ToLower(s[:i])
+		// A URL with a second scheme ("https://http://user:pw@host/path",
+		// the URL that b builds for a ref with a scheme that it does not
+		// fetch): the user part is in the authority of the inner URL.
+		if hasScheme(s[start:]) {
+			return s[:start] + RedactUserinfo(s[start:])
+		}
 	} else if isSSHImplicit(s) {
 		return s // scp-style "user@host:path": the user part has no password
 	}
 	rest := s[start:]
-	end := strings.IndexAny(rest, "/?#")
-	if end < 0 {
-		end = len(rest)
-	}
-	at := strings.LastIndex(rest[:end], "@")
+	at := strings.LastIndex(rest[:authorityEnd(rest)], "@")
 	if at < 0 {
 		return s
 	}

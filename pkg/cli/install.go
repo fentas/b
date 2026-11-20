@@ -177,8 +177,13 @@ func (o *InstallOptions) Complete(args []string) error {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 
-		// Check for SCP syntax: ref@version:/glob [dest]
-		if ei, consumed, ok := parseSCPArg(arg, args[i+1:]); ok {
+		// Check for SCP syntax: ref@version:/glob [dest]. A refused
+		// argument stops the command before any message shows it.
+		ei, consumed, ok, err := parseSCPArg(arg, args[i+1:])
+		if err != nil {
+			return err
+		}
+		if ok {
 			o.envInstalls = append(o.envInstalls, ei)
 			i += consumed // skip dest arg if consumed
 			continue
@@ -789,11 +794,41 @@ func parseBinaryArg(arg string) (name, version string) {
 //	ref@version:/glob [dest]
 //
 // Returns the parsed envInstall, how many additional args were consumed, and whether it matched.
-func parseSCPArg(arg string, remaining []string) (envInstall, int, bool) {
+// It returns the error of gitcache.CheckRef for an argument with a password
+// or more than one @ in front of its host, also after a scheme, before any
+// message shows it.
+func parseSCPArg(arg string, remaining []string) (envInstall, int, bool, error) {
 	// docker:// and oci:// are always binary installs (never env SCP), even
 	// though they may contain ":/path" for in-container binary location.
 	if strings.HasPrefix(arg, "docker://") || strings.HasPrefix(arg, "oci://") {
-		return envInstall{}, 0, false
+		return envInstall{}, 0, false, nil
+	}
+
+	// Before the colon scan: the scan takes the first ":" after a "/" or a
+	// ".", which can be the ":" of a password ("user.name:password@host/
+	// org/repo:/glob" gives the ref "user.name").
+	if err := gitcache.CheckRef(arg); err != nil {
+		return envInstall{}, 0, false, err
+	}
+	// CheckRef lets a password after a scheme pass, but the colon scan takes
+	// its ":" too: "https://token:x@host/org/repo:/glob" gives the ref
+	// "https://token". The authority after each scheme (up to the first "/",
+	// "?" or "#", also after a second scheme as in "git://https://...") is
+	// checked as a ref without a scheme: CheckRef refuses a ":" in front of
+	// its "@". A ":" after the "@" (a port) passes.
+	for s := arg; ; {
+		i := strings.Index(s, "://")
+		if i <= 0 || strings.ContainsAny(s[:i], "/?#@") {
+			break
+		}
+		s = s[i+len("://"):]
+		authority := s
+		if end := strings.IndexAny(s, "/?#"); end >= 0 {
+			authority = s[:end]
+		}
+		if err := gitcache.CheckRef(authority); err != nil {
+			return envInstall{}, 0, false, err
+		}
 	}
 
 	// Look for colon that signals SCP syntax — must come after a ref (contains /)
@@ -814,16 +849,25 @@ func parseSCPArg(arg string, remaining []string) (envInstall, int, bool) {
 		}
 	}
 	if colonIdx == -1 {
-		return envInstall{}, 0, false
+		return envInstall{}, 0, false, nil
 	}
 
 	refPart := arg[:colonIdx]
 	glob := strings.TrimPrefix(arg[colonIdx+1:], "/")
 
-	// Parse ref@version
+	// Before the version split: the split at the last @ can cut the ref in
+	// its user part ("user:password@host/org/repo" gives the ref
+	// "user:password").
+	if err := gitcache.CheckRef(refPart); err != nil {
+		return envInstall{}, 0, false, err
+	}
+
+	// Parse ref@version, with the rule of RefBase and RefVersion: an @ of a
+	// user part is not a version ("https://token@host/org/repo" keeps its
+	// host; "host/org/repo@v1" has the version v1).
 	ref := refPart
 	version := ""
-	if atIdx := strings.LastIndex(refPart, "@"); atIdx != -1 {
+	if atIdx := strings.LastIndex(refPart, "@"); atIdx > 0 && !gitcache.IsSSHUserAt(refPart, atIdx) {
 		ref = refPart[:atIdx]
 		version = refPart[atIdx+1:]
 	}
@@ -846,7 +890,7 @@ func parseSCPArg(arg string, remaining []string) (envInstall, int, bool) {
 		version: version,
 		glob:    glob,
 		dest:    dest,
-	}, consumed, true
+	}, consumed, true, nil
 }
 
 // runEnvInstalls handles SCP-style and config-ref env installs.
@@ -872,14 +916,16 @@ func (o *InstallOptions) runEnvInstalls() error {
 
 		// SCP-style installs always sync fresh (user explicitly requested files)
 		result, err := env.SyncEnv(cfg, projectRoot, "", nil)
+		// The ref as the messages show it: "***" in place of a user part.
+		shown := gitcache.RedactUserinfo(ei.ref)
 		if err != nil {
-			return fmt.Errorf("syncing %s: %w", ei.ref, err)
+			return fmt.Errorf("syncing %s: %w", shown, err)
 		}
 
 		if result.Skipped {
-			fmt.Fprintf(o.IO.Out, "  %-40s %s\n", ei.ref, result.Message)
+			fmt.Fprintf(o.IO.Out, "  %-40s %s\n", shown, result.Message)
 		} else {
-			fmt.Fprintf(o.IO.Out, "  %-40s %s → %s (%s)\n", ei.ref, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)
+			fmt.Fprintf(o.IO.Out, "  %-40s %s → %s (%s)\n", shown, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)
 			for _, f := range result.Files {
 				fmt.Fprintf(o.IO.Out, "    → %-36s ✓ synced\n", f.Dest)
 			}
@@ -943,6 +989,17 @@ func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 			}
 		}
 
+		// Before RefLabel, RefBase and every message that shows the key, as
+		// b update does: a key with a password or more than one @ in front
+		// of its host. RefBase can cut such a key so that SyncEnv no longer
+		// sees the part that CheckRef refuses.
+		if err := gitcache.CheckRef(entry.Key); err != nil {
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", refusedEnvKey(o.Config.Envs, entry.Key), err)
+			continue
+		}
+		// The key as the lines below show it: "***" in place of a user part.
+		shown := gitcache.RedactUserinfo(entry.Key)
+
 		label := gitcache.RefLabel(entry.Key)
 		ref := gitcache.RefBase(entry.Key)
 
@@ -959,16 +1016,16 @@ func (o *InstallOptions) syncConfigEnvs(refs []string) error {
 		lockEntry := lk.FindEnv(ref, label)
 		result, err := env.SyncEnv(cfg, projectRoot, "", lockEntry)
 		if err != nil {
-			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", shown, firstLine(err.Error()))
 			continue
 		}
 
 		if result.Skipped {
-			fmt.Fprintf(o.IO.Out, "  %-40s %s\n", entry.Key, result.Message)
+			fmt.Fprintf(o.IO.Out, "  %-40s %s\n", shown, result.Message)
 			continue // don't overwrite lock entry when up-to-date
 		}
 
-		fmt.Fprintf(o.IO.Out, "  %-40s %s → %s (%s)\n", entry.Key, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)
+		fmt.Fprintf(o.IO.Out, "  %-40s %s → %s (%s)\n", shown, shortCommit(result.PreviousCommit), shortCommit(result.Commit), result.Message)
 		for _, f := range result.Files {
 			fmt.Fprintf(o.IO.Out, "    → %-36s ✓ synced\n", f.Dest)
 		}

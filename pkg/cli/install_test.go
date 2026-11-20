@@ -78,7 +78,10 @@ func TestParseSCPArg(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		ei, consumed, ok := parseSCPArg(tt.arg, tt.remaining)
+		ei, consumed, ok, err := parseSCPArg(tt.arg, tt.remaining)
+		if err != nil {
+			t.Errorf("parseSCPArg(%q) error %v, want none", tt.arg, err)
+		}
 		if ok != tt.wantOk {
 			t.Errorf("parseSCPArg(%q) ok = %v, want %v", tt.arg, ok, tt.wantOk)
 			continue

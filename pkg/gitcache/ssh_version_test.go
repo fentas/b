@@ -62,11 +62,17 @@ func TestIsSSHUserAt_Forms(t *testing.T) {
 		{"user:pw@github.com/org/repo", true},
 		{"user:pw@github.com:443/org/repo", true},
 		{"tok@github.com/org/repo", true},
+		{"user:p@ss@github.com/org/repo", true}, // an @ in the user part
+		{"a@b@github.com/org/repo", true},
+		{"git://http://user:pw@github.com/org/repo", true}, // the authority of the inner URL
 		{"github.com/org/repo@v2.0", false},
 		{"git@github.com:org/repo@v1", false},
 		{"git@github.com:repo@v1", false},
+		{"deploy@host:repo@release/1.0", false}, // an @ in an scp-style path
 		{"ssh://git@github.com/org/repo@v1", false},
 		{"https://github.com/org/repo@v1", false},
+		{"https://github.com#lbl@v1", false}, // the authority ends at the "#"
+		{"https://github.com?x@v1", false},   // and at the "?"
 		{"kubectl@v1.30", false},
 	}
 	for _, tt := range tests {

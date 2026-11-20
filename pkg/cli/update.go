@@ -602,6 +602,23 @@ func (o *UpdateOptions) callUpdateBinaries(binaries []*binary.Binary) error {
 	return o.updateBinaries(binaries)
 }
 
+// refusedEnvKey is the text that b update and b install show in place of an
+// env key that gitcache.CheckRef refuses, in its ✗ line and in the failure
+// summary of b update. The key can hold a password. The text names the
+// position of the key, so two refused keys get two texts: its place, from 1,
+// in the sorted list of the env keys of b.yaml. b.yaml keeps the envs in a
+// map, so b does not know their order in the file; the sorted order is the
+// same in each run.
+func refusedEnvKey(envs state.EnvList, key string) string {
+	n := 1
+	for _, e := range envs {
+		if e.Key < key {
+			n++
+		}
+	}
+	return fmt.Sprintf("<refused env key #%d>", n)
+}
+
 // updateEnvs updates env entries from config. If refs is nil, updates all.
 func (o *UpdateOptions) updateEnvs(refs []string) error {
 	if o.Config == nil {
@@ -657,6 +674,20 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		if o.Group != "" && entry.Group != o.Group {
 			continue
 		}
+
+		// Before RefLabel, RefBase and every message that shows the key: a
+		// key with a password or more than one @ in front of its host.
+		// RedactUserinfo does not hide each such key, so the line and the
+		// summary show refusedEnvKey in place of the key.
+		if err := gitcache.CheckRef(entry.Key); err != nil {
+			placeholder := refusedEnvKey(o.Config.Envs, entry.Key)
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", placeholder, err)
+			failedEnvs = append(failedEnvs, placeholder)
+			continue
+		}
+		// The key as the lines and the summary below show it: "***" in
+		// place of a user part.
+		shown := gitcache.RedactUserinfo(entry.Key)
 
 		label := gitcache.RefLabel(entry.Key)
 		ref := gitcache.RefBase(entry.Key)
@@ -715,8 +746,8 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		// Handle rollback: use previous commit from lock
 		if o.Rollback {
 			if lockEntry == nil || lockEntry.PreviousCommit == "" {
-				fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ no previous commit to rollback to\n", entry.Key)
-				failedEnvs = append(failedEnvs, entry.Key)
+				fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ no previous commit to rollback to\n", shown)
+				failedEnvs = append(failedEnvs, shown)
 				continue
 			}
 			cfg.ForceCommit = lockEntry.PreviousCommit
@@ -726,8 +757,8 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		// apply when safety is auto / --yes.
 		firstResult, err := syncEnvFunc(cfg, projectRoot, "", lockEntry)
 		if err != nil {
-			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
-			failedEnvs = append(failedEnvs, entry.Key)
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", shown, firstLine(err.Error()))
+			failedEnvs = append(failedEnvs, shown)
 			continue
 		}
 
@@ -747,7 +778,7 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 					Commit:  firstResult.Commit,
 				})
 			} else {
-				fmt.Fprintf(o.IO.Out, "  %-40s %s\n", entry.Key, firstResult.Message)
+				fmt.Fprintf(o.IO.Out, "  %-40s %s\n", shown, firstResult.Message)
 			}
 			continue // don't overwrite lock entry when up-to-date
 		}
@@ -762,7 +793,7 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		}
 
 		// Header line + plan table.
-		fmt.Fprintf(o.IO.Out, "  %-40s %s → %s\n", entry.Key,
+		fmt.Fprintf(o.IO.Out, "  %-40s %s → %s\n", shown,
 			shortCommit(firstResult.PreviousCommit), shortCommit(firstResult.Commit))
 		env.RenderPlanText(o.IO.Out, plan)
 
@@ -786,8 +817,8 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		// Plan-first path: gate on safety, then apply if approved.
 		apply, gateErr := o.gateApply(safety, plan, isDryRun)
 		if gateErr != nil {
-			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, gateErr)
-			refusedEnvs = append(refusedEnvs, entry.Key)
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", shown, gateErr)
+			refusedEnvs = append(refusedEnvs, shown)
 			continue
 		}
 		if !apply {
@@ -819,8 +850,8 @@ func (o *UpdateOptions) updateEnvs(refs []string) error {
 		applyCfg.DryRun = false
 		realResult, err := syncEnvFunc(applyCfg, projectRoot, "", lockEntry)
 		if err != nil {
-			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", entry.Key, firstLine(err.Error()))
-			failedEnvs = append(failedEnvs, entry.Key)
+			fmt.Fprintf(o.IO.ErrOut, "  %-40s ✗ %s\n", shown, firstLine(err.Error()))
+			failedEnvs = append(failedEnvs, shown)
 			continue
 		}
 

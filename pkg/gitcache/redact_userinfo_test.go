@@ -14,8 +14,16 @@ func TestRedactUserinfo(t *testing.T) {
 		{"https://tok@github.com/org/repo.git", "https://***@github.com/org/repo.git"},
 		{"HTTPS://user:pw@github.com/x", "HTTPS://***@github.com/x"},
 		{"https://user:pw@github.com?x@y", "https://***@github.com?x@y"},
+		{"https://user:pw@github.com#x@y", "https://***@github.com#x@y"},
+		{"user:pw@github.com?x@y", "***@github.com?x@y"},
 		{"git://user:pw@host/org/repo", "git://***@host/org/repo"},
 		{"ssh://user:pw@host/org/repo", "ssh://***@host/org/repo"},
+		// A second scheme: the user part of the inner URL.
+		{"https://http://user:pw@github.com/org/repo.git", "https://http://***@github.com/org/repo.git"},
+		{"https://HTTPS://user:pw@github.com/org/repo.git", "https://HTTPS://***@github.com/org/repo.git"},
+		{"git://http://user:pw@github.com/org/repo", "git://http://***@github.com/org/repo"},
+		{"https://ftp://user:p@ss@h.example/x.git", "https://ftp://***@h.example/x.git"},
+		{"https://ssh://git@github.com/org/repo.git", "https://ssh://git@github.com/org/repo.git"},
 		// No secret: an SSH user name, an @ in the path, no user part.
 		{"ssh://git@github.com/org/repo", "ssh://git@github.com/org/repo"},
 		{"ssh://git@github.com/org/repo@v1", "ssh://git@github.com/org/repo@v1"},

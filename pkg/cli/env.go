@@ -514,6 +514,9 @@ func NewEnvMatchCmd(shared *SharedOptions) *cobra.Command {
 // Run executes the env match command.
 func (o *EnvMatchOptions) Run(args []string) error {
 	refArg := args[0]
+	if err := gitcache.CheckRef(refArg); err != nil {
+		return err
+	}
 	glob := args[1]
 	dest := ""
 	if len(args) >= 3 {
@@ -599,6 +602,9 @@ If no b.yaml is found, shows the directory structure as suggested profiles.`,
 
 // Run executes the env profiles command.
 func (o *EnvProfilesOptions) Run(refArg string) error {
+	if err := gitcache.CheckRef(refArg); err != nil {
+		return err
+	}
 	ref := gitcache.RefBase(refArg)
 	version := gitcache.RefVersion(refArg)
 	if idx := strings.Index(version, "#"); idx != -1 {
@@ -644,7 +650,7 @@ func (o *EnvProfilesOptions) Run(refArg string) error {
 			return sorted[i].Key < sorted[j].Key
 		})
 
-		fmt.Fprintf(o.IO.Out, "Available profiles from %s @ %s:\n\n", ref, versionLabel)
+		fmt.Fprintf(o.IO.Out, "Available profiles from %s @ %s:\n\n", gitcache.RedactUserinfo(ref), versionLabel)
 		for _, e := range sorted {
 			name := e.Key
 			desc := e.Description
@@ -770,6 +776,10 @@ Use -i for interactive selection.`,
 
 // Run executes the env add command.
 func (o *EnvAddOptions) Run(refArg string) error {
+	// Before RefBase and every message that shows the ref.
+	if err := gitcache.CheckRef(refArg); err != nil {
+		return err
+	}
 	ref := gitcache.RefBase(refArg)
 	label := gitcache.RefLabel(refArg)
 	version := gitcache.RefVersion(refArg)
@@ -785,14 +795,15 @@ func (o *EnvAddOptions) Run(refArg string) error {
 	}
 
 	if label == "" {
-		return fmt.Errorf("profile name required — use %s#<name>\n  Hint: run `b env profiles %s` to see available profiles\n  Hint: use -i for interactive selection", ref, ref)
+		shown := gitcache.RedactUserinfo(ref)
+		return fmt.Errorf("profile name required — use %s#<name>\n  Hint: run `b env profiles %s` to see available profiles\n  Hint: use -i for interactive selection", shown, shown)
 	}
 
 	// Fail fast if already in local config
 	localKey := ref + "#" + label
 	if o.Config != nil {
 		if existing := o.Config.Envs.Get(localKey); existing != nil {
-			return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", localKey, localKey)
+			return envExistsError(localKey)
 		}
 	}
 
@@ -812,7 +823,7 @@ func (o *EnvAddOptions) Run(refArg string) error {
 // runInteractive shows a numbered list of profiles and lets the user select.
 func (o *EnvAddOptions) runInteractive(ref, version, refArg string) error {
 	if !isTTYFunc() {
-		return fmt.Errorf("interactive mode requires a terminal — use %s#<name> syntax instead", ref)
+		return fmt.Errorf("interactive mode requires a terminal — use %s#<name> syntax instead", gitcache.RedactUserinfo(ref))
 	}
 
 	upstream, err := o.fetchUpstream(ref, version, refArg)
@@ -831,7 +842,7 @@ func (o *EnvAddOptions) runInteractive(ref, version, refArg string) error {
 		return sorted[i].Key < sorted[j].Key
 	})
 
-	fmt.Fprintf(o.IO.Out, "Available profiles from %s:\n\n", ref)
+	fmt.Fprintf(o.IO.Out, "Available profiles from %s:\n\n", gitcache.RedactUserinfo(ref))
 	for i, e := range sorted {
 		desc := e.Description
 		if desc == "" {
@@ -925,6 +936,18 @@ func (o *EnvAddOptions) findProfile(label, ref string, upstream *state.State) (*
 	return nil, fmt.Errorf("no profiles found in %s's b.yaml", ref)
 }
 
+// envExistsError is the "already exists" error of b env add for the b.yaml
+// key key. It shows the key with "***" in place of a user part
+// (RedactUserinfo). The hint names the `b env remove` command only for a key
+// that shows as it is: a command with "***" in it does not remove the key.
+func envExistsError(key string) error {
+	shown := gitcache.RedactUserinfo(key)
+	if shown != key {
+		return fmt.Errorf("%s already exists in b.yaml — remove it from b.yaml first", shown)
+	}
+	return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", shown, shown)
+}
+
 // addProfile resolves includes and adds a single profile to the local config.
 func (o *EnvAddOptions) addProfile(ref, label, version string, source *state.EnvEntry, upstream *state.State) error {
 	localKey := ref + "#" + label
@@ -935,7 +958,7 @@ func (o *EnvAddOptions) addProfile(ref, label, version string, source *state.Env
 	}
 	config := o.Config
 	if existing := config.Envs.Get(localKey); existing != nil {
-		return fmt.Errorf("%s already exists in b.yaml — remove it first with `b env remove %s`", localKey, localKey)
+		return envExistsError(localKey)
 	}
 
 	// Resolve includes

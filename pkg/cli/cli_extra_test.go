@@ -1250,7 +1250,10 @@ func TestParseSCPArg_ExtraEdgeCases(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		ei, _, ok := parseSCPArg(tt.arg, tt.remaining)
+		ei, _, ok, err := parseSCPArg(tt.arg, tt.remaining)
+		if err != nil {
+			t.Errorf("parseSCPArg(%q) error %v, want none", tt.arg, err)
+		}
 		if ok != tt.wantOK {
 			t.Errorf("parseSCPArg(%q) ok = %v, want %v", tt.arg, ok, tt.wantOK)
 			continue
