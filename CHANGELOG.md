@@ -1,5 +1,33 @@
 # Changelog
 
+## [4.19.0](https://github.com/fentas/b/compare/v4.18.8...v4.19.0) (2026-11-20)
+
+
+### Features
+
+* **gitcache:** B_GIT_SSH_AS_HTTPS=1 fetches a GitHub SSH ref over https ([#209](https://github.com/fentas/b/issues/209)) ([6794dac](https://github.com/fentas/b/commit/6794dac8f68b75aa2008036059a9565ddcafe4d9))
+
+
+### Bug Fixes
+
+* **binary:** check what an archive installs before it replaces the binary ([#205](https://github.com/fentas/b/issues/205)) ([2d91565](https://github.com/fentas/b/commit/2d915656b4967a06632a951a93a70304d26ba877))
+* **binary:** install the one executable match among same-named files ([#206](https://github.com/fentas/b/issues/206)) ([34b6718](https://github.com/fentas/b/commit/34b6718fcd0d671b5a1c8da9c839c0a36c18aec5))
+* **cli:** b --version=false prints no version banner ([#207](https://github.com/fentas/b/issues/207)) ([e9d9077](https://github.com/fentas/b/commit/e9d9077c600cc3ec5fae77d181a05afff5dcff7b))
+* **cli:** b install exits non-zero when an env of b.yaml fails ([#213](https://github.com/fentas/b/issues/213)) ([d73f893](https://github.com/fentas/b/commit/d73f8933aae94880e5c44d0dccfcef1ac07be6b7))
+* **cli:** b install keeps the b.lock rows of an SCP-style argument next to an env key ([#214](https://github.com/fentas/b/issues/214)) ([d564634](https://github.com/fentas/b/commit/d5646343125cbce360b56ec03d44148028189f5e))
+* **cli:** exit 1 when a download of the -i flag fails ([#204](https://github.com/fentas/b/issues/204)) ([36d9fd5](https://github.com/fentas/b/commit/36d9fd58236da35c8c218e62b40e5949686aee13))
+* **env:** the conflict prompt's merge goes through the merge gate ([#210](https://github.com/fentas/b/issues/210)) ([7a820e8](https://github.com/fentas/b/commit/7a820e8dae2c7cc863acf6318f232b9aecfc2a5a))
+* **gitcache:** keep a ref's user part out of error messages, refuse unknown schemes and refs with two @ ([#212](https://github.com/fentas/b/issues/212)) ([60d1dd5](https://github.com/fentas/b/commit/60d1dd5c1656458b42a205ec24b5da6246d77a10))
+* **install:** a named install uses b.yaml; b.lock describes the file on disk ([#195](https://github.com/fentas/b/issues/195)) ([1fb43e5](https://github.com/fentas/b/commit/1fb43e56383f08ca52538dd9ce959e72acc20f9d))
+* **install:** go, git, docker and oci providers write the file of the entry ([#201](https://github.com/fentas/b/issues/201)) ([bc39d35](https://github.com/fentas/b/commit/bc39d357981a18bc1afbda5eebb4cc45344fbd00))
+* **install:** key the b.yaml duplicate check on the resolved path ([#202](https://github.com/fentas/b/issues/202)) ([203d8ef](https://github.com/fentas/b/commit/203d8ef81c5b9d638a0ba6ba142a2f10edeb7b5d))
+* **install:** replace binaries and b.lock in one step; fail on failed downloads and unreadable b.lock ([#200](https://github.com/fentas/b/issues/200)) ([1c3fe48](https://github.com/fentas/b/commit/1c3fe4814408036d4c586361b1aa568c288b71bb))
+* **install:** review follow-ups for b install ([#198](https://github.com/fentas/b/issues/198)) ([9b56de0](https://github.com/fentas/b/commit/9b56de065cab1eea769241017333aaefd57f838f))
+* **kubectl:** download kubectl and its stable version from dl.k8s.io ([#197](https://github.com/fentas/b/issues/197)) ([1c15096](https://github.com/fentas/b/commit/1c150967dd82af096f7c0155b09f0d4c16b146c2))
+* **lock:** key b.lock rows by the installed file; prune, refuse duplicates, keep preset rows ([#199](https://github.com/fentas/b/issues/199)) ([e407024](https://github.com/fentas/b/commit/e4070246218ce80bdb67abdcca778a6aeaa142fd))
+* the conflict prompt keeps the local file when there is no answer ([#210](https://github.com/fentas/b/issues/210) follow-ups) ([#211](https://github.com/fentas/b/issues/211)) ([da47767](https://github.com/fentas/b/commit/da47767a6a730f0cac43ccec6862b95d2c5aaedf))
+* **update:** fail on failed downloads; remove stale temp files on install and update ([#203](https://github.com/fentas/b/issues/203)) ([ad285cf](https://github.com/fentas/b/commit/ad285cf99795d44d8cb01fbc757bb5938f3b3263))
+
 ## [4.18.8](https://github.com/fentas/b/compare/v4.18.7...v4.18.8) (2026-11-09)
 
 
